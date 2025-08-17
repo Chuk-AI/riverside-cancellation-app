@@ -1,0 +1,913 @@
+{% extends "base.html" %} {% block title %}System Settings - Riverside
+Equestrian{% endblock %} {% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-12">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">System Settings</h1>
+        <div class="btn-group">
+          <button class="btn btn-success" onclick="saveAllSettings()">
+            <i class="fas fa-save"></i> Save All Changes
+          </button>
+          <button class="btn btn-outline-secondary" onclick="resetToDefaults()">
+            <i class="fas fa-undo"></i> Reset to Defaults
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- General Settings -->
+    <div class="col-lg-6">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-primary">General Settings</h6>
+        </div>
+        <div class="card-body">
+          <form id="generalSettingsForm">
+            <div class="mb-3">
+              <label for="systemName" class="form-label">System Name</label>
+              <input
+                type="text"
+                class="form-control"
+                id="systemName"
+                value="Riverside Equestrian Cancellation System"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="companyEmail" class="form-label">Company Email</label>
+              <input
+                type="email"
+                class="form-control"
+                id="companyEmail"
+                value="managers@riversideequestrian.ca"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="websiteUrl" class="form-label">Website URL</label>
+              <input
+                type="url"
+                class="form-control"
+                id="websiteUrl"
+                value="https://www.riversideequestrian.ca"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="cancellationPolicyUrl" class="form-label"
+                >Cancellation Policy URL</label
+              >
+              <input
+                type="url"
+                class="form-control"
+                id="cancellationPolicyUrl"
+                value="https://www.riversideequestrian.ca/cancellations"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="timezone" class="form-label">System Timezone</label>
+              <select class="form-select" id="timezone">
+                <option value="America/Vancouver" selected>
+                  Pacific Time (Vancouver)
+                </option>
+                <option value="America/Toronto">Eastern Time (Toronto)</option>
+                <option value="America/Edmonton">
+                  Mountain Time (Edmonton)
+                </option>
+                <option value="America/Winnipeg">
+                  Central Time (Winnipeg)
+                </option>
+              </select>
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="maintenanceMode"
+              />
+              <label class="form-check-label" for="maintenanceMode">
+                Enable Maintenance Mode
+              </label>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Settings -->
+    <div class="col-lg-6">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-success">
+            Notification Settings
+          </h6>
+        </div>
+        <div class="card-body">
+          <form id="notificationSettingsForm">
+            <div class="mb-3">
+              <label for="emailFrom" class="form-label"
+                >Email From Address</label
+              >
+              <input
+                type="email"
+                class="form-control"
+                id="emailFrom"
+                value="noreply@riversideequestrian.ca"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="emailFromName" class="form-label"
+                >Email From Name</label
+              >
+              <input
+                type="text"
+                class="form-control"
+                id="emailFromName"
+                value="Riverside Equestrian"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="managerEmails" class="form-label"
+                >Manager Email Addresses</label
+              >
+              <textarea
+                class="form-control"
+                id="managerEmails"
+                rows="3"
+                placeholder="Enter email addresses separated by commas"
+              >
+managers@riversideequestrian.ca, stav@riversideequestrian.ca</textarea
+              >
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="clientEmailNotifications"
+                checked
+              />
+              <label class="form-check-label" for="clientEmailNotifications">
+                Send email notifications to clients
+              </label>
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="managerEmailNotifications"
+                checked
+              />
+              <label class="form-check-label" for="managerEmailNotifications">
+                Send email notifications to managers
+              </label>
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="dailyReports"
+              />
+              <label class="form-check-label" for="dailyReports">
+                Send daily cancellation reports
+              </label>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Business Rules -->
+    <div class="col-lg-6">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-warning">Business Rules</h6>
+        </div>
+        <div class="card-body">
+          <form id="businessRulesForm">
+            <div class="mb-3">
+              <label for="dataRetentionMonths" class="form-label"
+                >Data Retention (Months)</label
+              >
+              <input
+                type="number"
+                class="form-control"
+                id="dataRetentionMonths"
+                value="12"
+                min="1"
+                max="60"
+              />
+              <div class="form-text">How long to keep cancellation history</div>
+            </div>
+
+            <div class="mb-3">
+              <label for="maxSequentialLessons" class="form-label"
+                >Maximum Sequential Lessons per Notice</label
+              >
+              <input
+                type="number"
+                class="form-control"
+                id="maxSequentialLessons"
+                value="10"
+                min="1"
+                max="20"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="illnessDocumentationDays" class="form-label"
+                >Illness Documentation Window (Days)</label
+              >
+              <input
+                type="number"
+                class="form-control"
+                id="illnessDocumentationDays"
+                value="14"
+                min="1"
+                max="30"
+              />
+              <div class="form-text">
+                Days allowed to submit medical documentation
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="advanceBookingDays" class="form-label"
+                >Advance Booking Limit (Days)</label
+              >
+              <input
+                type="number"
+                class="form-control"
+                id="advanceBookingDays"
+                value="7"
+                min="0"
+                max="30"
+              />
+              <div class="form-text">
+                How many days before month start cancellations are accepted
+              </div>
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="allowSameDayCancellation"
+              />
+              <label class="form-check-label" for="allowSameDayCancellation">
+                Allow same-day cancellations (with charges)
+              </label>
+            </div>
+
+            <div class="form-check mb-3">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="autoApplyCharges"
+                checked
+              />
+              <label class="form-check-label" for="autoApplyCharges">
+                Automatically apply cancellation charges
+              </label>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Prompts -->
+    <div class="col-lg-6">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-info">System Prompts</h6>
+        </div>
+        <div class="card-body">
+          <form id="systemPromptsForm">
+            <div class="mb-3">
+              <label for="welcomeMessage" class="form-label"
+                >Welcome Message</label
+              >
+              <textarea class="form-control" id="welcomeMessage" rows="2">
+Welcome to the Riverside Equestrian cancellation system. Please review your current status below.</textarea
+              >
+            </div>
+
+            <div class="mb-3">
+              <label for="policyReminderText" class="form-label"
+                >Policy Reminder Text</label
+              >
+              <textarea class="form-control" id="policyReminderText" rows="2">
+Please be familiar with our cancellation policy before submitting.</textarea
+              >
+            </div>
+
+            <div class="mb-3">
+              <label for="errorReportPrompt" class="form-label"
+                >Error Report Prompt</label
+              >
+              <textarea class="form-control" id="errorReportPrompt" rows="2">
+Let us know if you think there is an error in our records.</textarea
+              >
+            </div>
+
+            <div class="mb-3">
+              <label for="reschedulePrompt" class="form-label"
+                >Reschedule Prompt</label
+              >
+              <textarea class="form-control" id="reschedulePrompt" rows="3">
+Rescheduling or rebooking does not affect your cancellation status. Were you interested in booking another lesson? If yes, what dates and times are you available?</textarea
+              >
+            </div>
+
+            <div class="mb-3">
+              <label for="sequentialLessonPrompt" class="form-label"
+                >Sequential Lesson Prompt</label
+              >
+              <textarea
+                class="form-control"
+                id="sequentialLessonPrompt"
+                rows="2"
+              >
+Additional lessons can be included in this cancellation notice, as long as the lessons are sequential.</textarea
+              >
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security Settings -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-danger">Security Settings</h6>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-lg-4">
+              <form id="securitySettingsForm">
+                <div class="mb-3">
+                  <label for="sessionTimeout" class="form-label"
+                    >Session Timeout (Minutes)</label
+                  >
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="sessionTimeout"
+                    value="60"
+                    min="5"
+                    max="480"
+                  />
+                </div>
+
+                <div class="mb-3">
+                  <label for="loginAttempts" class="form-label"
+                    >Max Login Attempts</label
+                  >
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="loginAttempts"
+                    value="5"
+                    min="3"
+                    max="10"
+                  />
+                </div>
+
+                <div class="mb-3">
+                  <label for="lockoutDuration" class="form-label"
+                    >Lockout Duration (Minutes)</label
+                  >
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="lockoutDuration"
+                    value="15"
+                    min="5"
+                    max="120"
+                  />
+                </div>
+              </form>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="mb-3">
+                <label class="form-label">Password Requirements</label>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="requirePasswords"
+                  />
+                  <label class="form-check-label" for="requirePasswords">
+                    Require passwords for client accounts
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="strongPasswords"
+                  />
+                  <label class="form-check-label" for="strongPasswords">
+                    Enforce strong password policy
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="passwordExpiry"
+                  />
+                  <label class="form-check-label" for="passwordExpiry">
+                    Require password changes every 90 days
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="mb-3">
+                <label class="form-label">Logging & Monitoring</label>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="logLoginAttempts"
+                    checked
+                  />
+                  <label class="form-check-label" for="logLoginAttempts">
+                    Log all login attempts
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="logCancellations"
+                    checked
+                  />
+                  <label class="form-check-label" for="logCancellations">
+                    Log all cancellation submissions
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="logAdminActions"
+                    checked
+                  />
+                  <label class="form-check-label" for="logAdminActions">
+                    Log all admin actions
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="alert alert-warning mb-0">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Warning:</strong> Changing security settings may affect
+            system performance and user experience. Test thoroughly before
+            implementing.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup & Maintenance -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-secondary">
+            Backup & Maintenance
+          </h6>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-lg-6">
+              <h6>Automatic Backups</h6>
+              <div class="mb-3">
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="dailyBackups"
+                    checked
+                  />
+                  <label class="form-check-label" for="dailyBackups">
+                    Enable daily backups
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="weeklyBackups"
+                    checked
+                  />
+                  <label class="form-check-label" for="weeklyBackups">
+                    Enable weekly full backups
+                  </label>
+                </div>
+                <div class="mb-3">
+                  <label for="backupRetention" class="form-label"
+                    >Backup Retention (Days)</label
+                  >
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="backupRetention"
+                    value="30"
+                    min="7"
+                    max="365"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <h6>System Maintenance</h6>
+              <div class="mb-3">
+                <label for="maintenanceWindow" class="form-label"
+                  >Maintenance Window</label
+                >
+                <select class="form-select" id="maintenanceWindow">
+                  <option value="sunday_2am">Sunday 2:00 AM - 4:00 AM</option>
+                  <option value="saturday_2am">
+                    Saturday 2:00 AM - 4:00 AM
+                  </option>
+                  <option value="daily_3am">Daily 3:00 AM - 3:30 AM</option>
+                </select>
+              </div>
+              <div class="form-check mb-3">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="autoUpdates"
+                />
+                <label class="form-check-label" for="autoUpdates">
+                  Enable automatic system updates
+                </label>
+              </div>
+              <div class="form-check mb-3">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="maintenanceNotifications"
+                  checked
+                />
+                <label class="form-check-label" for="maintenanceNotifications">
+                  Send maintenance notifications
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <hr />
+
+          <div class="row">
+            <div class="col-12">
+              <h6>Manual Actions</h6>
+              <div class="btn-group mb-3">
+                <button
+                  class="btn btn-outline-primary"
+                  onclick="createBackup()"
+                >
+                  <i class="fas fa-download"></i> Create Backup Now
+                </button>
+                <button
+                  class="btn btn-outline-warning"
+                  onclick="optimizeDatabase()"
+                >
+                  <i class="fas fa-database"></i> Optimize Database
+                </button>
+                <button class="btn btn-outline-info" onclick="clearLogs()">
+                  <i class="fas fa-trash-alt"></i> Clear Old Logs
+                </button>
+                <button
+                  class="btn btn-outline-danger"
+                  onclick="restoreFromBackup()"
+                >
+                  <i class="fas fa-upload"></i> Restore from Backup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmationModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirm Changes</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <p>
+          Are you sure you want to save these system settings? Some changes may
+          require a system restart.
+        </p>
+        <div id="changedSettings"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick="confirmSaveSettings()"
+        >
+          Save Changes
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let originalSettings = {};
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // Store original settings for comparison
+    storeOriginalSettings();
+  });
+
+  function storeOriginalSettings() {
+    const forms = [
+      "generalSettingsForm",
+      "notificationSettingsForm",
+      "businessRulesForm",
+      "systemPromptsForm",
+      "securitySettingsForm",
+    ];
+    forms.forEach((formId) => {
+      const form = document.getElementById(formId);
+      const formData = new FormData(form);
+      originalSettings[formId] = Object.fromEntries(formData);
+    });
+  }
+
+  function saveAllSettings() {
+    // Detect changes
+    const changes = detectChanges();
+
+    if (changes.length === 0) {
+      alert("No changes detected.");
+      return;
+    }
+
+    // Show confirmation modal with changes
+    document.getElementById("changedSettings").innerHTML =
+      "<strong>Changed settings:</strong><ul>" +
+      changes.map((change) => `<li>${change}</li>`).join("") +
+      "</ul>";
+
+    new bootstrap.Modal(document.getElementById("confirmationModal")).show();
+  }
+
+  function detectChanges() {
+    const changes = [];
+
+    // Check for changes in each form
+    const forms = [
+      "generalSettingsForm",
+      "notificationSettingsForm",
+      "businessRulesForm",
+      "systemPromptsForm",
+      "securitySettingsForm",
+    ];
+
+    forms.forEach((formId) => {
+      const form = document.getElementById(formId);
+      const inputs = form.querySelectorAll("input, select, textarea");
+
+      inputs.forEach((input) => {
+        const fieldName = input.id || input.name;
+        const currentValue =
+          input.type === "checkbox" ? input.checked : input.value;
+
+        if (
+          originalSettings[formId] &&
+          originalSettings[formId][fieldName] !== currentValue
+        ) {
+          changes.push(
+            `${fieldName}: ${originalSettings[formId][fieldName]} → ${currentValue}`
+          );
+        }
+      });
+    });
+
+    return changes;
+  }
+
+  function confirmSaveSettings() {
+    // Collect all form data
+    const allSettings = {};
+    const forms = [
+      "generalSettingsForm",
+      "notificationSettingsForm",
+      "businessRulesForm",
+      "systemPromptsForm",
+      "securitySettingsForm",
+    ];
+
+    forms.forEach((formId) => {
+      const form = document.getElementById(formId);
+      const formData = new FormData(form);
+      allSettings[formId] = Object.fromEntries(formData);
+    });
+
+    // Send to server
+    fetch("/senior/save-settings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(allSettings),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          alert("Settings saved successfully!");
+          storeOriginalSettings(); // Update original settings
+          bootstrap.Modal.getInstance(
+            document.getElementById("confirmationModal")
+          ).hide();
+        } else {
+          alert("Error saving settings: " + data.error);
+        }
+      })
+      .catch((error) => {
+        alert("Error saving settings: " + error);
+      });
+  }
+
+  function resetToDefaults() {
+    if (
+      confirm(
+        "Are you sure you want to reset all settings to their default values? This action cannot be undone."
+      )
+    ) {
+      fetch("/senior/reset-settings", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            location.reload();
+          } else {
+            alert("Error resetting settings: " + data.error);
+          }
+        });
+    }
+  }
+
+  function createBackup() {
+    if (confirm("Create a manual backup now? This may take a few minutes.")) {
+      fetch("/senior/create-backup", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            alert("Backup created successfully! File: " + data.filename);
+          } else {
+            alert("Backup failed: " + data.error);
+          }
+        });
+    }
+  }
+
+  function optimizeDatabase() {
+    if (
+      confirm(
+        "Optimize the database? This may temporarily slow down the system."
+      )
+    ) {
+      fetch("/senior/optimize-database", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            alert("Database optimized successfully!");
+          } else {
+            alert("Optimization failed: " + data.error);
+          }
+        });
+    }
+  }
+
+  function clearLogs() {
+    if (
+      confirm(
+        "Clear old system logs? This will remove logs older than 30 days."
+      )
+    ) {
+      fetch("/senior/clear-logs", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            alert("Old logs cleared successfully!");
+          } else {
+            alert("Log clearing failed: " + data.error);
+          }
+        });
+    }
+  }
+
+  function restoreFromBackup() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".sql,.backup";
+    input.onchange = function (e) {
+      const file = e.target.files[0];
+      if (file) {
+        if (
+          confirm(
+            'Restore from backup file "' +
+              file.name +
+              '"? This will overwrite all current data and cannot be undone.'
+          )
+        ) {
+          const formData = new FormData();
+          formData.append("backup_file", file);
+
+          fetch("/senior/restore-backup", {
+            method: "POST",
+            body: formData,
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.success) {
+                alert("Backup restored successfully! Please log in again.");
+                window.location.href = "/login";
+              } else {
+                alert("Restore failed: " + data.error);
+              }
+            });
+        }
+      }
+    };
+    input.click();
+  }
+</script>
+
+<style>
+  .form-control:focus,
+  .form-select:focus {
+    border-color: #4e73df;
+    box-shadow: 0 0 0 0.2rem rgba(78, 115, 223, 0.25);
+  }
+
+  .card-header h6 {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .btn-group .btn {
+    margin-right: 0.5rem;
+  }
+
+  .alert-warning {
+    border-left: 4px solid #f6c23e;
+  }
+
+  .form-text {
+    font-size: 0.8rem;
+    color: #6c757d;
+  }
+
+  .form-check-label {
+    font-size: 0.9rem;
+  }
+
+  .modal-body ul {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+</style>
+{% endblock %}

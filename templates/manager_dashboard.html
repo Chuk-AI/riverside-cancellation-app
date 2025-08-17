@@ -1,0 +1,577 @@
+{% extends "base.html" %} {% block title %}Manager Dashboard - Riverside
+Equestrian{% endblock %} {% block extra_css %}
+<style>
+  .stats-card {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stats-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(
+      to bottom,
+      var(--primary-color),
+      var(--accent-color)
+    );
+  }
+
+  .stats-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  }
+
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(
+      135deg,
+      var(--primary-color),
+      var(--accent-color)
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+  }
+
+  .recent-activity-item {
+    border-left: 3px solid transparent;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+    transition: all 0.3s ease;
+    background: #f8fafc;
+  }
+
+  .recent-activity-item:hover {
+    border-left-color: var(--primary-color);
+    background: #f1f5f9;
+    transform: translateX(4px);
+  }
+
+  .recent-activity-item.new {
+    border-left-color: #10b981;
+    background: #f0fdf4;
+  }
+  .recent-activity-item.charged {
+    border-left-color: #f59e0b;
+    background: #fffbeb;
+  }
+  .recent-activity-item.excluded {
+    border-left-color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  .quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .quick-action-btn {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.3s ease;
+    text-align: center;
+    display: block;
+  }
+
+  .quick-action-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(59, 130, 246, 0.1);
+    text-decoration: none;
+  }
+
+  .alert-panel {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border: 1px solid #fca5a5;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .table-responsive {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .table th {
+    background: linear-gradient(
+      135deg,
+      var(--gray-50) 0%,
+      var(--gray-100) 100%
+    );
+    border-bottom: 2px solid var(--gray-200);
+    font-weight: 600;
+    color: var(--gray-700);
+  }
+
+  .membership-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .membership-bronze {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .membership-silver {
+    background: #f1f5f9;
+    color: #475569;
+  }
+  .membership-gold {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .membership-intro {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  .membership-legacy {
+    background: #e0e7ff;
+    color: #3730a3;
+  }
+  .membership-guest {
+    background: #f3f4f6;
+    color: #374151;
+  }
+  .membership-welcome {
+    background: #fce7f3;
+    color: #be185d;
+  }
+</style>
+{% endblock %} {% block content %}
+<!-- Welcome Header -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="card bg-primary text-white">
+      <div class="card-body">
+        <div class="row align-items-center">
+          <div class="col-md-8">
+            <h1 class="h3 mb-2">
+              <i class="fas fa-tachometer-alt me-2"></i>
+              Manager Dashboard
+            </h1>
+            <p class="mb-0 opacity-75">
+              System overview and quick access to management tools
+            </p>
+          </div>
+          <div class="col-md-4 text-md-end">
+            <small class="opacity-75"
+              >Last updated: {{ current_time.strftime('%I:%M %p') }}</small
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Alert Panel (if any pending items) -->
+{% if alerts %}
+<div class="alert-panel">
+  <h6 class="fw-bold mb-2">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    Attention Required
+  </h6>
+  <ul class="mb-0">
+    {% for alert in alerts %}
+    <li>{{ alert }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- Stats Overview -->
+<div class="row mb-4">
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card stats-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h6 class="text-muted mb-2">Today's Cancellations</h6>
+            <div class="stat-number">{{ stats.today_cancellations }}</div>
+            <small class="text-muted">{{ stats.today_vs_yesterday }}</small>
+          </div>
+          <div class="text-primary">
+            <i class="fas fa-calendar-times fa-2x"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card stats-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h6 class="text-muted mb-2">This Month</h6>
+            <div class="stat-number">{{ stats.month_cancellations }}</div>
+            <small class="text-success"
+              >{{ stats.free_cancellations }} free, {{
+              stats.charged_cancellations }} charged</small
+            >
+          </div>
+          <div class="text-success">
+            <i class="fas fa-chart-line fa-2x"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card stats-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h6 class="text-muted mb-2">Active Students</h6>
+            <div class="stat-number">{{ stats.active_students }}</div>
+            <small class="text-info"
+              >{{ stats.new_students_month }} new this month</small
+            >
+          </div>
+          <div class="text-info">
+            <i class="fas fa-users fa-2x"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card stats-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h6 class="text-muted mb-2">Pending Reviews</h6>
+            <div class="stat-number">{{ stats.pending_reviews }}</div>
+            <small class="text-warning">Requires attention</small>
+          </div>
+          <div class="text-warning">
+            <i class="fas fa-clock fa-2x"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="quick-actions">
+  <a href="{{ url_for('manager_students') }}" class="quick-action-btn">
+    <div class="text-primary mb-2">
+      <i class="fas fa-user-plus fa-2x"></i>
+    </div>
+    <h6 class="mb-1">Add Student</h6>
+    <small class="text-muted">Register new student</small>
+  </a>
+
+  <a href="{{ url_for('manager_cancellations') }}" class="quick-action-btn">
+    <div class="text-warning mb-2">
+      <i class="fas fa-list-alt fa-2x"></i>
+    </div>
+    <h6 class="mb-1">Review Cancellations</h6>
+    <small class="text-muted">Process requests</small>
+  </a>
+
+  <a href="{{ url_for('manager_analytics') }}" class="quick-action-btn">
+    <div class="text-info mb-2">
+      <i class="fas fa-chart-bar fa-2x"></i>
+    </div>
+    <h6 class="mb-1">View Reports</h6>
+    <small class="text-muted">Analytics & trends</small>
+  </a>
+
+  <a href="#" onclick="exportData()" class="quick-action-btn">
+    <div class="text-success mb-2">
+      <i class="fas fa-download fa-2x"></i>
+    </div>
+    <h6 class="mb-1">Export Data</h6>
+    <small class="text-muted">Download reports</small>
+  </a>
+</div>
+
+<!-- Recent Activity & Recent Cancellations -->
+<div class="row">
+  <!-- Recent Activity -->
+  <div class="col-lg-6 mb-4">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-clock me-2"></i>
+          Recent Activity
+        </h5>
+        <small class="text-muted">Last 24 hours</small>
+      </div>
+      <div class="card-body">
+        {% if recent_activity %}
+        <div class="recent-activity-list">
+          {% for activity in recent_activity %}
+          <div class="recent-activity-item {{ activity.type }}">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h6 class="mb-1">{{ activity.title }}</h6>
+                <p class="mb-1 small">{{ activity.description }}</p>
+                <small class="text-muted">
+                  <i class="fas fa-user me-1"></i>{{ activity.student_name }}
+                  <span class="mx-2">•</span>
+                  <i class="fas fa-clock me-1"></i>{{ activity.time_ago }}
+                </small>
+              </div>
+              <div>
+                {% if activity.type == 'new' %}
+                <i class="fas fa-plus-circle text-success"></i>
+                {% elif activity.type == 'charged' %}
+                <i class="fas fa-dollar-sign text-warning"></i>
+                {% elif activity.type == 'excluded' %}
+                <i class="fas fa-shield-alt text-info"></i>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="fas fa-inbox fa-2x mb-2"></i>
+          <p class="mb-0">No recent activity</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Cancellations Table -->
+  <div class="col-lg-6 mb-4">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-calendar-times me-2"></i>
+          Recent Cancellations
+        </h5>
+        <a
+          href="{{ url_for('manager_cancellations') }}"
+          class="btn btn-sm btn-outline-primary"
+        >
+          View All
+        </a>
+      </div>
+      <div class="card-body p-0">
+        {% if recent_cancellations %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Lesson Date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for cancellation in recent_cancellations %}
+              <tr>
+                <td>
+                  <div>
+                    <strong>{{ cancellation.student_name }}</strong>
+                    <br />
+                    <span
+                      class="membership-badge membership-{{ cancellation.membership_level|lower|replace(' ', '') }}"
+                    >
+                      {{ cancellation.membership_level }}
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <div>
+                    {{ cancellation.lesson_date.strftime('%m/%d/%Y') }}
+                    <br />
+                    <small class="text-muted"
+                      >{{ cancellation.lesson_time.strftime('%I:%M %p')
+                      }}</small
+                    >
+                  </div>
+                </td>
+                <td>
+                  {% if cancellation.excluded %}
+                  <span class="badge bg-info">Excluded</span>
+                  {% elif cancellation.charged %}
+                  <span class="badge bg-warning">Charged</span>
+                  {% else %}
+                  <span class="badge bg-success">Free</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="btn-group btn-group-sm">
+                    <button
+                      class="btn btn-outline-primary btn-sm"
+                      onclick="viewCancellation({{ cancellation.id }})"
+                    >
+                      <i class="fas fa-eye"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      onclick="editCancellation({{ cancellation.id }})"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="fas fa-calendar fa-2x mb-2"></i>
+          <p class="mb-0">No recent cancellations</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Monthly Overview Chart -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-chart-area me-2"></i>
+          Monthly Cancellation Trends
+        </h5>
+      </div>
+      <div class="card-body">
+        <canvas id="monthlyChart" height="100"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+  // Monthly trends chart
+  const ctx = document.getElementById('monthlyChart').getContext('2d');
+  const monthlyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+          labels: {{ monthly_labels|safe }},
+          datasets: [{
+              label: 'Total Cancellations',
+              data: {{ monthly_totals|safe }},
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              tension: 0.4,
+              fill: true
+          }, {
+              label: 'Charged Cancellations',
+              data: {{ monthly_charged|safe }},
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              tension: 0.4,
+              fill: true
+          }]
+      },
+      options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+              legend: {
+                  position: 'top',
+              }
+          },
+          scales: {
+              y: {
+                  beginAtZero: true,
+                  ticks: {
+                      stepSize: 1
+                  }
+              }
+          }
+      }
+  });
+
+  // Functions for quick actions
+  function viewCancellation(id) {
+      window.location.href = `{{ url_for('manager_cancellations') }}?view=${id}`;
+  }
+
+  function editCancellation(id) {
+      window.location.href = `{{ url_for('manager_cancellations') }}?edit=${id}`;
+  }
+
+  function exportData() {
+      const options = [
+          'Monthly Cancellation Report',
+          'Student List with Membership',
+          'Charged Cancellations Report',
+          'Full System Export'
+      ];
+
+      const choice = prompt('Select export type:\n' + options.map((opt, i) => `${i + 1}. ${opt}`).join('\n'));
+
+      if (choice >= 1 && choice <= 4) {
+          window.location.href = `{{ url_for('manager_analytics') }}?export=${choice}`;
+      }
+  }
+
+  // Auto-refresh stats every 5 minutes
+  setInterval(function() {
+      fetch('{{ url_for('manager_dashboard') }}?ajax=stats')
+          .then(response => response.json())
+          .then(data => {
+              if (data.stats) {
+                  document.querySelector('.stat-number').textContent = data.stats.today_cancellations;
+                  // Update other stats as needed
+              }
+          })
+          .catch(console.error);
+  }, 300000);
+
+  // Animate stat numbers on load
+  document.addEventListener('DOMContentLoaded', function() {
+      const statNumbers = document.querySelectorAll('.stat-number');
+      statNumbers.forEach(stat => {
+          const finalValue = parseInt(stat.textContent);
+          let currentValue = 0;
+          const increment = finalValue / 20;
+
+          const timer = setInterval(() => {
+              currentValue += increment;
+              if (currentValue >= finalValue) {
+                  currentValue = finalValue;
+                  clearInterval(timer);
+              }
+              stat.textContent = Math.floor(currentValue);
+          }, 50);
+      });
+  });
+</script>
+{% endblock %}

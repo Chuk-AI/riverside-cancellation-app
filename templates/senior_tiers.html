@@ -1,0 +1,1352 @@
+{% extends "base.html" %} {% block title %}Membership Tiers - Riverside
+Equestrian{% endblock %} {% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-12">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Membership Tiers Management</h1>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="addNewTier()">
+            <i class="fas fa-plus"></i> Add New Tier
+          </button>
+          <button class="btn btn-success" onclick="saveAllTiers()">
+            <i class="fas fa-save"></i> Save Changes
+          </button>
+          <button class="btn btn-outline-info" onclick="exportTierConfig()">
+            <i class="fas fa-download"></i> Export Config
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Current Tiers Overview -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card shadow">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-primary">
+            Current Membership Tiers
+          </h6>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-bordered" id="tiersTable">
+              <thead class="table-dark">
+                <tr>
+                  <th>Tier Name</th>
+                  <th>Free Cancellations/Month</th>
+                  <th>Cancellation Deadline</th>
+                  <th>Active Students</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tiersTableBody">
+                <tr data-tier="bronze">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Bronze"
+                      data-original="Bronze"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="1"
+                      min="0"
+                      max="10"
+                      data-original="1"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">25 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('bronze')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('bronze')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="silver">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Silver"
+                      data-original="Silver"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="2"
+                      min="0"
+                      max="10"
+                      data-original="2"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">45 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('silver')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('silver')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="gold">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Gold"
+                      data-original="Gold"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="4"
+                      min="0"
+                      max="10"
+                      data-original="4"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="2_hours_before"
+                    >
+                      <option value="6pm_previous_day">6pm previous day</option>
+                      <option value="2_hours_before" selected>
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">35 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('gold')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('gold')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="intro_package">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Intro Package"
+                      data-original="Intro Package"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="1"
+                      min="0"
+                      max="10"
+                      data-original="1"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">15 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('intro_package')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('intro_package')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="legacy">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Legacy"
+                      data-original="Legacy"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="1"
+                      min="0"
+                      max="10"
+                      data-original="1"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-warning">12 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="deprecated"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated" selected>Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('legacy')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('legacy')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="guest">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Guest"
+                      data-original="Guest"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="1"
+                      min="0"
+                      max="10"
+                      data-original="1"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">8 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('guest')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('guest')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                <tr data-tier="welcome_package">
+                  <td>
+                    <input
+                      type="text"
+                      class="form-control tier-name"
+                      value="Welcome Package"
+                      data-original="Welcome Package"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      class="form-control tier-limit"
+                      value="1"
+                      min="0"
+                      max="10"
+                      data-original="1"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-deadline"
+                      data-original="6pm_previous_day"
+                    >
+                      <option value="6pm_previous_day" selected>
+                        6pm previous day
+                      </option>
+                      <option value="2_hours_before">
+                        2 hours before lesson
+                      </option>
+                      <option value="24_hours_before">
+                        24 hours before lesson
+                      </option>
+                      <option value="same_day">Same day allowed</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span class="badge bg-info">10 students</span>
+                  </td>
+                  <td>
+                    <select
+                      class="form-select tier-status"
+                      data-original="active"
+                    >
+                      <option value="active" selected>Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="deprecated">Deprecated</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      onclick="editTierDetails('welcome_package')"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      onclick="deleteTier('welcome_package')"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tier Statistics -->
+  <div class="row mb-4">
+    <div class="col-lg-8">
+      <div class="card shadow">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-info">Tier Distribution</h6>
+        </div>
+        <div class="card-body">
+          <canvas id="tierDistributionChart"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card shadow">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-success">Usage Statistics</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <div class="small text-muted">Most Popular Tier</div>
+            <div class="h5 mb-0">Silver (45 students)</div>
+          </div>
+          <div class="mb-3">
+            <div class="small text-muted">Average Cancellations/Student</div>
+            <div class="h5 mb-0">1.3 per month</div>
+          </div>
+          <div class="mb-3">
+            <div class="small text-muted">Total Active Tiers</div>
+            <div class="h5 mb-0">6 of 7</div>
+          </div>
+          <div class="mb-3">
+            <div class="small text-muted">Students on Deprecated Tiers</div>
+            <div class="h5 mb-0 text-warning">12 students</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Operations -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-warning">Bulk Operations</h6>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-lg-4">
+              <h6>Migrate Students</h6>
+              <div class="mb-3">
+                <label class="form-label">From Tier:</label>
+                <select class="form-select" id="migrationFromTier">
+                  <option value="">Select tier...</option>
+                  <option value="legacy">Legacy (12 students)</option>
+                  <option value="bronze">Bronze (25 students)</option>
+                  <option value="silver">Silver (45 students)</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">To Tier:</label>
+                <select class="form-select" id="migrationToTier">
+                  <option value="">Select tier...</option>
+                  <option value="bronze">Bronze</option>
+                  <option value="silver">Silver</option>
+                  <option value="gold">Gold</option>
+                </select>
+              </div>
+              <button class="btn btn-warning" onclick="migrateStudents()">
+                <i class="fas fa-exchange-alt"></i> Migrate Students
+              </button>
+            </div>
+
+            <div class="col-lg-4">
+              <h6>Tier Templates</h6>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-primary btn-sm"
+                  onclick="applyTemplate('basic')"
+                >
+                  Basic Package Template
+                </button>
+              </div>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-primary btn-sm"
+                  onclick="applyTemplate('premium')"
+                >
+                  Premium Package Template
+                </button>
+              </div>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-primary btn-sm"
+                  onclick="applyTemplate('corporate')"
+                >
+                  Corporate Template
+                </button>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <h6>Import/Export</h6>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-success btn-sm"
+                  onclick="importTierConfig()"
+                >
+                  <i class="fas fa-upload"></i> Import Configuration
+                </button>
+              </div>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-info btn-sm"
+                  onclick="exportTierConfig()"
+                >
+                  <i class="fas fa-download"></i> Export Configuration
+                </button>
+              </div>
+              <div class="mb-3">
+                <button
+                  class="btn btn-outline-secondary btn-sm"
+                  onclick="resetToDefaults()"
+                >
+                  <i class="fas fa-undo"></i> Reset to Defaults
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Tier Modal -->
+<div class="modal fade" id="tierModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="tierModalTitle">Add New Tier</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <form id="tierForm">
+          <div class="row">
+            <div class="col-md-6">
+              <div class="mb-3">
+                <label for="tierName" class="form-label">Tier Name *</label>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="tierName"
+                  required
+                />
+              </div>
+              <div class="mb-3">
+                <label for="tierLimit" class="form-label"
+                  >Free Cancellations per Month *</label
+                >
+                <input
+                  type="number"
+                  class="form-control"
+                  id="tierLimit"
+                  min="0"
+                  max="20"
+                  required
+                />
+              </div>
+              <div class="mb-3">
+                <label for="tierDeadline" class="form-label"
+                  >Cancellation Deadline *</label
+                >
+                <select class="form-select" id="tierDeadline" required>
+                  <option value="">Select deadline...</option>
+                  <option value="6pm_previous_day">6pm previous day</option>
+                  <option value="2_hours_before">2 hours before lesson</option>
+                  <option value="24_hours_before">
+                    24 hours before lesson
+                  </option>
+                  <option value="same_day">Same day allowed</option>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="mb-3">
+                <label for="tierStatus" class="form-label">Status</label>
+                <select class="form-select" id="tierStatus">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="deprecated">Deprecated</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="tierColor" class="form-label">Display Color</label>
+                <input
+                  type="color"
+                  class="form-control form-control-color"
+                  id="tierColor"
+                  value="#007bff"
+                />
+              </div>
+              <div class="mb-3">
+                <label for="tierSort" class="form-label">Sort Order</label>
+                <input
+                  type="number"
+                  class="form-control"
+                  id="tierSort"
+                  min="1"
+                  max="100"
+                  value="1"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-12">
+              <div class="mb-3">
+                <label for="tierDescription" class="form-label"
+                  >Description</label
+                >
+                <textarea
+                  class="form-control"
+                  id="tierDescription"
+                  rows="3"
+                  placeholder="Optional description for this membership tier"
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-12">
+              <h6>Custom Messages</h6>
+              <div class="mb-3">
+                <label for="tierWelcomeMessage" class="form-label"
+                  >Welcome Message</label
+                >
+                <textarea
+                  class="form-control"
+                  id="tierWelcomeMessage"
+                  rows="2"
+                  placeholder="Custom message shown to clients with this tier"
+                ></textarea>
+              </div>
+              <div class="mb-3">
+                <label for="tierPolicyMessage" class="form-label"
+                  >Policy Message</label
+                >
+                <textarea
+                  class="form-control"
+                  id="tierPolicyMessage"
+                  rows="2"
+                  placeholder="Custom policy explanation for this tier"
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-12">
+              <h6>Advanced Settings</h6>
+              <div class="form-check mb-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="allowSequential"
+                />
+                <label class="form-check-label" for="allowSequential">
+                  Allow sequential lesson cancellations
+                </label>
+              </div>
+              <div class="form-check mb-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="allowRescheduling"
+                />
+                <label class="form-check-label" for="allowRescheduling">
+                  Allow rescheduling requests
+                </label>
+              </div>
+              <div class="form-check mb-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="requireApproval"
+                />
+                <label class="form-check-label" for="requireApproval">
+                  Require manager approval for cancellations
+                </label>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-primary" onclick="saveTier()">
+          Save Tier
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirm Action</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmMessage"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-danger" id="confirmAction">
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let tierChart;
+  let unsavedChanges = false;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    initializeTierChart();
+    trackChanges();
+  });
+
+  function initializeTierChart() {
+    const ctx = document
+      .getElementById("tierDistributionChart")
+      .getContext("2d");
+    tierChart = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: [
+          "Bronze",
+          "Silver",
+          "Gold",
+          "Intro Package",
+          "Legacy",
+          "Guest",
+          "Welcome Package",
+        ],
+        datasets: [
+          {
+            data: [25, 45, 35, 15, 12, 8, 10],
+            backgroundColor: [
+              "#cd7f32",
+              "#c0c0c0",
+              "#ffd700",
+              "#17a2b8",
+              "#6c757d",
+              "#28a745",
+              "#fd7e14",
+            ],
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: "bottom",
+          },
+        },
+      },
+    });
+  }
+
+  function trackChanges() {
+    const inputs = document.querySelectorAll(
+      "#tiersTable input, #tiersTable select"
+    );
+    inputs.forEach((input) => {
+      input.addEventListener("change", function () {
+        const original = this.dataset.original;
+        const current = this.type === "checkbox" ? this.checked : this.value;
+
+        if (original !== current.toString()) {
+          this.classList.add("changed");
+          unsavedChanges = true;
+        } else {
+          this.classList.remove("changed");
+        }
+
+        updateSaveButtonState();
+      });
+    });
+  }
+
+  function updateSaveButtonState() {
+    const saveBtn = document.querySelector('button[onclick="saveAllTiers()"]');
+    if (unsavedChanges) {
+      saveBtn.classList.remove("btn-success");
+      saveBtn.classList.add("btn-warning");
+      saveBtn.innerHTML =
+        '<i class="fas fa-exclamation-triangle"></i> Save Changes';
+    } else {
+      saveBtn.classList.remove("btn-warning");
+      saveBtn.classList.add("btn-success");
+      saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+    }
+  }
+
+  function addNewTier() {
+    document.getElementById("tierModalTitle").textContent = "Add New Tier";
+    document.getElementById("tierForm").reset();
+    document.getElementById("tierStatus").value = "active";
+    document.getElementById("allowSequential").checked = true;
+    document.getElementById("allowRescheduling").checked = true;
+
+    new bootstrap.Modal(document.getElementById("tierModal")).show();
+  }
+
+  function editTierDetails(tierId) {
+    const row = document.querySelector(`tr[data-tier="${tierId}"]`);
+    const tierName = row.querySelector(".tier-name").value;
+
+    document.getElementById(
+      "tierModalTitle"
+    ).textContent = `Edit ${tierName} Tier`;
+    document.getElementById("tierName").value = tierName;
+    document.getElementById("tierLimit").value =
+      row.querySelector(".tier-limit").value;
+    document.getElementById("tierDeadline").value =
+      row.querySelector(".tier-deadline").value;
+    document.getElementById("tierStatus").value =
+      row.querySelector(".tier-status").value;
+
+    // Set the modal to edit mode
+    const modal = new bootstrap.Modal(document.getElementById("tierModal"));
+    modal.show();
+
+    // Store the tier ID for saving
+    document.getElementById("tierForm").dataset.editingTier = tierId;
+  }
+
+  function saveTier() {
+    const form = document.getElementById("tierForm");
+    const tierName = document.getElementById("tierName").value;
+    const tierLimit = document.getElementById("tierLimit").value;
+    const tierDeadline = document.getElementById("tierDeadline").value;
+    const tierStatus = document.getElementById("tierStatus").value;
+
+    if (!tierName || !tierLimit || !tierDeadline) {
+      alert("Please fill in all required fields.");
+      return;
+    }
+
+    const tierData = {
+      name: tierName,
+      limit: parseInt(tierLimit),
+      deadline: tierDeadline,
+      status: tierStatus,
+      description: document.getElementById("tierDescription").value,
+      color: document.getElementById("tierColor").value,
+      sort: parseInt(document.getElementById("tierSort").value),
+      welcomeMessage: document.getElementById("tierWelcomeMessage").value,
+      policyMessage: document.getElementById("tierPolicyMessage").value,
+      allowSequential: document.getElementById("allowSequential").checked,
+      allowRescheduling: document.getElementById("allowRescheduling").checked,
+      requireApproval: document.getElementById("requireApproval").checked,
+    };
+
+    const editingTier = form.dataset.editingTier;
+
+    if (editingTier) {
+      // Update existing tier
+      updateTierInTable(editingTier, tierData);
+    } else {
+      // Add new tier
+      addTierToTable(tierData);
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById("tierModal")).hide();
+    unsavedChanges = true;
+    updateSaveButtonState();
+  }
+
+  function updateTierInTable(tierId, tierData) {
+    const row = document.querySelector(`tr[data-tier="${tierId}"]`);
+    row.querySelector(".tier-name").value = tierData.name;
+    row.querySelector(".tier-limit").value = tierData.limit;
+    row.querySelector(".tier-deadline").value = tierData.deadline;
+    row.querySelector(".tier-status").value = tierData.status;
+  }
+
+  function addTierToTable(tierData) {
+    const tbody = document.getElementById("tiersTableBody");
+    const tierId = tierData.name.toLowerCase().replace(/\s+/g, "_");
+
+    const row = document.createElement("tr");
+    row.setAttribute("data-tier", tierId);
+    row.innerHTML = `
+        <td><input type="text" class="form-control tier-name" value="${
+          tierData.name
+        }" data-original="${tierData.name}"></td>
+        <td><input type="number" class="form-control tier-limit" value="${
+          tierData.limit
+        }" min="0" max="10" data-original="${tierData.limit}"></td>
+        <td>
+            <select class="form-select tier-deadline" data-original="${
+              tierData.deadline
+            }">
+                <option value="6pm_previous_day" ${
+                  tierData.deadline === "6pm_previous_day" ? "selected" : ""
+                }>6pm previous day</option>
+                <option value="2_hours_before" ${
+                  tierData.deadline === "2_hours_before" ? "selected" : ""
+                }>2 hours before lesson</option>
+                <option value="24_hours_before" ${
+                  tierData.deadline === "24_hours_before" ? "selected" : ""
+                }>24 hours before lesson</option>
+                <option value="same_day" ${
+                  tierData.deadline === "same_day" ? "selected" : ""
+                }>Same day allowed</option>
+            </select>
+        </td>
+        <td><span class="badge bg-secondary">0 students</span></td>
+        <td>
+            <select class="form-select tier-status" data-original="${
+              tierData.status
+            }">
+                <option value="active" ${
+                  tierData.status === "active" ? "selected" : ""
+                }>Active</option>
+                <option value="inactive" ${
+                  tierData.status === "inactive" ? "selected" : ""
+                }>Inactive</option>
+                <option value="deprecated" ${
+                  tierData.status === "deprecated" ? "selected" : ""
+                }>Deprecated</option>
+            </select>
+        </td>
+        <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="editTierDetails('${tierId}')">
+                <i class="fas fa-edit"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteTier('${tierId}')">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+    `;
+
+    tbody.appendChild(row);
+    trackChanges(); // Re-attach change listeners
+  }
+
+  function deleteTier(tierId) {
+    const row = document.querySelector(`tr[data-tier="${tierId}"]`);
+    const tierName = row.querySelector(".tier-name").value;
+    const studentCount = row.querySelector(".badge").textContent;
+
+    document.getElementById(
+      "confirmMessage"
+    ).innerHTML = `Are you sure you want to delete the <strong>${tierName}</strong> tier?<br>
+         This tier currently has ${studentCount}.<br><br>
+         <strong>This action cannot be undone.</strong>`;
+
+    document.getElementById("confirmAction").onclick = function () {
+      row.remove();
+      unsavedChanges = true;
+      updateSaveButtonState();
+      bootstrap.Modal.getInstance(
+        document.getElementById("confirmModal")
+      ).hide();
+    };
+
+    new bootstrap.Modal(document.getElementById("confirmModal")).show();
+  }
+
+  function saveAllTiers() {
+    if (!unsavedChanges) {
+      alert("No changes to save.");
+      return;
+    }
+
+    const tiers = [];
+    const rows = document.querySelectorAll("#tiersTableBody tr");
+
+    rows.forEach((row) => {
+      const tierId = row.getAttribute("data-tier");
+      const tierData = {
+        id: tierId,
+        name: row.querySelector(".tier-name").value,
+        limit: parseInt(row.querySelector(".tier-limit").value),
+        deadline: row.querySelector(".tier-deadline").value,
+        status: row.querySelector(".tier-status").value,
+      };
+      tiers.push(tierData);
+    });
+
+    fetch("/senior/save-tiers", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tiers: tiers }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          alert("Tiers saved successfully!");
+          unsavedChanges = false;
+          updateSaveButtonState();
+
+          // Update original values
+          document
+            .querySelectorAll("#tiersTable input, #tiersTable select")
+            .forEach((input) => {
+              input.dataset.original =
+                input.type === "checkbox" ? input.checked : input.value;
+              input.classList.remove("changed");
+            });
+        } else {
+          alert("Error saving tiers: " + data.error);
+        }
+      })
+      .catch((error) => {
+        alert("Error saving tiers: " + error);
+      });
+  }
+
+  function migrateStudents() {
+    const fromTier = document.getElementById("migrationFromTier").value;
+    const toTier = document.getElementById("migrationToTier").value;
+
+    if (!fromTier || !toTier) {
+      alert("Please select both source and destination tiers.");
+      return;
+    }
+
+    if (fromTier === toTier) {
+      alert("Source and destination tiers cannot be the same.");
+      return;
+    }
+
+    const fromTierText =
+      document.getElementById("migrationFromTier").selectedOptions[0].text;
+    const toTierText =
+      document.getElementById("migrationToTier").selectedOptions[0].text;
+
+    document.getElementById(
+      "confirmMessage"
+    ).innerHTML = `Migrate all students from <strong>${fromTierText}</strong> to <strong>${toTierText}</strong>?<br><br>
+         This will update all student records and cannot be undone.`;
+
+    document.getElementById("confirmAction").onclick = function () {
+      fetch("/senior/migrate-students", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ from_tier: fromTier, to_tier: toTier }),
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            alert(`Successfully migrated ${data.count} students.`);
+            location.reload(); // Refresh to show updated counts
+          } else {
+            alert("Migration failed: " + data.error);
+          }
+        });
+
+      bootstrap.Modal.getInstance(
+        document.getElementById("confirmModal")
+      ).hide();
+    };
+
+    new bootstrap.Modal(document.getElementById("confirmModal")).show();
+  }
+
+  function applyTemplate(template) {
+    let templateData;
+
+    switch (template) {
+      case "basic":
+        templateData = {
+          name: "Basic Package",
+          limit: 1,
+          deadline: "6pm_previous_day",
+          status: "active",
+        };
+        break;
+      case "premium":
+        templateData = {
+          name: "Premium Package",
+          limit: 5,
+          deadline: "2_hours_before",
+          status: "active",
+        };
+        break;
+      case "corporate":
+        templateData = {
+          name: "Corporate Package",
+          limit: 10,
+          deadline: "same_day",
+          status: "active",
+        };
+        break;
+    }
+
+    // Pre-fill the modal with template data
+    document.getElementById("tierModalTitle").textContent =
+      "Add New Tier (Template Applied)";
+    document.getElementById("tierName").value = templateData.name;
+    document.getElementById("tierLimit").value = templateData.limit;
+    document.getElementById("tierDeadline").value = templateData.deadline;
+    document.getElementById("tierStatus").value = templateData.status;
+
+    new bootstrap.Modal(document.getElementById("tierModal")).show();
+  }
+
+  function exportTierConfig() {
+    const tiers = [];
+    const rows = document.querySelectorAll("#tiersTableBody tr");
+
+    rows.forEach((row) => {
+      const tierData = {
+        id: row.getAttribute("data-tier"),
+        name: row.querySelector(".tier-name").value,
+        limit: parseInt(row.querySelector(".tier-limit").value),
+        deadline: row.querySelector(".tier-deadline").value,
+        status: row.querySelector(".tier-status").value,
+      };
+      tiers.push(tierData);
+    });
+
+    const dataStr = JSON.stringify(tiers, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tier-configuration.json";
+    link.click();
+  }
+
+  function importTierConfig() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = function (e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          try {
+            const tiers = JSON.parse(e.target.result);
+            // Process imported tiers
+            console.log("Imported tiers:", tiers);
+            alert("Configuration imported successfully!");
+          } catch (error) {
+            alert("Error importing configuration: Invalid JSON file");
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  }
+
+  function resetToDefaults() {
+    document.getElementById("confirmMessage").innerHTML =
+      "Reset all tiers to default configuration?<br><br>" +
+      "<strong>This will remove all custom tiers and reset existing ones. This action cannot be undone.</strong>";
+
+    document.getElementById("confirmAction").onclick = function () {
+      fetch("/senior/reset-tiers", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            location.reload();
+          } else {
+            alert("Reset failed: " + data.error);
+          }
+        });
+
+      bootstrap.Modal.getInstance(
+        document.getElementById("confirmModal")
+      ).hide();
+    };
+
+    new bootstrap.Modal(document.getElementById("confirmModal")).show();
+  }
+
+  // Warn user about unsaved changes
+  window.addEventListener("beforeunload", function (e) {
+    if (unsavedChanges) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+</script>
+
+<style>
+  .changed {
+    border-color: #ffc107 !important;
+    box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25) !important;
+  }
+
+  .table input,
+  .table select {
+    border: 1px solid #d1ecf1;
+    font-size: 0.875rem;
+  }
+
+  .table input:focus,
+  .table select:focus {
+    border-color: #4e73df;
+    box-shadow: 0 0 0 0.2rem rgba(78, 115, 223, 0.25);
+  }
+
+  .badge {
+    font-size: 0.75rem;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .modal-lg {
+    max-width: 800px;
+  }
+
+  .form-control-color {
+    max-width: 60px;
+  }
+</style>
+{% endblock %}

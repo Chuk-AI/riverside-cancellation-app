@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      {% block title %}Riverside Equestrian - Cancellation System{% endblock %}
+    </title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="{{ url_for('static', filename='css/main.css') }}"
+      rel="stylesheet"
+    />
+    {% block extra_css %}{% endblock %}
+  </head>
+  <body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+      <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+          <i class="fas fa-horse me-2"></i>
+          Riverside Equestrian
+        </a>
+
+        {% if session.user_id %}
+        <button
+          class="navbar-toggler"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#navbarNav"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav me-auto">
+            <!-- Client Navigation -->
+            {% if session.user_role == 'client' %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('client_dashboard') }}">
+                <i class="fas fa-home me-1"></i>Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('client_cancel') }}">
+                <i class="fas fa-calendar-times me-1"></i>Cancel Lesson
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('client_history') }}">
+                <i class="fas fa-history me-1"></i>History
+              </a>
+            </li>
+            {% endif %}
+
+            <!-- Manager Navigation -->
+            {% if session.user_role == 'manager' %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_dashboard') }}">
+                <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_students') }}">
+                <i class="fas fa-users me-1"></i>Students
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_cancellations') }}">
+                <i class="fas fa-list-alt me-1"></i>Cancellations
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_analytics') }}">
+                <i class="fas fa-chart-bar me-1"></i>Analytics
+              </a>
+            </li>
+            {% endif %}
+
+            <!-- Senior Manager Navigation -->
+            {% if session.user_role == 'senior_manager' %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('senior_dashboard') }}">
+                <i class="fas fa-crown me-1"></i>Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_students') }}">
+                <i class="fas fa-users me-1"></i>Students
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('manager_cancellations') }}">
+                <i class="fas fa-list-alt me-1"></i>Cancellations
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('senior_settings') }}">
+                <i class="fas fa-cog me-1"></i>Settings
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('senior_tiers') }}">
+                <i class="fas fa-layer-group me-1"></i>Tiers
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('senior_templates') }}">
+                <i class="fas fa-envelope me-1"></i>Templates
+              </a>
+            </li>
+            {% endif %}
+          </ul>
+
+          <!-- User Info & Logout -->
+          <ul class="navbar-nav">
+            <li class="nav-item dropdown">
+              <a
+                class="nav-link dropdown-toggle"
+                href="#"
+                id="navbarDropdown"
+                role="button"
+                data-bs-toggle="dropdown"
+              >
+                <i class="fas fa-user me-1"></i>
+                {% if session.user_role == 'client' %} {{ session.user_name }}
+                {% else %} {{ session.user_role|title }} - {{ session.user_email
+                }} {% endif %}
+              </a>
+              <ul class="dropdown-menu">
+                <li>
+                  <span class="dropdown-item-text"
+                    ><strong>Role:</strong> {{ session.user_role|title }}</span
+                  >
+                </li>
+                <li><hr class="dropdown-divider" /></li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('logout') }}">
+                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                  </a>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %} {% if
+    messages %}
+    <div class="container mt-3">
+      {% for category, message in messages %}
+      <div
+        class="alert alert-{{ 'danger' if category == 'error' else 'success' if category == 'success' else 'info' }} alert-dismissible fade show"
+        role="alert"
+      >
+        {{ message }}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+        ></button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %} {% endwith %}
+
+    <!-- Main Content -->
+    <main class="container my-4">{% block content %}{% endblock %}</main>
+
+    <!-- Footer -->
+    <footer class="bg-light text-center text-muted py-3 mt-5">
+      <div class="container">
+        <p class="mb-0">
+          © 2024 Riverside Equestrian - Cancellation Management System
+        </p>
+        <small>
+          <a
+            href="https://www.riversideequestrian.ca/cancellations"
+            target="_blank"
+            class="text-decoration-none"
+          >
+            <i class="fas fa-external-link-alt me-1"></i>View Cancellation
+            Policy
+          </a>
+        </small>
+      </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>

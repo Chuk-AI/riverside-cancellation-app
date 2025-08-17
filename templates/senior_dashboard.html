@@ -1,0 +1,519 @@
+{% extends "base.html" %} {% block title %}Senior Dashboard - Riverside
+Equestrian{% endblock %} {% block extra_css %}
+<style>
+  .metric-card {
+    transition: all 0.3s ease;
+    border: none;
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  }
+
+  .metric-card .card-body {
+    padding: 1.5rem;
+  }
+
+  .metric-card .card-footer {
+    background: rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .metric-card .card-footer a {
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  /* Fix contrast issues */
+  .bg-warning .card-footer a,
+  .bg-warning .small {
+    color: #2d3436 !important; /* Dark text for yellow background */
+  }
+
+  .bg-warning {
+    background-color: #f39c12 !important; /* Darker orange for better contrast */
+    color: #2d3436 !important; /* Dark text */
+  }
+
+  .activity-feed {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .activity-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem 0;
+    border-bottom: 1px solid #e3e6f0;
+  }
+
+  .activity-item:last-child {
+    border-bottom: none;
+  }
+
+  .activity-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 1rem;
+    color: white;
+    font-size: 0.9rem;
+  }
+
+  .activity-content {
+    flex: 1;
+  }
+
+  .activity-title {
+    font-weight: 600;
+    color: #2d3436;
+    margin-bottom: 0.2rem;
+  }
+
+  .activity-desc {
+    font-size: 0.85rem;
+    color: #636e72;
+    margin-bottom: 0.2rem;
+  }
+
+  .activity-time {
+    font-size: 0.75rem;
+    color: #b2bec3;
+  }
+
+  .quick-action-btn {
+    transition: all 0.3s ease;
+    border-radius: 0.5rem;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    border: 2px solid;
+  }
+
+  .quick-action-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  }
+
+  .quick-action-btn i {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    display: block;
+  }
+
+  .chart-container {
+    position: relative;
+    height: 300px;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-12">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h1 class="h3 mb-1">Senior Manager Dashboard</h1>
+          <p class="text-muted mb-0">System overview and management controls</p>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline-primary" onclick="refreshData()">
+            <i class="fas fa-sync-alt me-1"></i> Refresh
+          </button>
+          <button class="btn btn-primary" onclick="generateSystemReport()">
+            <i class="fas fa-file-download me-1"></i> System Report
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Overview Cards -->
+  <div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card metric-card bg-primary text-white">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-grow-1">
+              <div class="small text-white-50">Total Students</div>
+              <div class="h4 mb-0">{{ stats.active_students or 0 }}</div>
+            </div>
+            <div class="fas fa-users fa-2x opacity-25"></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="small">
+            <i class="fas fa-angle-right me-1"></i>
+            <a href="{{ url_for('manager_students') }}" class="text-white"
+              >View Details</a
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card metric-card bg-warning text-dark">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-grow-1">
+              <div class="small">This Month's Cancellations</div>
+              <div class="h4 mb-0">{{ stats.month_cancellations or 0 }}</div>
+            </div>
+            <div class="fas fa-calendar-times fa-2x opacity-25"></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="small">
+            <i class="fas fa-angle-right me-1"></i>
+            <a href="{{ url_for('manager_cancellations') }}" class="text-dark"
+              >View Details</a
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card metric-card bg-success text-white">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-grow-1">
+              <div class="small text-white-50">Active Membership Tiers</div>
+              <div class="h4 mb-0">{{ stats.active_tiers or 0 }}</div>
+            </div>
+            <div class="fas fa-layer-group fa-2x opacity-25"></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="small">
+            <i class="fas fa-angle-right me-1"></i>
+            <a href="{{ url_for('senior_tiers') }}" class="text-white"
+              >Manage Tiers</a
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card metric-card bg-info text-white">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-grow-1">
+              <div class="small text-white-50">Pending Reviews</div>
+              <div class="h4 mb-0">{{ stats.pending_reviews or 0 }}</div>
+            </div>
+            <div class="fas fa-exclamation-circle fa-2x opacity-25"></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="small">
+            <i class="fas fa-angle-right me-1"></i>
+            <a
+              href="{{ url_for('manager_cancellations') }}?status=pending"
+              class="text-white"
+              >Review Now</a
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <!-- System Performance Chart -->
+    <div class="col-xl-8 col-lg-7">
+      <div class="card shadow">
+        <div
+          class="card-header py-3 d-flex justify-content-between align-items-center"
+        >
+          <h6 class="m-0 font-weight-bold text-primary">
+            System Usage Analytics
+          </h6>
+          <div class="dropdown">
+            <button
+              class="btn btn-sm btn-outline-secondary dropdown-toggle"
+              type="button"
+              data-bs-toggle="dropdown"
+            >
+              Last 30 Days
+            </button>
+            <ul class="dropdown-menu">
+              <li>
+                <a class="dropdown-item" href="#" onclick="updateChart('7days')"
+                  >Last 7 Days</a
+                >
+              </li>
+              <li>
+                <a
+                  class="dropdown-item"
+                  href="#"
+                  onclick="updateChart('30days')"
+                  >Last 30 Days</a
+                >
+              </li>
+              <li>
+                <a
+                  class="dropdown-item"
+                  href="#"
+                  onclick="updateChart('90days')"
+                  >Last 90 Days</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="chart-container">
+            <canvas id="systemUsageChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="col-xl-4 col-lg-5">
+      <div class="card shadow">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-primary">
+            Recent System Activity
+          </h6>
+        </div>
+        <div class="card-body p-0">
+          <div class="activity-feed p-3">
+            {% for activity in recent_activity[:8] %}
+            <div class="activity-item">
+              {% if 'login' in activity.action %}
+              <div class="activity-icon bg-success">
+                <i class="fas fa-sign-in-alt"></i>
+              </div>
+              {% elif 'cancellation' in activity.action %}
+              <div class="activity-icon bg-warning">
+                <i class="fas fa-calendar-times"></i>
+              </div>
+              {% elif 'student' in activity.action %}
+              <div class="activity-icon bg-info">
+                <i class="fas fa-user"></i>
+              </div>
+              {% else %}
+              <div class="activity-icon bg-secondary">
+                <i class="fas fa-cog"></i>
+              </div>
+              {% endif %}
+              <div class="activity-content">
+                <div class="activity-title">
+                  {{ activity.action|title|replace('_', ' ') }}
+                </div>
+                <div class="activity-desc">
+                  {{ activity.details or 'System activity' }}
+                </div>
+                <div class="activity-time">
+                  {% set created_at = activity.created_at %} {% if created_at %}
+                  {{ moment(created_at) if moment else created_at }} {% else %}
+                  Recently {% endif %}
+                </div>
+              </div>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-info-circle me-2"></i>
+              No recent activity
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-footer">
+          <a href="#" class="btn btn-sm btn-outline-primary"
+            >View All Activity</a
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Actions Row -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-primary">Quick Actions</h6>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-3 mb-3">
+              <a
+                href="{{ url_for('senior_tiers') }}"
+                class="btn quick-action-btn btn-outline-primary w-100"
+              >
+                <i class="fas fa-layer-group"></i>
+                Manage Tiers
+              </a>
+            </div>
+            <div class="col-md-3 mb-3">
+              <a
+                href="{{ url_for('senior_templates') }}"
+                class="btn quick-action-btn btn-outline-success w-100"
+              >
+                <i class="fas fa-envelope"></i>
+                Email Templates
+              </a>
+            </div>
+            <div class="col-md-3 mb-3">
+              <a
+                href="{{ url_for('senior_settings') }}"
+                class="btn quick-action-btn btn-outline-warning w-100"
+              >
+                <i class="fas fa-cogs"></i>
+                System Settings
+              </a>
+            </div>
+            <div class="col-md-3 mb-3">
+              <button
+                class="btn quick-action-btn btn-outline-info w-100"
+                onclick="systemBackup()"
+              >
+                <i class="fas fa-download"></i>
+                Backup System
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+  // System usage chart
+  let systemChart;
+
+  document.addEventListener('DOMContentLoaded', function() {
+      const ctx = document.getElementById('systemUsageChart').getContext('2d');
+
+      // Prepare data from backend
+      const chartLabels = [
+          {% for analytic in usage_analytics %}
+              '{{ analytic.date }}'{% if not loop.last %},{% endif %}
+          {% endfor %}
+      ];
+
+      const cancellationData = [
+          {% for analytic in usage_analytics %}
+              {{ analytic.cancellations or 0 }}{% if not loop.last %},{% endif %}
+          {% endfor %}
+      ];
+
+      const activeStudentsData = [
+          {% for analytic in usage_analytics %}
+              {{ analytic.active_students or 0 }}{% if not loop.last %},{% endif %}
+          {% endfor %}
+      ];
+
+      systemChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+              labels: chartLabels.length > 0 ? chartLabels : ['No Data'],
+              datasets: [{
+                  label: 'Daily Cancellations',
+                  data: cancellationData.length > 0 ? cancellationData : [0],
+                  borderColor: '#3b82f6',
+                  backgroundColor: '#3b82f6' + '20',
+                  tension: 0.4,
+                  fill: true
+              }, {
+                  label: 'Active Students',
+                  data: activeStudentsData.length > 0 ? activeStudentsData : [0],
+                  borderColor: '#10b981',
+                  backgroundColor: '#10b981' + '20',
+                  tension: 0.4,
+                  fill: true
+              }]
+          },
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                  legend: {
+                      position: 'top'
+                  }
+              },
+              scales: {
+                  y: {
+                      beginAtZero: true,
+                      ticks: {
+                          stepSize: 1
+                      }
+                  }
+              }
+          }
+      });
+  });
+
+  function refreshData() {
+      location.reload();
+  }
+
+  function updateChart(period) {
+      console.log('Updating chart for period:', period);
+      // Could implement AJAX call to update chart data
+  }
+
+  function generateSystemReport() {
+      window.open('/senior/generate-report', '_blank');
+  }
+
+  function systemBackup() {
+      if (confirm('Are you sure you want to create a system backup? This may take a few minutes.')) {
+          const button = event.target;
+          const originalText = button.innerHTML;
+          button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Creating Backup...';
+          button.disabled = true;
+
+          // Fix: Use the correct endpoint that matches your backend
+          fetch('/senior/backup', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+              }
+          })
+          .then(response => response.json())
+          .then(data => {
+              if (data.success) {
+                  alert('Backup created successfully!\n\nFile: ' + data.filename + '\nSize: ' + data.size_mb + ' MB\n\nBackup saved to: backups/' + data.filename);
+              } else {
+                  alert('Backup failed: ' + data.error);
+              }
+          })
+          .catch(error => {
+              alert('Backup failed: ' + error);
+          })
+          .finally(() => {
+              button.innerHTML = originalText;
+              button.disabled = false;
+          });
+      }
+  }
+
+  // Simple moment.js replacement for time formatting
+  function moment(date) {
+      const now = new Date();
+      const past = new Date(date);
+      const diffMs = now - past;
+      const diffSecs = Math.floor(diffMs / 1000);
+      const diffMins = Math.floor(diffSecs / 60);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffDays > 0) return diffDays + ' day' + (diffDays > 1 ? 's' : '') + ' ago';
+      if (diffHours > 0) return diffHours + ' hour' + (diffHours > 1 ? 's' : '') + ' ago';
+      if (diffMins > 0) return diffMins + ' minute' + (diffMins > 1 ? 's' : '') + ' ago';
+      return 'Just now';
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,1331 @@
+{% extends "base.html" %} 
+{% block title %}Email Templates - Riverside Equestrian{% endblock %} 
+{% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-12">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Email Templates Management</h1>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="createNewTemplate()">
+            <i class="fas fa-plus"></i> New Template
+          </button>
+          <button class="btn btn-success" onclick="saveAllTemplates()">
+            <i class="fas fa-save"></i> Save All
+          </button>
+          <button class="btn btn-outline-info" onclick="previewTemplate()">
+            <i class="fas fa-eye"></i> Preview
+          </button>
+          <button class="btn btn-outline-secondary" onclick="testEmail()">
+            <i class="fas fa-paper-plane"></i> Send Test
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Template List -->
+    <div class="col-lg-4">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-primary">Email Templates</h6>
+        </div>
+        <div class="card-body p-0">
+          <div class="list-group list-group-flush">
+            {% for template in templates %}
+            <div
+              class="list-group-item template-item {% if loop.first %}active{% endif %}"
+              data-template="{{ template.id }}"
+              onclick="selectTemplate('{{ template.id }}')"
+            >
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <h6 class="mb-1">{{ template.name }}</h6>
+                  <p class="mb-1 text-muted small">
+                    {{ template.type|title }} email template
+                  </p>
+                </div>
+                <span class="badge {% if template.active %}bg-success{% else %}bg-secondary{% endif %}">
+                  {% if template.active %}Active{% else %}Inactive{% endif %}
+                </span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-footer">
+          <button
+            class="btn btn-sm btn-outline-primary w-100"
+            onclick="duplicateTemplate()"
+          >
+            <i class="fas fa-copy"></i> Duplicate Selected
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Template Editor -->
+    <div class="col-lg-8">
+      <div class="card shadow mb-4">
+        <div
+          class="card-header py-3 d-flex justify-content-between align-items-center"
+        >
+          <h6 class="m-0 font-weight-bold text-success" id="templateTitle">
+            {% if templates %}{{ templates[0].name }}{% else %}Email Template{% endif %}
+          </h6>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="showVariables()">
+              <i class="fas fa-code"></i> Variables
+            </button>
+            <button class="btn btn-outline-info" onclick="resetTemplate()">
+              <i class="fas fa-undo"></i> Reset
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <form id="templateForm">
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label for="emailSubject" class="form-label"
+                  >Email Subject</label
+                >
+                <input
+                  type="text"
+                  class="form-control"
+                  id="emailSubject"
+                  value="{% if templates %}{{ templates[0].subject }}{% endif %}"
+                />
+              </div>
+              <div class="col-md-6">
+                <label for="emailType" class="form-label">Email Type</label>
+                <select class="form-select" id="emailType">
+                  <option value="client" {% if templates and templates[0].type == 'client' %}selected{% endif %}>Client Email</option>
+                  <option value="manager" {% if templates and templates[0].type == 'manager' %}selected{% endif %}>Manager Email</option>
+                  <option value="system" {% if templates and templates[0].type == 'system' %}selected{% endif %}>System Email</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="emailBody" class="form-label">Email Body</label>
+              <div class="border rounded" style="min-height: 400px">
+                <div id="toolbar" class="border-bottom p-2 bg-light">
+                  <div class="btn-group btn-group-sm me-2">
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="formatText('bold')"
+                    >
+                      <i class="fas fa-bold"></i>
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="formatText('italic')"
+                    >
+                      <i class="fas fa-italic"></i>
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="formatText('underline')"
+                    >
+                      <i class="fas fa-underline"></i>
+                    </button>
+                  </div>
+                  <div class="btn-group btn-group-sm me-2">
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="insertVariable('client_name')"
+                    >
+                      Client Name
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="insertVariable('lesson_date')"
+                    >
+                      Lesson Date
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary"
+                      onclick="insertVariable('membership_tier')"
+                    >
+                      Membership
+                    </button>
+                  </div>
+                </div>
+                <div
+                  id="emailBody"
+                  contenteditable="true"
+                  class="p-3"
+                  style="min-height: 350px; outline: none"
+                >
+                  {% if templates %}{{ templates[0].body|safe }}{% else %}
+                  <p>Dear client_name_placeholder,</p>
+                  <p>This is a sample email template.</p>
+                  <p>Best regards,<br />The Riverside Equestrian Team</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-check mb-3">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="templateActive"
+                    {% if templates and templates[0].active %}checked{% endif %}
+                  />
+                  <label class="form-check-label" for="templateActive">
+                    Template Active
+                  </label>
+                </div>
+                <div class="form-check mb-3">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="autoSend"
+                    {% if templates and templates[0].auto_send %}checked{% endif %}
+                  />
+                  <label class="form-check-label" for="autoSend">
+                    Send Automatically
+                  </label>
+                </div>
+                <div class="form-check mb-3">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    id="includeAttachment"
+                    {% if templates and templates[0].include_attachment %}checked{% endif %}
+                  />
+                  <label class="form-check-label" for="includeAttachment">
+                    Include Policy Attachment
+                  </label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="emailPriority" class="form-label"
+                    >Email Priority</label
+                  >
+                  <select class="form-select" id="emailPriority">
+                    <option value="normal" {% if templates and templates[0].priority == 'normal' %}selected{% endif %}>Normal</option>
+                    <option value="high" {% if templates and templates[0].priority == 'high' %}selected{% endif %}>High</option>
+                    <option value="low" {% if templates and templates[0].priority == 'low' %}selected{% endif %}>Low</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label for="delayMinutes" class="form-label"
+                    >Send Delay (Minutes)</label
+                  >
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="delayMinutes"
+                    value="{% if templates %}{{ templates[0].delay_minutes or 0 }}{% else %}0{% endif %}"
+                    min="0"
+                    max="1440"
+                  />
+                  <div class="form-text">
+                    Delay before sending (0 = immediate)
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="card-footer">
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="saveTemplate()">
+              <i class="fas fa-save"></i> Save Template
+            </button>
+            <button class="btn btn-outline-primary" onclick="saveAsNew()">
+              <i class="fas fa-plus"></i> Save as New
+            </button>
+          </div>
+          <div class="btn-group float-end">
+            <button class="btn btn-outline-danger" onclick="deleteTemplate()">
+              <i class="fas fa-trash"></i> Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold text-info">Quick Actions</h6>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-lg-3 col-md-6">
+              <div class="card border-primary mb-3">
+                <div class="card-header bg-primary text-white">
+                  <i class="fas fa-download"></i> Export Templates
+                </div>
+                <div class="card-body">
+                  <p class="card-text small">
+                    Export all email templates for backup or migration.
+                  </p>
+                  <button
+                    class="btn btn-outline-primary btn-sm"
+                    onclick="exportTemplates()"
+                  >
+                    Export All
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+              <div class="card border-success mb-3">
+                <div class="card-header bg-success text-white">
+                  <i class="fas fa-upload"></i> Import Templates
+                </div>
+                <div class="card-body">
+                  <p class="card-text small">
+                    Import templates from a backup file.
+                  </p>
+                  <button
+                    class="btn btn-outline-success btn-sm"
+                    onclick="importTemplates()"
+                  >
+                    Import
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+              <div class="card border-warning mb-3">
+                <div class="card-header bg-warning text-white">
+                  <i class="fas fa-magic"></i> Template Wizard
+                </div>
+                <div class="card-body">
+                  <p class="card-text small">
+                    Create templates using guided wizard.
+                  </p>
+                  <button
+                    class="btn btn-outline-warning btn-sm"
+                    onclick="startWizard()"
+                  >
+                    Start Wizard
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6">
+              <div class="card border-info mb-3">
+                <div class="card-header bg-info text-white">
+                  <i class="fas fa-chart-line"></i> Email Analytics
+                </div>
+                <div class="card-body">
+                  <p class="card-text small">
+                    View email sending statistics and performance.
+                  </p>
+                  <button
+                    class="btn btn-outline-info btn-sm"
+                    onclick="showAnalytics()"
+                  >
+                    View Stats
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Variables Modal -->
+<div class="modal fade" id="variablesModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Available Variables</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-6">
+            <h6>Client Information</h6>
+            <div class="list-group mb-3">
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{client_name}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('client_name')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{parent_name}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('parent_name')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{client_email}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('client_email')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{membership_tier}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('membership_tier')"
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+
+            <h6>Lesson Information</h6>
+            <div class="list-group mb-3">
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{lesson_date}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('lesson_date')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{lesson_time}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('lesson_time')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{sequential_lessons}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('sequential_lessons')"
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <h6>Cancellation Status</h6>
+            <div class="list-group mb-3">
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{cancellation_status}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('cancellation_status')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{status_message}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('status_message')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{used_cancellations}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('used_cancellations')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{allowed_cancellations}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('allowed_cancellations')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{remaining_cancellations}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('remaining_cancellations')"
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+
+            <h6>System Information</h6>
+            <div class="list-group mb-3">
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{current_date}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('current_date')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{policy_url}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('policy_url')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{company_name}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('company_name')"
+                >
+                  Insert
+                </button>
+              </div>
+              <div class="list-group-item d-flex justify-content-between">
+                <code>{{contact_email}}</code>
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  onclick="insertVariable('contact_email')"
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview Modal -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Email Preview</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div class="card">
+          <div class="card-header bg-light">
+            <div class="row">
+              <div class="col-md-3">
+                <strong>From:</strong> Riverside Equestrian
+              </div>
+              <div class="col-md-6">
+                <strong>Subject:</strong> <span id="previewSubject"></span>
+              </div>
+              <div class="col-md-3"><strong>To:</strong> sample@email.com</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div
+              id="previewContent"
+              style="font-family: Arial, sans-serif; line-height: 1.6"
+            ></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="sendTestEmail()">
+          <i class="fas fa-paper-plane"></i> Send Test Email
+        </button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Test Email Modal -->
+<div class="modal fade" id="testEmailModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Send Test Email</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="testEmailAddress" class="form-label"
+            >Test Email Address</label
+          >
+          <input
+            type="email"
+            class="form-control"
+            id="testEmailAddress"
+            value="stav@riversideequestrian.ca"
+            placeholder="Enter email address"
+          />
+        </div>
+        <div class="alert alert-info">
+          <i class="fas fa-info-circle"></i>
+          This will send a test email using sample data to verify the template
+          formatting.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick="confirmSendTest()"
+        >
+          <i class="fas fa-paper-plane"></i> Send Test
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentTemplate = "{% if templates %}{{ templates[0].id }}{% else %}client_confirmation{% endif %}";
+  let templates = {};
+  let unsavedChanges = false;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    loadTemplates();
+    setupEditorEvents();
+  });
+
+  function loadTemplates() {
+    // Load templates from server data
+    templates = {
+      {% for template in templates %}
+      "{{ template.id }}": {
+        subject: "{{ template.subject|e }}",
+        type: "{{ template.type }}",
+        active: {{ template.active|lower }},
+        autoSend: {{ template.auto_send|lower }},
+        priority: "{{ template.priority or 'normal' }}",
+        body: {{ template.body|tojson }},
+        delay: {{ template.delay_minutes or 0 }}
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    };
+  }
+
+  function setupEditorEvents() {
+    const editor = document.getElementById("emailBody");
+    if (editor) {
+      editor.addEventListener("input", function () {
+        unsavedChanges = true;
+        updateSaveButtonState();
+      });
+    }
+
+    // Track changes in other form fields
+    document
+      .querySelectorAll("#templateForm input, #templateForm select")
+      .forEach((input) => {
+        input.addEventListener("change", function () {
+          unsavedChanges = true;
+          updateSaveButtonState();
+        });
+      });
+  }
+
+  function updateSaveButtonState() {
+    const saveBtn = document.querySelector(
+      'button[onclick="saveAllTemplates()"]'
+    );
+    if (saveBtn) {
+      if (unsavedChanges) {
+        saveBtn.classList.remove("btn-success");
+        saveBtn.classList.add("btn-warning");
+        saveBtn.innerHTML =
+          '<i class="fas fa-exclamation-triangle"></i> Save All';
+      } else {
+        saveBtn.classList.remove("btn-warning");
+        saveBtn.classList.add("btn-success");
+        saveBtn.innerHTML = '<i class="fas fa-save"></i> Save All';
+      }
+    }
+  }
+
+  function selectTemplate(templateId) {
+    if (
+      unsavedChanges &&
+      !confirm("You have unsaved changes. Continue without saving?")
+    ) {
+      return;
+    }
+
+    currentTemplate = templateId;
+
+    // Update active template in sidebar
+    document
+      .querySelectorAll(".template-item")
+      .forEach((item) => item.classList.remove("active"));
+    
+    const selectedItem = document.querySelector(`[data-template="${templateId}"]`);
+    if (selectedItem) {
+      selectedItem.classList.add("active");
+    }
+
+    // Load template data
+    loadTemplateData(templateId);
+  }
+
+  function loadTemplateData(templateId) {
+    const templateData = templates[templateId] || getDefaultTemplateData(templateId);
+
+    const titleElement = document.getElementById("templateTitle");
+    if (titleElement) {
+      titleElement.textContent = getTemplateTitle(templateId);
+    }
+
+    const elements = {
+      emailSubject: templateData.subject || "",
+      emailType: templateData.type || "client",
+      emailBody: templateData.body || "",
+      delayMinutes: templateData.delay || 0
+    };
+
+    for (const [id, value] of Object.entries(elements)) {
+      const element = document.getElementById(id);
+      if (element) {
+        if (id === 'emailBody') {
+          element.innerHTML = value;
+        } else {
+          element.value = value;
+        }
+      }
+    }
+
+    const checkboxes = {
+      templateActive: templateData.active || false,
+      autoSend: templateData.autoSend || false,
+      includeAttachment: false
+    };
+
+    for (const [id, checked] of Object.entries(checkboxes)) {
+      const element = document.getElementById(id);
+      if (element) {
+        element.checked = checked;
+      }
+    }
+
+    const priorityElement = document.getElementById("emailPriority");
+    if (priorityElement) {
+      priorityElement.value = templateData.priority || "normal";
+    }
+
+    unsavedChanges = false;
+    updateSaveButtonState();
+  }
+
+  function getDefaultTemplateData(templateId) {
+    return {
+      subject: "Email Template Subject",
+      type: "client",
+      active: true,
+      autoSend: true,
+      priority: "normal",
+      body: "<p>Dear {{client_name}},</p><p>This is a default template.</p><p>Best regards,<br>The Riverside Equestrian Team</p>",
+      delay: 0
+    };
+  }
+
+  function getTemplateTitle(templateId) {
+    const titles = {
+      client_confirmation: "Client Confirmation Email",
+      manager_notification: "Manager Notification Email",
+      cancellation_charged: "Cancellation Charged Email",
+      free_cancellation: "Free Cancellation Email",
+      limit_exceeded: "Limit Exceeded Email",
+      late_cancellation: "Late Cancellation Email",
+      illness_exclusion: "Illness Exclusion Email",
+      daily_report: "Daily Report Email",
+      welcome_new_client: "Welcome Email",
+    };
+
+    return titles[templateId] || templates[templateId]?.name || "Email Template";
+  }
+
+  function createNewTemplate() {
+    const templateName = prompt("Enter template name:");
+    if (templateName) {
+      const templateId = templateName.toLowerCase().replace(/\s+/g, "_");
+
+      // Add to sidebar
+      const listGroup = document.querySelector(".list-group");
+      if (listGroup) {
+        const newItem = document.createElement("div");
+        newItem.className = "list-group-item template-item";
+        newItem.setAttribute("data-template", templateId);
+        newItem.setAttribute("onclick", `selectTemplate('${templateId}')`);
+        newItem.innerHTML = `
+              <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                      <h6 class="mb-1">${templateName}</h6>
+                      <p class="mb-1 text-muted small">Custom template</p>
+                  </div>
+                  <span class="badge bg-secondary">New</span>
+              </div>
+          `;
+        listGroup.appendChild(newItem);
+
+        // Select the new template
+        selectTemplate(templateId);
+      }
+    }
+  }
+
+  function saveTemplate() {
+    const templateData = {
+      id: currentTemplate,
+      subject: document.getElementById("emailSubject")?.value || "",
+      type: document.getElementById("emailType")?.value || "client",
+      body: document.getElementById("emailBody")?.innerHTML || "",
+      active: document.getElementById("templateActive")?.checked || false,
+      autoSend: document.getElementById("autoSend")?.checked || false,
+      priority: document.getElementById("emailPriority")?.value || "normal",
+      delay: parseInt(document.getElementById("delayMinutes")?.value || 0),
+      includeAttachment: document.getElementById("includeAttachment")?.checked || false,
+    };
+
+    fetch("/senior/save-template", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(templateData),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          unsavedChanges = false;
+          updateSaveButtonState();
+          showNotification("Template saved successfully!", "success");
+        } else {
+          showNotification("Error saving template: " + (data.error || "Unknown error"), "error");
+        }
+      })
+      .catch((error) => {
+        showNotification("Error saving template: " + error.message, "error");
+      });
+  }
+
+  function saveAsNew() {
+    const newName = prompt("Enter name for new template:");
+    if (newName) {
+      const newId = newName.toLowerCase().replace(/\s+/g, "_");
+      const originalTemplate = currentTemplate;
+
+      // Create new template entry
+      templates[newId] = {
+        subject: document.getElementById("emailSubject")?.value || "",
+        type: document.getElementById("emailType")?.value || "client",
+        body: document.getElementById("emailBody")?.innerHTML || "",
+        active: false, // Start as inactive
+        autoSend: document.getElementById("autoSend")?.checked || false,
+        priority: document.getElementById("emailPriority")?.value || "normal",
+        delay: parseInt(document.getElementById("delayMinutes")?.value || 0)
+      };
+
+      // Add to sidebar
+      createNewTemplate();
+      currentTemplate = newId;
+
+      // Save with new ID
+      saveTemplate();
+    }
+  }
+
+  function saveAllTemplates() {
+    if (!unsavedChanges) {
+      showNotification("No changes to save.", "info");
+      return;
+    }
+
+    saveTemplate(); // Save current template
+    showNotification("All templates saved!", "success");
+  }
+
+  function deleteTemplate() {
+    if (
+      confirm(
+        `Are you sure you want to delete the ${getTemplateTitle(
+          currentTemplate
+        )}? This action cannot be undone.`
+      )
+    ) {
+      fetch(`/senior/delete-template/${currentTemplate}`, {
+        method: "DELETE",
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            // Remove from sidebar
+            const templateItem = document.querySelector(`[data-template="${currentTemplate}"]`);
+            if (templateItem) {
+              templateItem.remove();
+            }
+
+            // Select first available template
+            const firstTemplate = document.querySelector(".template-item");
+            if (firstTemplate) {
+              selectTemplate(firstTemplate.getAttribute("data-template"));
+            }
+
+            showNotification("Template deleted successfully!", "success");
+          } else {
+            showNotification("Error deleting template: " + (data.error || "Unknown error"), "error");
+          }
+        })
+        .catch((error) => {
+          showNotification("Error deleting template: " + error.message, "error");
+        });
+    }
+  }
+
+  function duplicateTemplate() {
+    const newName = prompt("Enter name for duplicated template:");
+    if (newName) {
+      const newId = newName.toLowerCase().replace(/\s+/g, "_");
+      
+      // Create duplicate with current template data
+      templates[newId] = {
+        subject: document.getElementById("emailSubject")?.value || "",
+        type: document.getElementById("emailType")?.value || "client",
+        body: document.getElementById("emailBody")?.innerHTML || "",
+        active: false, // Start as inactive
+        autoSend: document.getElementById("autoSend")?.checked || false,
+        priority: document.getElementById("emailPriority")?.value || "normal",
+        delay: parseInt(document.getElementById("delayMinutes")?.value || 0)
+      };
+
+      // Add to sidebar
+      const listGroup = document.querySelector(".list-group");
+      if (listGroup) {
+        const newItem = document.createElement("div");
+        newItem.className = "list-group-item template-item";
+        newItem.setAttribute("data-template", newId);
+        newItem.setAttribute("onclick", `selectTemplate('${newId}')`);
+        newItem.innerHTML = `
+              <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                      <h6 class="mb-1">${newName}</h6>
+                      <p class="mb-1 text-muted small">Duplicated template</p>
+                  </div>
+                  <span class="badge bg-secondary">Copy</span>
+              </div>
+          `;
+        listGroup.appendChild(newItem);
+
+        // Select the new template
+        selectTemplate(newId);
+      }
+      
+      showNotification("Template duplicated successfully!", "success");
+    }
+  }
+
+  function formatText(command) {
+    document.execCommand(command, false, null);
+    const editor = document.getElementById("emailBody");
+    if (editor) {
+      editor.focus();
+    }
+  }
+
+  function insertVariable(variable) {
+    const editor = document.getElementById("emailBody");
+    if (!editor) return;
+
+    const variableText = "{{" + variable + "}}";
+
+    if (window.getSelection && window.getSelection().rangeCount) {
+      const range = window.getSelection().getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(document.createTextNode(variableText));
+      range.collapse(false);
+    } else {
+      editor.innerHTML += variableText;
+    }
+
+    editor.focus();
+    unsavedChanges = true;
+    updateSaveButtonState();
+
+    // Close variables modal if open
+    const modal = bootstrap.Modal.getInstance(
+      document.getElementById("variablesModal")
+    );
+    if (modal) modal.hide();
+  }
+
+  function showVariables() {
+    const modal = new bootstrap.Modal(document.getElementById("variablesModal"));
+    modal.show();
+  }
+
+  function resetTemplate() {
+    if (
+      confirm("Reset template to default? This will lose all unsaved changes.")
+    ) {
+      loadTemplateData(currentTemplate);
+      showNotification("Template reset to default.", "info");
+    }
+  }
+
+  function previewTemplate() {
+    const subject = document.getElementById("emailSubject")?.value || "";
+    const body = document.getElementById("emailBody")?.innerHTML || "";
+
+    // Replace variables with sample data for preview
+    const sampleData = {
+      client_name: "Sarah Johnson",
+      parent_name: "Michael Johnson",
+      client_email: "sarah.johnson@email.com",
+      membership_tier: "Silver",
+      lesson_date: "March 15, 2024",
+      lesson_time: "3:00 PM",
+      cancellation_status: "Free cancellation applied",
+      status_message: "Your lesson has been cancelled at no charge.",
+      used_cancellations: "1",
+      allowed_cancellations: "2",
+      remaining_cancellations: "1",
+      current_date: new Date().toLocaleDateString(),
+      policy_url: "https://www.riversideequestrian.ca/cancellations",
+      company_name: "Riverside Equestrian",
+      contact_email: "managers@riversideequestrian.ca",
+    };
+
+    let previewSubject = subject;
+    let previewBody = body;
+
+    // Replace all variables
+    Object.keys(sampleData).forEach((key) => {
+      const regex = new RegExp("{{" + key + "}}", "g");
+      previewSubject = previewSubject.replace(regex, sampleData[key]);
+      previewBody = previewBody.replace(regex, sampleData[key]);
+    });
+
+    const previewSubjectElement = document.getElementById("previewSubject");
+    const previewContentElement = document.getElementById("previewContent");
+    
+    if (previewSubjectElement) {
+      previewSubjectElement.textContent = previewSubject;
+    }
+    if (previewContentElement) {
+      previewContentElement.innerHTML = previewBody;
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById("previewModal"));
+    modal.show();
+  }
+
+  function testEmail() {
+    const modal = new bootstrap.Modal(document.getElementById("testEmailModal"));
+    modal.show();
+  }
+
+  function sendTestEmail() {
+    previewTemplate(); // This will open the preview modal
+    const modal = new bootstrap.Modal(document.getElementById("testEmailModal"));
+    modal.show();
+  }
+
+  function confirmSendTest() {
+    const emailAddress = document.getElementById("testEmailAddress")?.value;
+
+    if (!emailAddress) {
+      alert("Please enter an email address.");
+      return;
+    }
+
+    const templateData = {
+      template_id: currentTemplate,
+      test_email: emailAddress,
+      subject: document.getElementById("emailSubject")?.value || "",
+      body: document.getElementById("emailBody")?.innerHTML || "",
+    };
+
+    fetch("/senior/send-test-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(templateData),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          showNotification(`Test email sent to ${emailAddress}!`, "success");
+          const modal = bootstrap.Modal.getInstance(
+            document.getElementById("testEmailModal")
+          );
+          if (modal) modal.hide();
+        } else {
+          showNotification("Error sending test email: " + (data.error || "Unknown error"), "error");
+        }
+      })
+      .catch((error) => {
+        showNotification("Error sending test email: " + error.message, "error");
+      });
+  }
+
+  function exportTemplates() {
+    const templatesList = [];
+    document.querySelectorAll(".template-item").forEach((item) => {
+      const templateId = item.getAttribute("data-template");
+      const templateData = templates[templateId] || getDefaultTemplateData(templateId);
+      templateData.id = templateId;
+      templateData.title = getTemplateTitle(templateId);
+      templatesList.push(templateData);
+    });
+
+    const dataStr = JSON.stringify(templatesList, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "email-templates.json";
+    link.click();
+    URL.revokeObjectURL(url);
+
+    showNotification("Templates exported successfully!", "success");
+  }
+
+  function importTemplates() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = function (e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          try {
+            const importedTemplates = JSON.parse(e.target.result);
+
+            fetch("/senior/import-templates", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ templates: importedTemplates }),
+            })
+              .then((response) => response.json())
+              .then((data) => {
+                if (data.success) {
+                  showNotification(
+                    `Successfully imported ${data.count || importedTemplates.length} templates!`,
+                    "success"
+                  );
+                  location.reload(); // Refresh to show imported templates
+                } else {
+                  showNotification(
+                    "Error importing templates: " + (data.error || "Unknown error"),
+                    "error"
+                  );
+                }
+              })
+              .catch((error) => {
+                showNotification(
+                  "Error importing templates: " + error.message,
+                  "error"
+                );
+              });
+          } catch (error) {
+            showNotification(
+              "Error importing templates: Invalid JSON file",
+              "error"
+            );
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  }
+
+  function startWizard() {
+    showNotification("Template wizard feature coming soon!", "info");
+  }
+
+  function showAnalytics() {
+    showNotification("Email analytics feature coming soon!", "info");
+  }
+
+  function showNotification(message, type = "info") {
+    const alertClass = {
+      success: "alert-success",
+      error: "alert-danger",
+      warning: "alert-warning",
+      info: "alert-info",
+    };
+
+    const notification = document.createElement("div");
+    notification.className = `alert ${alertClass[type]} alert-dismissible fade show position-fixed`;
+    notification.style.cssText =
+      "top: 20px; right: 20px; z-index: 9999; min-width: 300px;";
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.remove();
+      }
+    }, 5000);
+  }
+
+  // Warn user about unsaved changes
+  window.addEventListener("beforeunload", function (e) {
+    if (unsavedChanges) {
+      e.preventDefault();
+      e.returnValue =
+        "You have unsaved changes. Are you sure you want to leave?";
+    }
+  });
+</script>
+
+<style>
+  .template-item {
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .template-item:hover {
+    background-color: #f8f9fc;
+  }
+
+  .template-item.active {
+    background-color: #4e73df;
+    color: white;
+  }
+
+  .template-item.active .text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+
+  #emailBody {
+    min-height: 350px;
+    line-height: 1.6;
+    font-family: Arial, sans-serif;
+  }
+
+  #emailBody:focus {
+    outline: 2px solid #4e73df;
+    outline-offset: -2px;
+  }
+
+  .btn-group-sm .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  #toolbar {
+    border-bottom: 1px solid #dee2e6;
+  }
+
+  #toolbar .btn {
+    margin-right: 0.25rem;
+  }
+
+  .list-group-item code {
+    background-color: #f8f9fa;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+  }
+
+  .card-header h6 {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .position-fixed.alert {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .border-primary,
+  .border-success,
+  .border-warning,
+  .border-info {
+    border-width: 2px !important;
+  }
+
+  .modal-xl {
+    max-width: 1200px;
+  }
+
+  #previewContent {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    background-color: white;
+  }
+</style>
+{% endblock %}

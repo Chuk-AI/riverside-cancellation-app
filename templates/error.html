@@ -1,0 +1,180 @@
+{% extends "base.html" %} {% block title %}Error - Riverside Equestrian{%
+endblock %} {% block extra_css %}
+<style>
+  .error-container {
+    text-align: center;
+    max-width: 600px;
+    margin: 3rem auto;
+  }
+  .error-icon {
+    font-size: 4rem;
+    color: #dc3545;
+    margin-bottom: 1rem;
+  }
+  .error-code {
+    font-size: 6rem;
+    font-weight: bold;
+    color: #dee2e6;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+  }
+  .error-message {
+    font-size: 1.25rem;
+    color: #6c757d;
+    margin-bottom: 2rem;
+  }
+  .error-details {
+    background-color: #f8f9fa;
+    border-left: 4px solid #dc3545;
+    padding: 1rem;
+    margin: 2rem 0;
+    text-align: left;
+    border-radius: 0.25rem;
+  }
+  .action-buttons {
+    margin-top: 2rem;
+  }
+  .action-buttons .btn {
+    margin: 0.25rem;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="error-container">
+  <!-- Error Icon and Code -->
+  <div class="error-icon">
+    {% if error_code == 404 %}
+    <i class="fas fa-search"></i>
+    {% elif error_code == 403 %}
+    <i class="fas fa-lock"></i>
+    {% elif error_code == 500 %}
+    <i class="fas fa-exclamation-triangle"></i>
+    {% else %}
+    <i class="fas fa-exclamation-circle"></i>
+    {% endif %}
+  </div>
+
+  <div class="error-code">{{ error_code or '500' }}</div>
+
+  <!-- Error Message -->
+  <h1 class="h3 mb-3">
+    {% if error_code == 404 %} Page Not Found {% elif error_code == 403 %}
+    Access Denied {% elif error_code == 500 %} Server Error {% else %} Something
+    Went Wrong {% endif %}
+  </h1>
+
+  <p class="error-message">
+    {% if error_message %} {{ error_message }} {% elif error_code == 404 %} The
+    page you're looking for doesn't exist or has been moved. {% elif error_code
+    == 403 %} You don't have permission to access this resource. {% elif
+    error_code == 500 %} We're experiencing technical difficulties. Please try
+    again later. {% else %} An unexpected error occurred. Please try again. {%
+    endif %}
+  </p>
+
+  <!-- Error Details (for development/admin) -->
+  {% if error_details and (session.user_role == 'senior_manager' or
+  config.DEBUG) %}
+  <div class="error-details">
+    <h6 class="fw-bold mb-2">
+      <i class="fas fa-bug me-1"></i>
+      Technical Details
+    </h6>
+    <pre class="mb-0"><code>{{ error_details }}</code></pre>
+  </div>
+  {% endif %}
+
+  <!-- Action Buttons -->
+  <div class="action-buttons">
+    {% if session.user_id %}
+    <!-- Logged in users -->
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+      <i class="fas fa-home me-1"></i>
+      Go to Dashboard
+    </a>
+
+    {% if error_code == 403 %}
+    <a href="javascript:history.back()" class="btn btn-outline-secondary">
+      <i class="fas fa-arrow-left me-1"></i>
+      Go Back
+    </a>
+    {% endif %} {% if session.user_role in ['manager', 'senior_manager'] %}
+    <a
+      href="mailto:support@riversideequestrian.ca?subject=System%20Error%20{{ error_code }}"
+      class="btn btn-outline-warning"
+    >
+      <i class="fas fa-envelope me-1"></i>
+      Report Issue
+    </a>
+    {% endif %} {% else %}
+    <!-- Not logged in -->
+    <a href="{{ url_for('login') }}" class="btn btn-primary">
+      <i class="fas fa-sign-in-alt me-1"></i>
+      Login
+    </a>
+    {% endif %}
+
+    <a href="javascript:location.reload()" class="btn btn-outline-info">
+      <i class="fas fa-redo me-1"></i>
+      Try Again
+    </a>
+  </div>
+
+  <!-- Help Section -->
+  <div class="card mt-4">
+    <div class="card-body">
+      <h6 class="card-title">
+        <i class="fas fa-life-ring me-1"></i>
+        Need Additional Help?
+      </h6>
+      <div class="row g-2">
+        <div class="col-md-6">
+          <a
+            href="https://www.riversideequestrian.ca/cancellations"
+            target="_blank"
+            class="btn btn-outline-secondary btn-sm w-100"
+          >
+            <i class="fas fa-book me-1"></i>
+            Cancellation Policy
+          </a>
+        </div>
+        <div class="col-md-6">
+          <a
+            href="mailto:managers@riversideequestrian.ca"
+            class="btn btn-outline-secondary btn-sm w-100"
+          >
+            <i class="fas fa-envelope me-1"></i>
+            Contact Support
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Timestamp -->
+  <small class="text-muted mt-4 d-block">
+    <i class="fas fa-clock me-1"></i>
+    Error occurred at: {{ moment().format('YYYY-MM-DD HH:mm:ss') }}
+  </small>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // Auto-refresh for 500 errors after 30 seconds
+  {% if error_code == 500 %}
+  setTimeout(function() {
+      if (confirm('Would you like to try reloading the page?')) {
+          location.reload();
+      }
+  }, 30000);
+  {% endif %}
+
+  // Console logging for debugging (admin only)
+  {% if session.user_role == 'senior_manager' or config.DEBUG %}
+  console.error('Error {{ error_code }}:', {
+      message: '{{ error_message }}',
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      timestamp: new Date().toISOString()
+  });
+  {% endif %}
+</script>
+{% endblock %}

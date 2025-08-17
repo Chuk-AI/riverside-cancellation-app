@@ -1,0 +1,376 @@
+{% extends "base.html" %} {% block title %}Dashboard - {{ session.user_name }} -
+Riverside Equestrian{% endblock %} {% block extra_css %}
+<style>
+  .status-card {
+    border-left: 5px solid;
+    transition: all 0.3s ease;
+  }
+  .status-card.silver {
+    border-left-color: #94a3b8;
+  }
+  .status-card.gold {
+    border-left-color: #f59e0b;
+  }
+  .status-card.bronze {
+    border-left-color: #cd7f32;
+  }
+  .status-card.intro {
+    border-left-color: #10b981;
+  }
+  .status-card.legacy {
+    border-left-color: #8b5cf6;
+  }
+  .status-card.guest {
+    border-left-color: #6b7280;
+  }
+  .status-card.welcome {
+    border-left-color: #ec4899;
+  }
+
+  .cancellation-meter {
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .cancellation-progress {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #059669);
+    transition: width 0.5s ease;
+  }
+  .cancellation-progress.warning {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+  }
+  .cancellation-progress.danger {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+  }
+
+  .quick-action-card {
+    border: 2px dashed #d1d5db;
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+  .quick-action-card:hover {
+    border-color: #3b82f6;
+    background: #f8fafc;
+    transform: translateY(-2px);
+  }
+
+  .policy-summary {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 1px solid #0ea5e9;
+  }
+</style>
+{% endblock %} {% block content %}
+<!-- Welcome Header -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="card bg-primary text-white">
+      <div class="card-body">
+        <div class="row align-items-center">
+          <div class="col-md-8">
+            <h1 class="h3 mb-2">
+              <i class="fas fa-user-circle me-2"></i>
+              Welcome back, {{ client.first_name }}!
+            </h1>
+            <p class="mb-0 opacity-75">
+              Manage your lesson cancellations and view your account status
+            </p>
+          </div>
+          <div class="col-md-4 text-md-end">
+            <div class="d-flex d-md-block gap-2">
+              <a href="{{ url_for('client_cancel') }}" class="btn btn-warning">
+                <i class="fas fa-calendar-times me-1"></i>
+                Cancel Lesson
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Status Overview -->
+<div class="row mb-4">
+  <!-- Membership Status -->
+  <div class="col-md-6 mb-3">
+    <div class="card status-card {{ client.membership_level|lower }}">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-star me-2"></i>
+          Membership Status
+        </h5>
+        <span class="badge bg-primary"
+          >{{ client.membership_level|title }}</span
+        >
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-sm-6">
+            <h6 class="text-muted mb-1">Student Name</h6>
+            <p class="mb-2">{{ client.first_name }} {{ client.last_name }}</p>
+
+            <h6 class="text-muted mb-1">Parent/Guardian</h6>
+            <p class="mb-0">
+              {{ client.parent_first }} {{ client.parent_last }}
+            </p>
+          </div>
+          <div class="col-sm-6">
+            <h6 class="text-muted mb-1">Contact Email</h6>
+            <p class="mb-2">{{ client.email }}</p>
+
+            <h6 class="text-muted mb-1">Phone</h6>
+            <p class="mb-0">{{ client.phone }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancellation Status -->
+  <div class="col-md-6 mb-3">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-calendar-check me-2"></i>
+          This Month's Status
+        </h5>
+        <small class="text-muted">{{ current_month }}</small>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <div class="d-flex justify-content-between mb-2">
+            <span>Free Cancellations Used</span>
+            <strong
+              >{{ cancellation_status.used }} of {{ cancellation_status.limit
+              }}</strong
+            >
+          </div>
+          <div class="cancellation-meter">
+            <div
+              class="cancellation-progress {% if cancellation_status.used >= cancellation_status.limit %}danger{% elif cancellation_status.used >= cancellation_status.limit * 0.8 %}warning{% endif %}"
+              style="width: {{ (cancellation_status.used / cancellation_status.limit * 100)|round }}%"
+            ></div>
+          </div>
+        </div>
+
+        <div class="row text-center">
+          <div class="col-6">
+            <h4 class="text-success mb-0">
+              {{ cancellation_status.remaining }}
+            </h4>
+            <small class="text-muted">Remaining Free</small>
+          </div>
+          <div class="col-6">
+            <h4 class="text-info mb-0">
+              {{ cancellation_policy.deadline_display }}
+            </h4>
+            <small class="text-muted">Deadline</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Policy Summary -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="policy-summary p-4 rounded-lg">
+      <div class="row align-items-center">
+        <div class="col-md-8">
+          <h5 class="mb-2">
+            <i class="fas fa-info-circle me-2"></i>
+            Your Cancellation Policy
+          </h5>
+          <p class="mb-2">
+            <strong
+              >{{ cancellation_policy.limit }} free cancellation notices per
+              month</strong
+            >
+            if received by
+            <strong>{{ cancellation_policy.deadline_display }}</strong>.
+          </p>
+          <p class="mb-0 small text-muted">
+            <strong>Remember:</strong> Sequential lessons can be included in one
+            notice. Cancellation notices are accepted during the lesson month or
+            up to 7 days before the month starts.
+          </p>
+        </div>
+        <div class="col-md-4 text-md-end">
+          <a
+            href="https://www.riversideequestrian.ca/cancellations"
+            target="_blank"
+            class="btn btn-outline-primary"
+          >
+            <i class="fas fa-external-link-alt me-1"></i>
+            Full Policy
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mb-4">
+  <div class="col-md-4 mb-3">
+    <div
+      class="card quick-action-card h-100"
+      onclick="window.location.href='{{ url_for('client_cancel') }}'"
+    >
+      <div class="card-body text-center">
+        <div class="text-primary mb-3">
+          <i class="fas fa-calendar-times fa-3x"></i>
+        </div>
+        <h5>Cancel a Lesson</h5>
+        <p class="text-muted">Submit a new cancellation request</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4 mb-3">
+    <div
+      class="card quick-action-card h-100"
+      onclick="window.location.href='{{ url_for('client_history') }}'"
+    >
+      <div class="card-body text-center">
+        <div class="text-info mb-3">
+          <i class="fas fa-history fa-3x"></i>
+        </div>
+        <h5>View History</h5>
+        <p class="text-muted">See your past cancellations</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4 mb-3">
+    <div
+      class="card quick-action-card h-100"
+      onclick="window.open('mailto:managers@riversideequestrian.ca', '_blank')"
+    >
+      <div class="card-body text-center">
+        <div class="text-success mb-3">
+          <i class="fas fa-envelope fa-3x"></i>
+        </div>
+        <h5>Contact Support</h5>
+        <p class="text-muted">Report issues or ask questions</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent Activity -->
+{% if recent_cancellations %}
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-clock me-2"></i>
+          Recent Activity
+        </h5>
+        <a
+          href="{{ url_for('client_history') }}"
+          class="btn btn-sm btn-outline-primary"
+        >
+          View All
+        </a>
+      </div>
+      <div class="card-body">
+        <div class="list-group list-group-flush">
+          {% for cancellation in recent_cancellations[:3] %}
+          <div
+            class="list-group-item d-flex justify-content-between align-items-start"
+          >
+            <div>
+              <h6 class="mb-1">
+                Lesson on {{ cancellation.lesson_date.strftime('%B %d, %Y') }}
+                <small class="text-muted"
+                  >at {{ cancellation.lesson_time.strftime('%I:%M %p') }}</small
+                >
+              </h6>
+              <small class="text-muted">
+                Submitted {{ cancellation.created_at.strftime('%m/%d/%Y at %I:%M
+                %p') }}
+              </small>
+            </div>
+            <div class="text-end">
+              {% if cancellation.excluded %}
+              <span class="badge bg-success">Excluded</span>
+              {% elif cancellation.charged %}
+              <span class="badge bg-warning">Charged</span>
+              {% else %}
+              <span class="badge bg-info">Free</span>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Help Section -->
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card bg-light">
+      <div class="card-body text-center">
+        <h6>
+          <i class="fas fa-question-circle me-2"></i>
+          Need Help?
+        </h6>
+        <p class="mb-3">
+          If you notice any errors in your records or have questions about the
+          cancellation policy, please don't hesitate to contact us.
+        </p>
+        <div class="d-flex justify-content-center gap-2 flex-wrap">
+          <a
+            href="mailto:managers@riversideequestrian.ca"
+            class="btn btn-outline-primary btn-sm"
+          >
+            <i class="fas fa-envelope me-1"></i>
+            Email Support
+          </a>
+          <a
+            href="https://www.riversideequestrian.ca/cancellations"
+            target="_blank"
+            class="btn btn-outline-info btn-sm"
+          >
+            <i class="fas fa-book me-1"></i>
+            Cancellation Policy
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // Auto-refresh status every 5 minutes
+  setTimeout(function () {
+    location.reload();
+  }, 300000);
+
+  // Animate progress bar on load
+  document.addEventListener("DOMContentLoaded", function () {
+    const progressBar = document.querySelector(".cancellation-progress");
+    if (progressBar) {
+      const width = progressBar.style.width;
+      progressBar.style.width = "0%";
+      setTimeout(() => {
+        progressBar.style.width = width;
+      }, 500);
+    }
+  });
+</script>
+{% endblock %}

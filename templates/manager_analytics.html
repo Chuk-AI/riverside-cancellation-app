@@ -1,0 +1,406 @@
+{% extends "base.html" %} {% block title %}Analytics Dashboard - Manager{%
+endblock %} {% block extra_css %}
+<style>
+  .analytics-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .analytics-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(59, 130, 246, 0.1);
+  }
+
+  .metric-card {
+    text-align: center;
+    padding: 2rem 1rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+  }
+
+  .metric-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #3b82f6;
+    line-height: 1;
+  }
+
+  .chart-container {
+    position: relative;
+    height: 300px;
+    margin-bottom: 1rem;
+  }
+
+  .chart-container.tall {
+    height: 400px;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="row mb-4">
+  <div class="col-12">
+    <h1 class="h2 mb-1">
+      <i class="fas fa-chart-bar me-2 text-primary"></i>
+      Analytics Dashboard
+    </h1>
+    <p class="text-muted mb-0">
+      Insights and trends for cancellation management
+    </p>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="metric-card">
+      <div class="metric-number">{{ monthly_trends|length or 0 }}</div>
+      <h6 class="mb-2">Months of Data</h6>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="metric-card">
+      <div class="metric-number">
+        {% set total = 0 %} {% for trend in monthly_trends %} {% set total =
+        total + trend.total_cancellations %} {% endfor %} {{ total }}
+      </div>
+      <h6 class="mb-2">Total Cancellations</h6>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="metric-card">
+      <div class="metric-number">
+        {% set free_total = 0 %} {% for trend in monthly_trends %} {% set
+        free_total = free_total + trend.free_cancellations %} {% endfor %} {{
+        free_total }}
+      </div>
+      <h6 class="mb-2">Free Cancellations</h6>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="metric-card">
+      <div class="metric-number">
+        {% set charged_total = 0 %} {% for trend in monthly_trends %} {% set
+        charged_total = charged_total + trend.charged_cancellations %} {% endfor
+        %} {{ charged_total }}
+      </div>
+      <h6 class="mb-2">Charged Cancellations</h6>
+    </div>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-lg-8 mb-4">
+    <div class="analytics-card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-chart-line me-2"></i>
+          Monthly Cancellation Trends
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="chart-container tall">
+          <canvas id="monthlyTrendsChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 mb-4">
+    <div class="analytics-card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-users me-2"></i>
+          Membership Distribution
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="chart-container">
+          <canvas id="membershipChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-lg-6 mb-4">
+    <div class="analytics-card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-trophy me-2"></i>
+          Most Active Students
+        </h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Student</th>
+                <th>Membership</th>
+                <th>Cancellations</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for student in top_students %}
+              <tr>
+                <td>{{ student.first_name }} {{ student.last_name }}</td>
+                <td>
+                  <span class="badge bg-secondary"
+                    >{{ student.membership_level }}</span
+                  >
+                </td>
+                <td>
+                  <strong class="text-primary"
+                    >{{ student.cancellation_count }}</strong
+                  >
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="3" class="text-center text-muted py-4">
+                  No data available
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6 mb-4">
+    <div class="analytics-card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-dollar-sign me-2"></i>
+          Revenue Impact
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="chart-container">
+          <canvas id="revenueChart"></canvas>
+        </div>
+        <div class="mt-3 text-center">
+          <h4 class="text-success mb-1">
+            ${% set total_revenue = 0 %} {% for revenue in revenue_impact %} {%
+            set total_revenue = total_revenue + revenue.estimated_charges %} {%
+            endfor %} {{ total_revenue }}
+          </h4>
+          <small class="text-muted">Total Revenue (12 months)</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-12">
+    <div class="analytics-card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-table me-2"></i>
+          Membership Level Details
+        </h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Membership Level</th>
+                <th>Total Students</th>
+                <th>Avg Monthly Cancellations</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tier in tier_distribution %}
+              <tr>
+                <td>
+                  <span class="badge bg-primary"
+                    >{{ tier.membership_level }}</span
+                  >
+                </td>
+                <td><strong>{{ tier.student_count }}</strong></td>
+                <td>{{ "%.2f"|format(tier.avg_monthly_cancellations) }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="3" class="text-center text-muted py-4">
+                  No membership data available
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+  const chartColors = {
+      primary: '#3b82f6',
+      success: '#10b981',
+      warning: '#f59e0b',
+      danger: '#ef4444',
+      info: '#06b6d4',
+      secondary: '#6b7280'
+  };
+
+  // Monthly Trends Chart
+  const monthlyCtx = document.getElementById('monthlyTrendsChart').getContext('2d');
+  const monthlyChart = new Chart(monthlyCtx, {
+      type: 'line',
+      data: {
+          labels: [
+              {% for trend in monthly_trends %}
+                  '{{ trend.month }}'{% if not loop.last %},{% endif %}
+              {% endfor %}
+          ],
+          datasets: [{
+              label: 'Total Cancellations',
+              data: [
+                  {% for trend in monthly_trends %}
+                      {{ trend.total_cancellations }}{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ],
+              borderColor: chartColors.primary,
+              backgroundColor: chartColors.primary + '20',
+              tension: 0.4,
+              fill: true
+          }, {
+              label: 'Free Cancellations',
+              data: [
+                  {% for trend in monthly_trends %}
+                      {{ trend.free_cancellations }}{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ],
+              borderColor: chartColors.success,
+              backgroundColor: chartColors.success + '20',
+              tension: 0.4,
+              fill: true
+          }, {
+              label: 'Charged Cancellations',
+              data: [
+                  {% for trend in monthly_trends %}
+                      {{ trend.charged_cancellations }}{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ],
+              borderColor: chartColors.warning,
+              backgroundColor: chartColors.warning + '20',
+              tension: 0.4,
+              fill: true
+          }]
+      },
+      options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+              legend: {
+                  position: 'top'
+              }
+          },
+          scales: {
+              y: {
+                  beginAtZero: true,
+                  ticks: {
+                      stepSize: 1
+                  }
+              }
+          }
+      }
+  });
+
+  // Membership Distribution Chart
+  const membershipCtx = document.getElementById('membershipChart').getContext('2d');
+  const membershipChart = new Chart(membershipCtx, {
+      type: 'doughnut',
+      data: {
+          labels: [
+              {% for tier in tier_distribution %}
+                  '{{ tier.membership_level }}'{% if not loop.last %},{% endif %}
+              {% endfor %}
+          ],
+          datasets: [{
+              data: [
+                  {% for tier in tier_distribution %}
+                      {{ tier.student_count }}{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ],
+              backgroundColor: [
+                  chartColors.primary,
+                  chartColors.success,
+                  chartColors.warning,
+                  chartColors.danger,
+                  chartColors.info,
+                  chartColors.secondary,
+                  '#8b5cf6'
+              ],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+          }]
+      },
+      options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+              legend: {
+                  position: 'bottom'
+              }
+          }
+      }
+  });
+
+  // Revenue Chart
+  const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+  const revenueChart = new Chart(revenueCtx, {
+      type: 'bar',
+      data: {
+          labels: [
+              {% for revenue in revenue_impact %}
+                  '{{ revenue.month }}'{% if not loop.last %},{% endif %}
+              {% endfor %}
+          ],
+          datasets: [{
+              label: 'Estimated Revenue ($)',
+              data: [
+                  {% for revenue in revenue_impact %}
+                      {{ revenue.estimated_charges }}{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ],
+              backgroundColor: chartColors.success,
+              borderColor: chartColors.success,
+              borderWidth: 1
+          }]
+      },
+      options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+              legend: {
+                  display: false
+              }
+          },
+          scales: {
+              y: {
+                  beginAtZero: true,
+                  ticks: {
+                      callback: function(value) {
+                          return '$' + value;
+                      }
+                  }
+              }
+          }
+      }
+  });
+</script>
+{% endblock %}

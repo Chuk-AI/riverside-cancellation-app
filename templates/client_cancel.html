@@ -1,0 +1,527 @@
+{% extends "base.html" %} {% block title %}Cancel Lesson - {{ session.user_name
+}} - Riverside Equestrian{% endblock %} {% block extra_css %}
+<style>
+  .cancellation-form {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .status-preview {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid #dee2e6;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    transition: all 0.3s ease;
+  }
+
+  .status-preview.will-charge {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fca5a5;
+  }
+
+  .status-preview.free-cancellation {
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    border-color: #86efac;
+  }
+
+  .status-preview.warning {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fcd34d;
+  }
+
+  .sequential-section {
+    border: 2px dashed #d1d5db;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    background: #f9fafb;
+    display: none;
+  }
+
+  .sequential-section.show {
+    display: block;
+    animation: slideDown 0.3s ease;
+  }
+
+  .lesson-input-group {
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .current-status {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-left: 4px solid #0ea5e9;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .form-check-input:checked {
+    background-color: #3b82f6;
+    border-color: #3b82f6;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="cancellation-form">
+  <!-- Header -->
+  <div class="text-center mb-4">
+    <h1 class="h2 text-gradient mb-2">
+      <i class="fas fa-calendar-times me-2"></i>
+      Cancel Lesson
+    </h1>
+    <p class="text-muted">
+      Submit your cancellation request and see the impact on your status
+    </p>
+  </div>
+
+  <!-- Current Status Card -->
+  <div class="card current-status mb-4">
+    <div class="card-body">
+      <div class="row align-items-center">
+        <div class="col-md-8">
+          <h6 class="mb-2">
+            <i class="fas fa-user me-1"></i>
+            {{ client.first_name }} {{ client.last_name }} - {{
+            client.membership_level|title }}
+          </h6>
+          <p class="mb-1">
+            <strong>Free Cancellations:</strong> {{ cancellation_status.used }}
+            of {{ cancellation_status.limit }} used this month
+          </p>
+          <p class="mb-0 small text-muted">
+            <strong>Policy:</strong> {{ cancellation_policy.limit }} free
+            notices per month, deadline {{ cancellation_policy.deadline_display
+            }}
+          </p>
+        </div>
+        <div class="col-md-4 text-md-end">
+          <div class="d-flex d-md-block gap-2">
+            <span
+              class="badge bg-{% if cancellation_status.remaining > 0 %}success{% else %}warning{% endif %} fs-6"
+            >
+              {{ cancellation_status.remaining }} Free Left
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancellation Form -->
+  <form
+    method="POST"
+    action="{{ url_for('client_cancel') }}"
+    id="cancellationForm"
+  >
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-calendar-minus me-2"></i>
+          Lesson to Cancel
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <div class="form-floating">
+              <input
+                type="date"
+                class="form-control"
+                id="lesson_date"
+                name="lesson_date"
+                required
+                min="{{ min_date }}"
+                onchange="updateStatusPreview()"
+              />
+              <label for="lesson_date">
+                <i class="fas fa-calendar me-1"></i>Lesson Date
+              </label>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="form-floating">
+              <input
+                type="time"
+                class="form-control"
+                id="lesson_time"
+                name="lesson_time"
+                required
+                onchange="updateStatusPreview()"
+              />
+              <label for="lesson_time">
+                <i class="fas fa-clock me-1"></i>Lesson Time
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional Sequential Lessons -->
+        <div class="text-center mb-3">
+          <button
+            type="button"
+            class="btn btn-outline-info"
+            id="addSequentialBtn"
+            onclick="toggleSequentialSection()"
+          >
+            <i class="fas fa-plus me-2"></i>
+            Add Sequential Lessons
+          </button>
+        </div>
+
+        <!-- Sequential Lessons Section -->
+        <div class="sequential-section" id="sequentialSection">
+          <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Sequential Lessons:</strong> Additional lessons can be
+            included in this cancellation notice, as long as the lessons are
+            sequential (consecutive dates/times).
+          </div>
+
+          <div id="sequentialLessons">
+            <!-- Sequential lesson inputs will be added here -->
+          </div>
+
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-primary"
+            onclick="addSequentialLesson()"
+          >
+            <i class="fas fa-plus me-1"></i>
+            Add Another Lesson
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Preview -->
+    <div class="status-preview" id="statusPreview">
+      <div class="text-center">
+        <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
+        <p class="mb-0">Enter lesson details to see cancellation status</p>
+      </div>
+    </div>
+
+    <!-- Rescheduling Section -->
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-calendar-plus me-2"></i>
+          Rescheduling (Optional)
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="alert alert-success">
+          <i class="fas fa-info-circle me-2"></i>
+          <strong>Good News:</strong> Rescheduling or rebooking does not affect
+          your cancellation status.
+        </div>
+
+        <div class="form-check mb-3">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="wants_reschedule"
+            name="wants_reschedule"
+            onchange="toggleRescheduleSection()"
+          />
+          <label class="form-check-label" for="wants_reschedule">
+            I would like to book another lesson
+          </label>
+        </div>
+
+        <div class="collapse" id="rescheduleSection">
+          <div class="form-floating">
+            <textarea
+              class="form-control"
+              id="reschedule_preferences"
+              name="reschedule_preferences"
+              style="height: 100px"
+              placeholder="Please let us know your preferred dates and times..."
+            ></textarea>
+            <label for="reschedule_preferences">
+              <i class="fas fa-calendar-alt me-1"></i>
+              Preferred dates and times for rescheduling
+            </label>
+          </div>
+          <small class="text-muted">
+            If we can accommodate any of your requested times, your lesson(s)
+            will be considered confirmed.
+          </small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Reporting -->
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0">
+          <i class="fas fa-exclamation-triangle me-2"></i>
+          Report Errors (Optional)
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="form-floating">
+          <textarea
+            class="form-control"
+            id="error_report"
+            name="error_report"
+            style="height: 80px"
+            placeholder="Let us know if you think there is an error in our records..."
+          ></textarea>
+          <label for="error_report">
+            <i class="fas fa-bug me-1"></i>
+            Report any errors in our records
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Policy Acknowledgment -->
+    <div class="card">
+      <div class="card-body">
+        <div class="form-check mb-3">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="policy_acknowledgment"
+            name="policy_acknowledgment"
+            required
+          />
+          <label class="form-check-label" for="policy_acknowledgment">
+            I have read and understand the
+            <a
+              href="https://www.riversideequestrian.ca/cancellations"
+              target="_blank"
+            >
+              Cancellation Policy
+            </a>
+          </label>
+        </div>
+
+        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+          <a
+            href="{{ url_for('client_dashboard') }}"
+            class="btn btn-outline-secondary"
+          >
+            <i class="fas fa-arrow-left me-1"></i>
+            Back to Dashboard
+          </a>
+          <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
+            <i class="fas fa-paper-plane me-2"></i>
+            Submit Cancellation
+          </button>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  let sequentialCount = 0;
+
+  // Form validation
+  document.getElementById('policy_acknowledgment').addEventListener('change', function() {
+      document.getElementById('submitBtn').disabled = !this.checked;
+  });
+
+  // Toggle sequential lessons section
+  function toggleSequentialSection() {
+      const section = document.getElementById('sequentialSection');
+      const btn = document.getElementById('addSequentialBtn');
+
+      if (section.classList.contains('show')) {
+          section.classList.remove('show');
+          btn.innerHTML = '<i class="fas fa-plus me-2"></i>Add Sequential Lessons';
+      } else {
+          section.classList.add('show');
+          btn.innerHTML = '<i class="fas fa-minus me-2"></i>Remove Sequential Lessons';
+          if (sequentialCount === 0) {
+              addSequentialLesson();
+          }
+      }
+  }
+
+  // Add sequential lesson input
+  function addSequentialLesson() {
+      sequentialCount++;
+      const container = document.getElementById('sequentialLessons');
+      const lessonDiv = document.createElement('div');
+      lessonDiv.className = 'lesson-input-group';
+      lessonDiv.id = `sequential-${sequentialCount}`;
+
+      lessonDiv.innerHTML = `
+          <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">Sequential Lesson ${sequentialCount}</h6>
+              <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSequentialLesson(${sequentialCount})">
+                  <i class="fas fa-trash"></i>
+              </button>
+          </div>
+          <div class="row">
+              <div class="col-md-6 mb-2">
+                  <div class="form-floating">
+                      <input type="date" class="form-control" name="sequential_dates[]" min="{{ min_date }}" onchange="updateStatusPreview()">
+                      <label><i class="fas fa-calendar me-1"></i>Date</label>
+                  </div>
+              </div>
+              <div class="col-md-6 mb-2">
+                  <div class="form-floating">
+                      <input type="time" class="form-control" name="sequential_times[]" onchange="updateStatusPreview()">
+                      <label><i class="fas fa-clock me-1"></i>Time</label>
+                  </div>
+              </div>
+          </div>
+      `;
+
+      container.appendChild(lessonDiv);
+  }
+
+  // Remove sequential lesson
+  function removeSequentialLesson(id) {
+      const element = document.getElementById(`sequential-${id}`);
+      if (element) {
+          element.remove();
+          updateStatusPreview();
+      }
+  }
+
+  // Toggle reschedule section
+  function toggleRescheduleSection() {
+      const checkbox = document.getElementById('wants_reschedule');
+      const section = document.getElementById('rescheduleSection');
+
+      if (checkbox.checked) {
+          section.classList.add('show');
+      } else {
+          section.classList.remove('show');
+      }
+  }
+
+  // Update status preview
+  function updateStatusPreview() {
+      const lessonDate = document.getElementById('lesson_date').value;
+      const lessonTime = document.getElementById('lesson_time').value;
+      const preview = document.getElementById('statusPreview');
+
+      if (!lessonDate || !lessonTime) {
+          preview.innerHTML = `
+              <div class="text-center">
+                  <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
+                  <p class="mb-0">Enter lesson details to see cancellation status</p>
+              </div>
+          `;
+          preview.className = 'status-preview';
+          return;
+      }
+
+      // Calculate if this would be charged (simplified logic for demo)
+      const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
+      const now = new Date();
+      const timeDiff = lessonDateTime - now;
+      const hoursDiff = timeDiff / (1000 * 60 * 60);
+
+      // Get deadline hours based on membership
+      const deadlineHours = {{ cancellation_policy.deadline_hours }};
+      const hasFreeCancellations = {{ cancellation_status.remaining }} > 0;
+
+      let willCharge = false;
+      let statusClass = 'free-cancellation';
+      let statusIcon = 'fas fa-check-circle text-success';
+      let statusText = '';
+
+      if (hoursDiff < deadlineHours) {
+          willCharge = true;
+          statusClass = 'will-charge';
+          statusIcon = 'fas fa-exclamation-triangle text-warning';
+          statusText = 'Your lesson will still be charged: Notice will be received after the cancellation cutoff.';
+      } else if (!hasFreeCancellations) {
+          willCharge = true;
+          statusClass = 'will-charge';
+          statusIcon = 'fas fa-times-circle text-danger';
+          statusText = 'Your lesson will still be charged: No more available free cancellation notices this month.';
+      } else if ({{ cancellation_status.used }} === {{ cancellation_status.limit - 1 }}) {
+          statusClass = 'warning';
+          statusIcon = 'fas fa-info-circle text-warning';
+          statusText = 'This is your last free cancellation notice. No more free cancellations available this month after this.';
+      } else {
+          statusText = 'This cancellation will be processed as a free cancellation notice.';
+      }
+
+      preview.innerHTML = `
+          <div class="d-flex align-items-center">
+              <div class="me-3">
+                  <i class="${statusIcon} fa-2x"></i>
+              </div>
+              <div class="flex-grow-1">
+                  <h6 class="mb-1">Cancellation Status Preview</h6>
+                  <p class="mb-0">${statusText}</p>
+                  ${willCharge ? '<small class="text-muted">You may still cancel, but charges will apply per your membership policy.</small>' : ''}
+              </div>
+          </div>
+      `;
+      preview.className = `status-preview ${statusClass}`;
+  }
+
+  // Form submission handling
+  document.getElementById('cancellationForm').addEventListener('submit', function(e) {
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+      submitBtn.disabled = true;
+
+      // Validate main lesson inputs
+      const lessonDate = document.getElementById('lesson_date').value;
+      const lessonTime = document.getElementById('lesson_time').value;
+
+      if (!lessonDate || !lessonTime) {
+          e.preventDefault();
+          alert('Please enter both lesson date and time.');
+          submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation';
+          submitBtn.disabled = false;
+          return;
+      }
+
+      // Validate that lesson is in the future
+      const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
+      const now = new Date();
+
+      if (lessonDateTime <= now) {
+          e.preventDefault();
+          alert('Cannot cancel lessons that have already occurred.');
+          submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation';
+          submitBtn.disabled = false;
+          return;
+      }
+
+      // Show confirmation dialog for charged cancellations
+      const preview = document.getElementById('statusPreview');
+      if (preview.classList.contains('will-charge')) {
+          if (!confirm('This cancellation will result in charges. Are you sure you want to proceed?')) {
+              e.preventDefault();
+              submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation';
+              submitBtn.disabled = false;
+              return;
+          }
+      }
+  });
+
+  // Auto-focus first input
+  document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('lesson_date').focus();
+
+      // Set minimum date to today
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('lesson_date').min = today;
+  });
+</script>
+{% endblock %}

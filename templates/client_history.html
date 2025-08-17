@@ -1,0 +1,490 @@
+{% extends "base.html" %} {% block title %}Cancellation History - {{
+session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
+<style>
+  .history-filters {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .cancellation-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.75rem;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+    background: white;
+  }
+
+  .cancellation-item:hover {
+    border-color: #3b82f6;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    transform: translateY(-2px);
+  }
+
+  .status-badge {
+    font-size: 0.75rem;
+    padding: 0.375rem 0.75rem;
+    border-radius: 1rem;
+    font-weight: 600;
+  }
+
+  .status-free {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  .status-charged {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .status-excluded {
+    background: #dbeafe;
+    color: #1e40af;
+  }
+  .status-pending {
+    background: #f3f4f6;
+    color: #374151;
+  }
+
+  .timeline-item {
+    position: relative;
+    padding-left: 2rem;
+    padding-bottom: 1rem;
+    border-left: 2px solid #e5e7eb;
+  }
+
+  .timeline-item:last-child {
+    border-left-color: transparent;
+  }
+
+  .timeline-icon {
+    position: absolute;
+    left: -0.5rem;
+    top: 0.5rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .timeline-icon.free {
+    border-color: #10b981;
+    background: #10b981;
+  }
+  .timeline-icon.charged {
+    border-color: #f59e0b;
+    background: #f59e0b;
+  }
+  .timeline-icon.excluded {
+    border-color: #3b82f6;
+    background: #3b82f6;
+  }
+
+  .monthly-summary {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 1px solid #0ea5e9;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .no-history {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6b7280;
+  }
+
+  .export-btn {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border: none;
+    color: white;
+  }
+
+  .filter-tabs {
+    border-bottom: 2px solid #e5e7eb;
+    margin-bottom: 1.5rem;
+  }
+
+  .filter-tab {
+    background: none;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    color: #6b7280;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    border-radius: 0.5rem 0.5rem 0 0;
+    margin-right: 0.5rem;
+  }
+
+  .filter-tab.active {
+    color: #3b82f6;
+    background: white;
+    border-bottom: 2px solid #3b82f6;
+    margin-bottom: -2px;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="row">
+  <div class="col-12">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h1 class="h2 text-gradient mb-1">
+          <i class="fas fa-history me-2"></i>
+          Cancellation History
+        </h1>
+        <p class="text-muted mb-0">
+          View your past cancellation requests and their status
+        </p>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('client_cancel') }}" class="btn btn-primary">
+          <i class="fas fa-calendar-times me-1"></i>
+          New Cancellation
+        </a>
+        {% if cancellations %}
+        <button class="btn export-btn" onclick="exportHistory()">
+          <i class="fas fa-download me-1"></i>
+          Export
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Current Status Summary -->
+    <div class="monthly-summary">
+      <div class="row align-items-center">
+        <div class="col-md-8">
+          <h6 class="mb-2">
+            <i class="fas fa-calendar-check me-2"></i>
+            Current Month Summary ({{ current_month }})
+          </h6>
+          <div class="row">
+            <div class="col-sm-6">
+              <p class="mb-1">
+                <strong>Free Cancellations:</strong> {{ current_month_stats.used
+                }} of {{ current_month_stats.limit }} used
+              </p>
+            </div>
+            <div class="col-sm-6">
+              <p class="mb-1">
+                <strong>Remaining:</strong> {{ current_month_stats.remaining }}
+                free cancellations
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4 text-md-end">
+          <div class="d-flex d-md-block gap-2 justify-content-end">
+            <span
+              class="status-badge {% if current_month_stats.remaining > 0 %}status-free{% else %}status-charged{% endif %}"
+            >
+              {% if current_month_stats.remaining > 0 %} {{
+              current_month_stats.remaining }} Free Left {% else %} No Free Left
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="filter-tabs">
+      <button
+        class="filter-tab active"
+        onclick="filterHistory('all')"
+        id="tab-all"
+      >
+        All History
+      </button>
+      <button
+        class="filter-tab"
+        onclick="filterHistory('current')"
+        id="tab-current"
+      >
+        This Month
+      </button>
+      <button
+        class="filter-tab"
+        onclick="filterHistory('last3')"
+        id="tab-last3"
+      >
+        Last 3 Months
+      </button>
+      <button class="filter-tab" onclick="filterHistory('year')" id="tab-year">
+        This Year
+      </button>
+    </div>
+
+    <!-- History Content -->
+    {% if cancellations %}
+    <div id="historyContent">
+      <!-- Group by Month -->
+      {% for month_group in cancellations_by_month %}
+      <div class="month-group" data-month="{{ month_group.month }}">
+        <h5 class="mb-3 text-muted">
+          <i class="fas fa-calendar me-2"></i>
+          {{ month_group.month_display }}
+          <small
+            >({{ month_group.count }} cancellation{% if month_group.count != 1
+            %}s{% endif %})</small
+          >
+        </h5>
+
+        <div class="row">
+          {% for cancellation in month_group.cancellations %}
+          <div class="col-lg-6 mb-3">
+            <div class="cancellation-item">
+              <div class="card-body">
+                <div
+                  class="d-flex justify-content-between align-items-start mb-2"
+                >
+                  <div>
+                    <h6 class="mb-1">
+                      {{ cancellation.lesson_date.strftime('%B %d, %Y') }}
+                      <small class="text-muted"
+                        >at {{ cancellation.lesson_time.strftime('%I:%M %p')
+                        }}</small
+                      >
+                    </h6>
+                    <small class="text-muted">
+                      <i class="fas fa-clock me-1"></i>
+                      Submitted {{ cancellation.created_at.strftime('%m/%d/%Y at
+                      %I:%M %p') }}
+                    </small>
+                  </div>
+                  <div>
+                    {% if cancellation.excluded %}
+                    <span class="status-badge status-excluded">
+                      <i class="fas fa-user-shield me-1"></i>Excluded
+                    </span>
+                    {% elif cancellation.charged %}
+                    <span class="status-badge status-charged">
+                      <i class="fas fa-dollar-sign me-1"></i>Charged
+                    </span>
+                    {% else %}
+                    <span class="status-badge status-free">
+                      <i class="fas fa-check me-1"></i>Free
+                    </span>
+                    {% endif %}
+                  </div>
+                </div>
+
+                {% if cancellation.sequential_lessons and
+                cancellation.sequential_lessons|length > 0 %}
+                <div class="mt-2">
+                  <small class="text-muted">
+                    <strong>Sequential lessons included:</strong>
+                  </small>
+                  <ul class="list-unstyled ms-3 mb-0">
+                    {% for seq_lesson in cancellation.sequential_lessons %}
+                    <li class="small">
+                      <i class="fas fa-arrow-right me-1"></i>
+                      {{ seq_lesson.date.strftime('%m/%d/%Y') }} at {{
+                      seq_lesson.time.strftime('%I:%M %p') }}
+                    </li>
+                    {% endfor %}
+                  </ul>
+                </div>
+                {% endif %} {% if cancellation.reschedule_requested %}
+                <div class="mt-2">
+                  <small class="text-success">
+                    <i class="fas fa-calendar-plus me-1"></i>
+                    Rescheduling requested
+                  </small>
+                </div>
+                {% endif %} {% if cancellation.excluded and
+                cancellation.approved_by %}
+                <div class="mt-2">
+                  <small class="text-info">
+                    <i class="fas fa-user-check me-1"></i>
+                    Exclusion approved by {{ cancellation.approved_by }}
+                  </small>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Load More Button (if needed) -->
+    {% if has_more_history %}
+    <div class="text-center mt-4">
+      <button class="btn btn-outline-primary" onclick="loadMoreHistory()">
+        <i class="fas fa-chevron-down me-1"></i>
+        Load More History
+      </button>
+    </div>
+    {% endif %} {% else %}
+    <!-- No History State -->
+    <div class="no-history">
+      <div class="mb-4">
+        <i class="fas fa-calendar-check fa-4x text-muted"></i>
+      </div>
+      <h4>No Cancellation History</h4>
+      <p class="mb-4">You haven't submitted any cancellation requests yet.</p>
+      <a href="{{ url_for('client_cancel') }}" class="btn btn-primary">
+        <i class="fas fa-calendar-times me-2"></i>
+        Submit Your First Cancellation
+      </a>
+    </div>
+    {% endif %}
+
+    <!-- Help Section -->
+    <div class="card mt-4 bg-light">
+      <div class="card-body">
+        <div class="row align-items-center">
+          <div class="col-md-8">
+            <h6 class="mb-2">
+              <i class="fas fa-question-circle me-2"></i>
+              Understanding Your History
+            </h6>
+            <ul class="mb-0 small">
+              <li>
+                <strong>Free:</strong> Cancellation was within policy and didn't
+                count against your limit
+              </li>
+              <li>
+                <strong>Charged:</strong> Cancellation was late or you had no
+                free cancellations remaining
+              </li>
+              <li>
+                <strong>Excluded:</strong> Manager approved exception (illness,
+                emergency, etc.)
+              </li>
+            </ul>
+          </div>
+          <div class="col-md-4 text-md-end">
+            <a
+              href="https://www.riversideequestrian.ca/cancellations"
+              target="_blank"
+              class="btn btn-outline-info btn-sm"
+            >
+              <i class="fas fa-external-link-alt me-1"></i>
+              View Full Policy
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // Filter history by time period
+  function filterHistory(period) {
+    // Update active tab
+    document
+      .querySelectorAll(".filter-tab")
+      .forEach((tab) => tab.classList.remove("active"));
+    document.getElementById(`tab-${period}`).classList.add("active");
+
+    const monthGroups = document.querySelectorAll(".month-group");
+    const now = new Date();
+
+    monthGroups.forEach((group) => {
+      const monthData = group.dataset.month;
+      const groupDate = new Date(monthData + "-01");
+      let show = false;
+
+      switch (period) {
+        case "all":
+          show = true;
+          break;
+        case "current":
+          show =
+            groupDate.getMonth() === now.getMonth() &&
+            groupDate.getFullYear() === now.getFullYear();
+          break;
+        case "last3":
+          const threeMonthsAgo = new Date(
+            now.getFullYear(),
+            now.getMonth() - 3,
+            1
+          );
+          show = groupDate >= threeMonthsAgo;
+          break;
+        case "year":
+          show = groupDate.getFullYear() === now.getFullYear();
+          break;
+      }
+
+      group.style.display = show ? "block" : "none";
+    });
+  }
+
+  // Export history to CSV
+  function exportHistory() {
+    const data = [];
+    const cancellationItems = document.querySelectorAll(
+      '.cancellation-item:not([style*="display: none"])'
+    );
+
+    cancellationItems.forEach((item) => {
+      // Extract data from each visible cancellation item
+      const dateText = item.querySelector("h6").textContent.trim();
+      const submittedText = item.querySelector("small").textContent.trim();
+      const statusText = item.querySelector(".status-badge").textContent.trim();
+
+      data.push([dateText, submittedText, statusText]);
+    });
+
+    // Create CSV content
+    let csvContent = "Lesson Date,Submitted Date,Status\n";
+    data.forEach((row) => {
+      csvContent += row.map((field) => `"${field}"`).join(",") + "\n";
+    });
+
+    // Download CSV
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cancellation_history.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
+
+  // Load more history (pagination)
+  function loadMoreHistory() {
+    // This would make an AJAX request to load more history
+    // For now, just show a loading state
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading...';
+    btn.disabled = true;
+
+    // Simulate loading
+    setTimeout(() => {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      // In real implementation, append new history items here
+    }, 1000);
+  }
+
+  // Animate items on load
+  document.addEventListener("DOMContentLoaded", function () {
+    const items = document.querySelectorAll(".cancellation-item");
+    items.forEach((item, index) => {
+      item.style.opacity = "0";
+      item.style.transform = "translateY(20px)";
+
+      setTimeout(() => {
+        item.style.transition = "all 0.3s ease";
+        item.style.opacity = "1";
+        item.style.transform = "translateY(0)";
+      }, index * 100);
+    });
+  });
+</script>
+{% endblock %}
