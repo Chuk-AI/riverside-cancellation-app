@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Database files
+*.db
+*.sqlite3
 
 # Python
 __pycache__/
@@ -30,3 +33,5 @@ backups/
 
 # Flask
 instance/
+
+.zip
