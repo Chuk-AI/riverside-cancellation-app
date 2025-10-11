@@ -11,7 +11,15 @@ from flask import (
     send_file,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta, date, time
+from datetime import (
+    datetime,
+    timedelta,
+    date,
+    time,
+    date as date_type,
+    time as time_type,
+)
+from dateutil.relativedelta import relativedelta
 from collections import defaultdict
 import sqlite3
 import os
@@ -54,7 +62,7 @@ def init_db():
         # Enable foreign key constraints
         conn.execute("PRAGMA foreign_keys = ON")
 
-        # Students table
+        # Students table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS students (
@@ -73,7 +81,7 @@ def init_db():
         )
         print("✓ Students table created")
 
-        # Admin users table
+        # Admin users table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS admin_users (
@@ -92,7 +100,7 @@ def init_db():
         )
         print("✓ Admin users table created")
 
-        # Membership tiers table
+        # Membership tiers table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS membership_tiers (
@@ -116,7 +124,7 @@ def init_db():
         )
         print("✓ Membership tiers table created")
 
-        # Cancellations table
+        # UPDATED Cancellations table with new columns
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cancellations (
@@ -128,12 +136,15 @@ def init_db():
                 reschedule_requested BOOLEAN DEFAULT 0,
                 reschedule_preferences TEXT,
                 error_report TEXT,
+                cancellation_note TEXT,                    -- NEW COLUMN
                 charged BOOLEAN DEFAULT 0,
                 excluded BOOLEAN DEFAULT 0,
                 approved_by TEXT,
                 exclusion_reason TEXT,
                 manager_notes TEXT,
                 status TEXT DEFAULT 'pending',
+                deadline_passed BOOLEAN DEFAULT 0,        -- NEW COLUMN
+                is_override BOOLEAN DEFAULT 0,            -- NEW COLUMN
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
@@ -142,7 +153,7 @@ def init_db():
         )
         print("✓ Cancellations table created")
 
-        # System settings table
+        # System settings table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -158,7 +169,7 @@ def init_db():
         )
         print("✓ System settings table created")
 
-        # Email templates table
+        # Email templates table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS email_templates (
@@ -180,7 +191,7 @@ def init_db():
         )
         print("✓ Email templates table created")
 
-        # System logs table
+        # System logs table (unchanged)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS system_logs (
@@ -198,7 +209,7 @@ def init_db():
         )
         print("✓ System logs table created")
 
-        # Create indexes for better performance
+        # Create indexes for better performance (UPDATED with new columns)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_students_email ON students(email)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_students_membership ON students(membership_level)"
@@ -213,6 +224,15 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_cancellations_created ON cancellations(created_at)"
         )
         conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cancellations_note ON cancellations(cancellation_note)"  # NEW INDEX
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cancellations_deadline ON cancellations(deadline_passed)"  # NEW INDEX
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cancellations_override ON cancellations(is_override)"  # NEW INDEX
+        )
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_system_logs_user ON system_logs(user_id)"
         )
         conn.execute(
@@ -220,7 +240,7 @@ def init_db():
         )
         print("✓ Database indexes created")
 
-        # Insert default membership tiers
+        # Insert default membership tiers (unchanged)
         membership_tiers = [
             (
                 "Bronze",
@@ -340,7 +360,7 @@ def init_db():
             )
         print("✓ Default membership tiers inserted")
 
-        # Insert default system settings
+        # Insert default system settings (unchanged)
         system_settings = [
             (
                 "system_name",
@@ -453,7 +473,7 @@ def init_db():
             )
         print("✓ Default system settings inserted")
 
-        # Insert default email templates
+        # Insert default email templates (unchanged)
         email_templates = [
             (
                 "client_confirmation",
@@ -520,8 +540,7 @@ def init_db():
             )
         print("✓ Default email templates inserted")
 
-        # Insert sample admin users
-        # Note: Password is 'admin123' for both users
+        # Insert sample admin users (unchanged)
         from werkzeug.security import generate_password_hash
 
         admin_password_hash = generate_password_hash("admin123")
@@ -555,7 +574,7 @@ def init_db():
             )
         print("✓ Sample admin users inserted")
 
-        # Insert sample students
+        # Insert sample students (unchanged)
         sample_students = [
             (
                 "Chloe",
@@ -704,34 +723,164 @@ def init_db():
             )
         print("✓ Sample students inserted")
 
-        # Insert sample cancellations for testing
+        # UPDATED sample cancellations with new columns
         sample_cancellations = [
-            (1, "2024-08-20", "14:00:00", 0, "approved", "2024-08-15 10:30:00"),
-            (2, "2024-08-22", "16:00:00", 1, "charged", "2024-08-16 09:15:00"),
-            (3, "2024-08-25", "15:30:00", 0, "approved", "2024-08-17 11:45:00"),
-            (1, "2024-08-28", "14:00:00", 0, "approved", "2024-08-18 08:20:00"),
-            (4, "2024-08-30", "13:00:00", 1, "charged", "2024-08-19 14:10:00"),
-            (2, "2024-09-02", "16:00:00", 0, "pending", "2024-08-20 15:30:00"),
-            (5, "2024-09-05", "11:00:00", 0, "approved", "2024-08-21 12:00:00"),
-            (6, "2024-09-08", "17:00:00", 1, "charged", "2024-08-22 18:45:00"),
-            (7, "2024-09-10", "10:00:00", 0, "pending", "2024-08-23 09:30:00"),
-            (8, "2024-09-12", "18:00:00", 0, "approved", "2024-08-24 16:20:00"),
-            (3, "2024-09-15", "15:30:00", 1, "charged", "2024-08-25 12:15:00"),
-            (9, "2024-09-18", "09:00:00", 0, "approved", "2024-08-26 14:45:00"),
-            (10, "2024-09-20", "13:30:00", 0, "pending", "2024-08-27 11:30:00"),
+            (
+                1,
+                "2024-08-20",
+                "14:00:00",
+                "Student was sick",
+                0,
+                "approved",
+                0,
+                0,
+                "2024-08-15 10:30:00",
+            ),
+            (
+                2,
+                "2024-08-22",
+                "16:00:00",
+                "Need to reschedule",
+                1,
+                "charged",
+                1,
+                0,
+                "2024-08-16 09:15:00",
+            ),
+            (
+                3,
+                "2024-08-25",
+                "15:30:00",
+                None,
+                0,
+                "approved",
+                0,
+                0,
+                "2024-08-17 11:45:00",
+            ),
+            (
+                1,
+                "2024-08-28",
+                "14:00:00",
+                "Family emergency",
+                0,
+                "approved",
+                0,
+                1,
+                "2024-08-18 08:20:00",
+            ),
+            (
+                4,
+                "2024-08-30",
+                "13:00:00",
+                None,
+                1,
+                "charged",
+                1,
+                0,
+                "2024-08-19 14:10:00",
+            ),
+            (
+                2,
+                "2024-09-02",
+                "16:00:00",
+                "Weather concerns",
+                0,
+                "pending",
+                0,
+                0,
+                "2024-08-20 15:30:00",
+            ),
+            (
+                5,
+                "2024-09-05",
+                "11:00:00",
+                None,
+                0,
+                "approved",
+                0,
+                0,
+                "2024-08-21 12:00:00",
+            ),
+            (
+                6,
+                "2024-09-08",
+                "17:00:00",
+                "Schedule conflict",
+                1,
+                "charged",
+                1,
+                0,
+                "2024-08-22 18:45:00",
+            ),
+            (
+                7,
+                "2024-09-10",
+                "10:00:00",
+                "Car trouble",
+                0,
+                "pending",
+                0,
+                0,
+                "2024-08-23 09:30:00",
+            ),
+            (
+                8,
+                "2024-09-12",
+                "18:00:00",
+                None,
+                0,
+                "approved",
+                0,
+                0,
+                "2024-08-24 16:20:00",
+            ),
+            (
+                3,
+                "2024-09-15",
+                "15:30:00",
+                "Work commitment",
+                1,
+                "charged",
+                1,
+                0,
+                "2024-08-25 12:15:00",
+            ),
+            (
+                9,
+                "2024-09-18",
+                "09:00:00",
+                "Doctor appointment",
+                0,
+                "approved",
+                0,
+                1,
+                "2024-08-26 14:45:00",
+            ),
+            (
+                10,
+                "2024-09-20",
+                "13:30:00",
+                None,
+                0,
+                "pending",
+                0,
+                0,
+                "2024-08-27 11:30:00",
+            ),
         ]
 
         for cancellation in sample_cancellations:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO cancellations (student_id, lesson_date, lesson_time, charged, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO cancellations (student_id, lesson_date, lesson_time, cancellation_note, charged, status, deadline_passed, is_override, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 cancellation,
             )
         print("✓ Sample cancellations inserted")
 
-        # Insert sample system logs
+        # Insert sample system logs (unchanged)
         sample_logs = [
             (
                 1,
@@ -847,6 +996,105 @@ def init_db():
         conn.close()
 
 
+def reset_database():
+    """Delete database file and recreate - Safest approach"""
+    try:
+        db_path = app.config["DATABASE"]
+
+        # Close any existing connections first
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.close()
+        except:
+            pass
+
+        # Remove the database file if it exists
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+                print(f"Deleted existing database file: {db_path}")
+            except OSError as e:
+                print(f"Could not delete database file: {e}")
+                # If we can't delete the file, try the table-by-table approach
+                return reset_database_tables()
+
+        # Create fresh database
+        print("Creating fresh database...")
+        return init_db()
+
+    except Exception as e:
+        print(f"Error in reset_database: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def reset_database_tables():
+    """Fallback method: Drop all tables and recreate database"""
+    try:
+        conn = sqlite3.connect(app.config["DATABASE"])
+
+        # Get all table names (excluding system tables)
+        cursor = conn.execute(
+            """SELECT name FROM sqlite_master 
+               WHERE type='table' 
+               AND name NOT LIKE 'sqlite_%'"""
+        )
+        tables = [row[0] for row in cursor.fetchall()]
+
+        # Disable foreign key constraints temporarily
+        conn.execute("PRAGMA foreign_keys = OFF")
+
+        # Drop all user tables
+        for table in tables:
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS `{table}`")
+                print(f"Dropped table: {table}")
+            except Exception as e:
+                print(f"Warning: Could not drop table {table}: {e}")
+
+        # Drop user-created indexes
+        cursor = conn.execute(
+            """SELECT name FROM sqlite_master 
+               WHERE type='index' 
+               AND name NOT LIKE 'sqlite_%'
+               AND sql IS NOT NULL"""
+        )
+        indexes = [row[0] for row in cursor.fetchall()]
+
+        for index in indexes:
+            try:
+                conn.execute(f"DROP INDEX IF EXISTS `{index}`")
+                print(f"Dropped index: {index}")
+            except Exception as e:
+                print(f"Warning: Could not drop index {index}: {e}")
+
+        # Reset auto-increment sequences
+        try:
+            conn.execute("DELETE FROM sqlite_sequence")
+            print("Reset auto-increment sequences")
+        except:
+            pass
+
+        # Re-enable foreign key constraints
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        conn.commit()
+        conn.close()
+
+        # Reinitialize with new schema
+        print("Reinitializing database with new schema...")
+        return init_db()
+
+    except Exception as e:
+        print(f"Error in reset_database_tables: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 def verify_database():
     """Verify database structure and data"""
     try:
@@ -888,31 +1136,6 @@ def verify_database():
         return False
     finally:
         conn.close()
-
-
-def reset_database():
-    """Drop all tables and recreate database"""
-    try:
-        conn = sqlite3.connect(app.config["DATABASE"])
-
-        # Get all table names
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
-
-        # Drop all tables
-        for table in tables:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
-            print(f"Dropped table: {table}")
-
-        conn.commit()
-        conn.close()
-
-        # Reinitialize
-        return init_db()
-
-    except Exception as e:
-        print(f"Error resetting database: {str(e)}")
-        return False
 
 
 def get_db():
@@ -1054,7 +1277,7 @@ def will_be_charged(student, lesson_datetime):
 
 
 def get_dashboard_stats():
-    """Calculate dashboard statistics with debugging and proper error handling"""
+    """Calculate dashboard statistics with new 5-box metrics and debugging"""
     conn = get_db()
 
     # Today's date for calculations
@@ -1105,52 +1328,34 @@ def get_dashboard_stats():
             else:
                 today_vs_yesterday = "No activity"
 
-        # This month's cancellations - Let's try multiple approaches
+        # This month's cancellations - using date range method
         print(f"DEBUG: Checking month cancellations for {current_month}")
 
-        # First try: using strftime
-        month_cancellations_result1 = conn.execute(
-            "SELECT COUNT(*) as count FROM cancellations WHERE strftime('%Y-%m', created_at) = ?",
-            (current_month,),
-        ).fetchone()
-        month_cancellations1 = (
-            month_cancellations_result1["count"] if month_cancellations_result1 else 0
-        )
-        print(f"DEBUG: Month cancellations (strftime): {month_cancellations1}")
-
-        # Second try: using date comparison for current month
         month_start = f"{current_month}-01"
         next_month = (
             (datetime.now().replace(day=1) + timedelta(days=32))
             .replace(day=1)
             .strftime("%Y-%m-01")
         )
-        month_cancellations_result2 = conn.execute(
+
+        month_cancellations_result = conn.execute(
             "SELECT COUNT(*) as count FROM cancellations WHERE created_at >= ? AND created_at < ?",
             (month_start, next_month),
         ).fetchone()
-        month_cancellations2 = (
-            month_cancellations_result2["count"] if month_cancellations_result2 else 0
+        month_cancellations = (
+            month_cancellations_result["count"] if month_cancellations_result else 0
         )
-        print(f"DEBUG: Month cancellations (date range): {month_cancellations2}")
+        print(f"DEBUG: Month cancellations: {month_cancellations}")
 
-        # Third try: Let's see what dates we actually have
-        all_dates = conn.execute(
-            "SELECT created_at FROM cancellations ORDER BY created_at DESC LIMIT 10"
-        ).fetchall()
-        print(
-            f"DEBUG: Recent cancellation dates: {[row['created_at'] for row in all_dates]}"
-        )
-
-        # Use the date range method as it's more reliable
-        month_cancellations = month_cancellations2
-
-        # Free vs charged this month
+        # This month's detailed stats - UPDATED for 5-box layout
         month_stats = conn.execute(
             """SELECT 
-                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN charged = 0 AND excluded = 0 AND status = 'approved' THEN 1 ELSE 0 END) as free,
                 SUM(CASE WHEN charged = 1 AND excluded = 0 THEN 1 ELSE 0 END) as charged,
-                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded,
+                SUM(CASE WHEN is_override = 1 THEN 1 ELSE 0 END) as override_count,
+                SUM(CASE WHEN deadline_passed = 1 THEN 1 ELSE 0 END) as deadline_passed,
+                SUM(CASE WHEN cancellation_note IS NOT NULL AND cancellation_note != '' THEN 1 ELSE 0 END) as with_notes
                FROM cancellations 
                WHERE created_at >= ? AND created_at < ?""",
             (month_start, next_month),
@@ -1159,11 +1364,17 @@ def get_dashboard_stats():
         free_cancellations = int(month_stats["free"] or 0)
         charged_cancellations = int(month_stats["charged"] or 0)
         excluded_cancellations = int(month_stats["excluded"] or 0)
-        print(
-            f"DEBUG: Free: {free_cancellations}, Charged: {charged_cancellations}, Excluded: {excluded_cancellations}"
-        )
+        override_this_month = int(month_stats["override_count"] or 0)
+        deadline_passed = int(month_stats["deadline_passed"] or 0)
+        with_notes = int(month_stats["with_notes"] or 0)
 
-        # Active students - let's debug this too
+        print(f"DEBUG: Free: {free_cancellations}, Charged: {charged_cancellations}")
+        print(
+            f"DEBUG: Excluded: {excluded_cancellations}, Override: {override_this_month}"
+        )
+        print(f"DEBUG: Deadline passed: {deadline_passed}, With notes: {with_notes}")
+
+        # Active students
         active_students_result = conn.execute(
             "SELECT COUNT(*) as count FROM students"
         ).fetchone()
@@ -1172,7 +1383,7 @@ def get_dashboard_stats():
         )
         print(f"DEBUG: Active students: {active_students}")
 
-        # Let's also check if students table exists and has data
+        # Sample students for debugging
         students_sample = conn.execute(
             "SELECT first_name, last_name FROM students LIMIT 5"
         ).fetchall()
@@ -1194,31 +1405,9 @@ def get_dashboard_stats():
             print(f"DEBUG: Error getting new students: {e}")
             new_students_month = 0
 
-        # Pending reviews - let's debug this carefully
+        # Pending reviews - simplified logic
         print("DEBUG: Checking pending reviews...")
 
-        # Check all possible pending conditions
-        pending1 = conn.execute(
-            "SELECT COUNT(*) as count FROM cancellations WHERE status = 'pending'"
-        ).fetchone()
-        pending1_count = pending1["count"] if pending1 else 0
-        print(f"DEBUG: Status = 'pending': {pending1_count}")
-
-        pending2 = conn.execute(
-            "SELECT COUNT(*) as count FROM cancellations WHERE charged = 1 AND excluded = 0"
-        ).fetchone()
-        pending2_count = pending2["count"] if pending2 else 0
-        print(f"DEBUG: Charged but not excluded: {pending2_count}")
-
-        # Check what statuses we actually have
-        statuses = conn.execute(
-            "SELECT status, COUNT(*) as count FROM cancellations GROUP BY status"
-        ).fetchall()
-        print(
-            f"DEBUG: All statuses: {[(row['status'], row['count']) for row in statuses]}"
-        )
-
-        # Use broader definition for pending reviews
         pending_reviews_result = conn.execute(
             """SELECT COUNT(*) as count FROM cancellations 
                WHERE status = 'pending' 
@@ -1228,6 +1417,14 @@ def get_dashboard_stats():
             pending_reviews_result["count"] if pending_reviews_result else 0
         )
         print(f"DEBUG: Total pending reviews: {pending_reviews}")
+
+        # Check what statuses we have for debugging
+        statuses = conn.execute(
+            "SELECT status, COUNT(*) as count FROM cancellations GROUP BY status"
+        ).fetchall()
+        print(
+            f"DEBUG: All statuses: {[(row['status'], row['count']) for row in statuses]}"
+        )
 
         # Active membership tiers
         try:
@@ -1252,16 +1449,27 @@ def get_dashboard_stats():
         except:
             pass
 
+        # Recent cancellation dates for debugging
+        all_dates = conn.execute(
+            "SELECT created_at FROM cancellations ORDER BY created_at DESC LIMIT 10"
+        ).fetchall()
+        print(
+            f"DEBUG: Recent cancellation dates: {[row['created_at'] for row in all_dates]}"
+        )
+
         conn.close()
 
-        # Final debug output
+        # Final stats object - UPDATED with new 5-box metrics
         stats = {
+            # 5-Box Layout Metrics (Primary)
             "today_cancellations": int(today_cancellations),
-            "today_vs_yesterday": today_vs_yesterday,
-            "month_cancellations": int(month_cancellations),
             "free_cancellations": int(free_cancellations),
             "charged_cancellations": int(charged_cancellations),
             "excluded_cancellations": int(excluded_cancellations),
+            "override_this_month": int(override_this_month),
+            # Additional Stats (for other parts of the system)
+            "today_vs_yesterday": today_vs_yesterday,
+            "month_cancellations": int(month_cancellations),
             "active_students": int(active_students),
             "new_students_month": int(new_students_month),
             "pending_reviews": int(pending_reviews),
@@ -1269,6 +1477,13 @@ def get_dashboard_stats():
             "monthly_cancellations": int(month_cancellations),
             "active_tiers": int(active_tiers),
             "system_alerts": int(system_alerts),
+            # Filter Tab Metrics
+            "deadline_passed": int(deadline_passed),
+            "with_notes": int(with_notes),
+            "total_cancellations": int(month_cancellations),
+            # Legacy compatibility
+            "today_submissions": int(today_cancellations),
+            "urgent_cancellations": int(pending_reviews),
         }
 
         print(f"DEBUG: Final stats: {stats}")
@@ -1280,14 +1495,18 @@ def get_dashboard_stats():
 
         traceback.print_exc()
         conn.close()
+
         # Return safe defaults if there's an error
         return {
+            # 5-Box Layout Metrics
             "today_cancellations": 0,
-            "today_vs_yesterday": "Error",
-            "month_cancellations": 0,
             "free_cancellations": 0,
             "charged_cancellations": 0,
             "excluded_cancellations": 0,
+            "override_this_month": 0,
+            # Additional Stats
+            "today_vs_yesterday": "Error",
+            "month_cancellations": 0,
             "active_students": 0,
             "new_students_month": 0,
             "pending_reviews": 0,
@@ -1295,6 +1514,13 @@ def get_dashboard_stats():
             "monthly_cancellations": 0,
             "active_tiers": 7,
             "system_alerts": 0,
+            # Filter Tab Metrics
+            "deadline_passed": 0,
+            "with_notes": 0,
+            "total_cancellations": 0,
+            # Legacy compatibility
+            "today_submissions": 0,
+            "urgent_cancellations": 0,
         }
 
 
@@ -1454,7 +1680,7 @@ def client_dashboard():
 @app.route("/client/cancel", methods=["GET", "POST"])
 @login_required
 def client_cancel():
-    """Client cancellation form"""
+    """Client cancellation form - UPDATED with cancellation note support"""
     if session["user_role"] != "client":
         return redirect(url_for("dashboard"))
 
@@ -1476,6 +1702,7 @@ def client_cancel():
         wants_reschedule = "wants_reschedule" in request.form
         reschedule_preferences = request.form.get("reschedule_preferences", "")
         error_report = request.form.get("error_report", "")
+        cancellation_note = request.form.get("cancellation_note", "")  # NEW FIELD
 
         # Validate main lesson
         try:
@@ -1493,6 +1720,12 @@ def client_cancel():
         # Check if will be charged
         will_charge, charge_reason = will_be_charged(client, lesson_datetime)
 
+        # Determine deadline status for new database fields
+        tier = get_membership_tier(client["membership_level"])
+        deadline_hours = tier["deadline_hours"] if tier else 18
+        hours_until_lesson = (lesson_datetime - datetime.now()).total_seconds() / 3600
+        deadline_passed = hours_until_lesson < deadline_hours
+
         # Prepare sequential lessons data
         sequential_lessons = []
         if sequential_dates and sequential_times:
@@ -1506,14 +1739,16 @@ def client_cancel():
             str(sequential_lessons) if sequential_lessons else None
         )
 
-        # Insert cancellation
+        # Insert cancellation - UPDATED with new fields
         conn = get_db()
         cursor = conn.execute(
             """
             INSERT INTO cancellations
             (student_id, lesson_date, lesson_time, sequential_lessons,
-             reschedule_requested, reschedule_preferences, error_report, charged)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             reschedule_requested, reschedule_preferences, error_report, 
+             cancellation_note, charged, deadline_passed, is_override, 
+             status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 session["user_id"],
@@ -1523,14 +1758,20 @@ def client_cancel():
                 wants_reschedule,
                 reschedule_preferences,
                 error_report,
+                cancellation_note,  # NEW
                 will_charge,
+                deadline_passed,  # NEW
+                False,  # is_override starts as False
+                "pending",  # Default status
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         cancellation_id = cursor.lastrowid
         conn.commit()
         conn.close()
 
-        # Prepare cancellation data for email
+        # Prepare cancellation data for email - UPDATED with new fields
         cancellation_data = {
             "id": cancellation_id,
             "lesson_date": lesson_date,
@@ -1539,7 +1780,9 @@ def client_cancel():
             "reschedule_requested": wants_reschedule,
             "reschedule_preferences": reschedule_preferences,
             "error_report": error_report,
+            "cancellation_note": cancellation_note,  # NEW
             "charged": will_charge,
+            "deadline_passed": deadline_passed,  # NEW
             "manager_notes": charge_reason,
         }
 
@@ -1567,17 +1810,26 @@ def client_cancel():
 
         log_action(
             "cancellation_submitted",
-            f"Lesson: {lesson_date} {lesson_time}, Charged: {will_charge}",
+            f"Lesson: {lesson_date} {lesson_time}, Charged: {will_charge}, Note: {'Yes' if cancellation_note else 'No'}",
         )
 
-        # Flash appropriate message
+        # Flash appropriate message - ENHANCED with note acknowledgment
         if will_charge:
-            flash(f"Cancellation submitted. {charge_reason}", "warning")
+            if cancellation_note:
+                flash(f"Cancellation submitted with note. {charge_reason}", "warning")
+            else:
+                flash(f"Cancellation submitted. {charge_reason}", "warning")
         else:
-            flash(
-                "Cancellation submitted successfully! This was processed as a free cancellation.",
-                "success",
-            )
+            if cancellation_note:
+                flash(
+                    "Cancellation with note submitted successfully! This was processed as a free cancellation.",
+                    "success",
+                )
+            else:
+                flash(
+                    "Cancellation submitted successfully! This was processed as a free cancellation.",
+                    "success",
+                )
 
         return redirect(url_for("client_dashboard"))
 
@@ -1966,12 +2218,14 @@ def manager_students():
     if where_clause:
         where_clause = "WHERE " + where_clause
 
-    # Sort order
+    # Sort order - Updated with new options
     sort_orders = {
         "name": "s.last_name, s.first_name",
         "email": "s.email",
         "membership": "s.membership_level",
         "recent": "s.created_at DESC",
+        "recent_activity": "s.created_at DESC",  # For now, same as recent - can be enhanced later
+        "status": "s.membership_level DESC",  # For now, sort by membership - can be enhanced later
     }
     order_by = sort_orders.get(sort_by, "s.last_name, s.first_name")
 
@@ -1980,7 +2234,8 @@ def manager_students():
         SELECT s.*,
                COUNT(c.id) as total_cancellations,
                SUM(CASE WHEN strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as cancellations_this_month,
-               SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used_this_month
+               SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used_this_month,
+               MAX(c.created_at) as last_cancellation_date
         FROM students s
         LEFT JOIN cancellations c ON s.id = c.student_id
         {where_clause}
@@ -2030,6 +2285,27 @@ def manager_students():
 
         students.append(student)
 
+    # Apply custom sorting for specific sort types
+    if sort_by == "recent_activity":
+        # Sort by most recent cancellation date, then by created date
+        students.sort(
+            key=lambda s: (
+                (
+                    datetime.strptime(
+                        s.get("last_cancellation_date", "1900-01-01 00:00:00"),
+                        "%Y-%m-%d %H:%M:%S",
+                    )
+                    if s.get("last_cancellation_date")
+                    else datetime.min
+                ),
+                s["created_at"],
+            ),
+            reverse=True,
+        )
+    elif sort_by == "status":
+        # Sort by free_remaining (descending - most free cancellations first)
+        students.sort(key=lambda s: s["free_remaining"], reverse=True)
+
     # Pagination
     total_students = len(students)
     start = (page - 1) * per_page
@@ -2062,7 +2338,7 @@ def manager_students():
 
     pagination = Pagination(page, per_page, total_students)
 
-    # Calculate statistics for the template
+    # Calculate statistics for the template - Updated with new stats
     current_month = datetime.now().strftime("%Y-%m")
 
     # Total students
@@ -2076,9 +2352,14 @@ def manager_students():
         [s for s in students if s["created_at"].strftime("%Y-%m") == current_month]
     )
 
-    # Membership breakdown
+    # Membership breakdown - Updated with all membership types
     gold_members = len([s for s in students if s["membership_level"] == "Gold"])
     silver_members = len([s for s in students if s["membership_level"] == "Silver"])
+    bronze_members = len([s for s in students if s["membership_level"] == "Bronze"])
+    welcome_members = len(
+        [s for s in students if s["membership_level"] == "Welcome Package"]
+    )
+    guest_members = len([s for s in students if s["membership_level"] == "Guest"])
 
     stats = {
         "total_students": total_students_count,
@@ -2086,14 +2367,17 @@ def manager_students():
         "new_this_month": new_this_month,
         "gold_members": gold_members,
         "silver_members": silver_members,
+        "bronze_members": bronze_members,  # NEW
+        "welcome_members": welcome_members,  # NEW
+        "guest_members": guest_members,  # NEW
     }
 
     # Get membership tiers for dropdown (use static list if table doesn't exist)
     try:
         membership_tiers_raw = conn.execute(
-            "SELECT name FROM membership_tiers WHERE active = 1 ORDER BY sort_order"
+            "SELECT level FROM membership_tiers WHERE active = 1 ORDER BY sort_order"
         ).fetchall()
-        membership_tiers = [tier["name"] for tier in membership_tiers_raw]
+        membership_tiers = [tier["level"] for tier in membership_tiers_raw]
     except:
         # Fallback to static list if table doesn't exist
         membership_tiers = [
@@ -2120,14 +2404,125 @@ def manager_students():
     )
 
 
-# Add these API endpoints to your app.py file
+def process_cancellation_dates(cancellation):
+    """Process cancellation dates to ensure consistent formatting for templates"""
+    cancellation_dict = (
+        dict(cancellation) if hasattr(cancellation, "keys") else cancellation
+    )
+
+    # Convert created_at string to datetime
+    if isinstance(cancellation_dict.get("created_at"), str):
+        try:
+            cancellation_dict["created_at"] = datetime.strptime(
+                cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
+            )
+        except (ValueError, TypeError):
+            cancellation_dict["created_at"] = datetime.now()
+
+    # Convert lesson_date string to date object
+    if isinstance(cancellation_dict.get("lesson_date"), str):
+        try:
+            cancellation_dict["lesson_date"] = datetime.strptime(
+                cancellation_dict["lesson_date"], "%Y-%m-%d"
+            ).date()
+        except (ValueError, TypeError):
+            cancellation_dict["lesson_date"] = datetime.now().date()
+
+    # Convert lesson_time string to time object (handle both HH:MM and HH:MM:SS)
+    if isinstance(cancellation_dict.get("lesson_time"), str):
+        lesson_time_str = cancellation_dict["lesson_time"]
+        try:
+            cancellation_dict["lesson_time"] = datetime.strptime(
+                lesson_time_str, "%H:%M:%S"
+            ).time()
+        except ValueError:
+            try:
+                cancellation_dict["lesson_time"] = datetime.strptime(
+                    lesson_time_str, "%H:%M"
+                ).time()
+            except ValueError:
+                cancellation_dict["lesson_time"] = datetime.strptime(
+                    "00:00", "%H:%M"
+                ).time()
+
+    # Process submitted date and time
+    if cancellation_dict.get("created_at"):
+        created_at = cancellation_dict["created_at"]
+        cancellation_dict["submitted_date"] = created_at.date()
+        cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p")
+
+        # Calculate time ago
+        now = datetime.now()
+        time_diff = now - created_at
+        if time_diff.days > 0:
+            cancellation_dict["time_ago"] = (
+                f"{time_diff.days} day{'s' if time_diff.days != 1 else ''} ago"
+            )
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            cancellation_dict["time_ago"] = (
+                f"{hours} hour{'s' if hours != 1 else ''} ago"
+            )
+        else:
+            minutes = max(1, time_diff.seconds // 60)
+            cancellation_dict["time_ago"] = (
+                f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+            )
+
+    # Process sequential lessons
+    if cancellation_dict.get("sequential_lessons"):
+        try:
+            if isinstance(cancellation_dict["sequential_lessons"], str):
+                sequential_lessons = eval(cancellation_dict["sequential_lessons"])
+            else:
+                sequential_lessons = cancellation_dict["sequential_lessons"]
+
+            # Convert string dates/times to objects for template consistency
+            for lesson in sequential_lessons:
+                if isinstance(lesson.get("date"), str):
+                    lesson["date"] = datetime.strptime(
+                        lesson["date"], "%Y-%m-%d"
+                    ).date()
+                if isinstance(lesson.get("time"), str):
+                    try:
+                        lesson["time"] = datetime.strptime(
+                            lesson["time"], "%H:%M:%S"
+                        ).time()
+                    except ValueError:
+                        lesson["time"] = datetime.strptime(
+                            lesson["time"], "%H:%M"
+                        ).time()
+
+            cancellation_dict["sequential_lessons"] = sequential_lessons
+        except:
+            cancellation_dict["sequential_lessons"] = []
+
+    # Add computed status properties for analytics
+    cancellation_dict["is_free"] = (
+        not cancellation_dict.get("charged", False)
+        and not cancellation_dict.get("excluded", False)
+        and cancellation_dict.get("status") == "approved"
+    )
+
+    cancellation_dict["is_charged"] = cancellation_dict.get(
+        "charged", False
+    ) and not cancellation_dict.get("excluded", False)
+
+    # Ensure boolean fields are properly set
+    cancellation_dict["is_override"] = bool(cancellation_dict.get("is_override", False))
+    cancellation_dict["deadline_passed"] = bool(
+        cancellation_dict.get("deadline_passed", False)
+    )
+    cancellation_dict["excluded"] = bool(cancellation_dict.get("excluded", False))
+
+    return cancellation_dict
 
 
 @app.route("/manager/api/cancellation/process", methods=["POST"])
 @login_required
 @admin_required
 def process_cancellation():
-    """Process individual cancellation"""
+    """Process individual cancellation - UPDATED with override tracking"""
     data = request.json
     action = data.get("action")  # 'approve' or 'charge'
     cancellation_id = data.get("cancellation_id")
@@ -2136,24 +2531,45 @@ def process_cancellation():
     if not action or not cancellation_id:
         return jsonify({"success": False, "message": "Missing required fields"})
 
+    if not reason.strip():
+        return jsonify({"success": False, "message": "Override reason is required"})
+
     conn = get_db()
 
     try:
         if action == "approve":
-            # Mark as approved (free cancellation)
+            # Mark as approved (free cancellation) with override flag
             conn.execute(
-                "UPDATE cancellations SET status = 'approved', charged = 0, manager_notes = ?, updated_at = ? WHERE id = ?",
-                (reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cancellation_id),
+                """UPDATE cancellations 
+                   SET status = 'approved', charged = 0, manager_notes = ?, 
+                       is_override = 1, updated_at = ? 
+                   WHERE id = ?""",
+                (
+                    f"Manager Override: {reason}",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    cancellation_id,
+                ),
             )
-            log_message = f"Cancellation {cancellation_id} approved as free"
+            log_message = (
+                f"Cancellation {cancellation_id} approved as free (Override: {reason})"
+            )
 
         elif action == "charge":
-            # Mark as charged
+            # Mark as charged with override flag
             conn.execute(
-                "UPDATE cancellations SET charged = 1, status = 'charged', manager_notes = ?, updated_at = ? WHERE id = ?",
-                (reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cancellation_id),
+                """UPDATE cancellations 
+                   SET charged = 1, status = 'charged', manager_notes = ?, 
+                       is_override = 1, updated_at = ? 
+                   WHERE id = ?""",
+                (
+                    f"Manager Override: {reason}",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    cancellation_id,
+                ),
             )
-            log_message = f"Cancellation {cancellation_id} marked as charged"
+            log_message = (
+                f"Cancellation {cancellation_id} marked as charged (Override: {reason})"
+            )
 
         else:
             return jsonify({"success": False, "message": "Invalid action"})
@@ -2173,11 +2589,11 @@ def process_cancellation():
 @login_required
 @admin_required
 def batch_process_cancellations():
-    """Batch process multiple cancellations"""
+    """Batch process multiple cancellations - UPDATED with override tracking"""
     data = request.json
     action = data.get("action")  # 'approve', 'charge', or 'exclude'
     cancellation_ids = data.get("cancellation_ids", [])
-    reason = data.get("reason", "")
+    reason = data.get("reason", "Batch processing")
 
     if not action or not cancellation_ids:
         return jsonify({"success": False, "message": "Missing required fields"})
@@ -2190,7 +2606,10 @@ def batch_process_cancellations():
         for cancellation_id in cancellation_ids:
             if action == "approve":
                 conn.execute(
-                    "UPDATE cancellations SET status = 'approved', charged = 0, manager_notes = ?, updated_at = ? WHERE id = ?",
+                    """UPDATE cancellations 
+                       SET status = 'approved', charged = 0, manager_notes = ?, 
+                           is_override = 1, updated_at = ? 
+                       WHERE id = ?""",
                     (
                         f"Batch approval: {reason}",
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2199,7 +2618,10 @@ def batch_process_cancellations():
                 )
             elif action == "charge":
                 conn.execute(
-                    "UPDATE cancellations SET charged = 1, status = 'charged', manager_notes = ?, updated_at = ? WHERE id = ?",
+                    """UPDATE cancellations 
+                       SET charged = 1, status = 'charged', manager_notes = ?, 
+                           is_override = 1, updated_at = ? 
+                       WHERE id = ?""",
                     (
                         f"Batch charge: {reason}",
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2208,7 +2630,10 @@ def batch_process_cancellations():
                 )
             elif action == "exclude":
                 conn.execute(
-                    "UPDATE cancellations SET excluded = 1, exclusion_reason = ?, approved_by = ?, updated_at = ? WHERE id = ?",
+                    """UPDATE cancellations 
+                       SET excluded = 1, exclusion_reason = ?, approved_by = ?, 
+                           is_override = 1, updated_at = ? 
+                       WHERE id = ?""",
                     (
                         reason,
                         session["user_email"],
@@ -2223,7 +2648,8 @@ def batch_process_cancellations():
         conn.close()
 
         log_action(
-            "batch_processing", f"Batch {action}: {processed_count} cancellations"
+            "batch_processing",
+            f"Batch {action}: {processed_count} cancellations ({reason})",
         )
         return jsonify({"success": True, "processed": processed_count})
 
@@ -2236,7 +2662,7 @@ def batch_process_cancellations():
 @login_required
 @admin_required
 def revert_cancellation():
-    """Revert cancellation back to pending"""
+    """Revert cancellation back to pending - UPDATED to clear override flags"""
     data = request.json
     cancellation_id = data.get("cancellation_id")
 
@@ -2247,9 +2673,12 @@ def revert_cancellation():
 
     try:
         conn.execute(
-            "UPDATE cancellations SET status = 'pending', charged = 0, excluded = 0, manager_notes = ?, updated_at = ? WHERE id = ?",
+            """UPDATE cancellations 
+               SET status = 'pending', charged = 0, excluded = 0, 
+                   is_override = 0, manager_notes = ?, updated_at = ? 
+               WHERE id = ?""",
             (
-                f"Reverted by {session['user_email']}",
+                f"Reverted by {session['user_email']} on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 cancellation_id,
             ),
@@ -2272,7 +2701,7 @@ def revert_cancellation():
 @login_required
 @admin_required
 def add_cancellation_note():
-    """Add note to cancellation"""
+    """Add note to cancellation - UNCHANGED"""
     data = request.json
     cancellation_id = data.get("cancellation_id")
     note = data.get("note")
@@ -2312,7 +2741,7 @@ def add_cancellation_note():
 @login_required
 @admin_required
 def process_all_pending():
-    """Auto-process all pending cancellations according to policy"""
+    """Auto-process all pending cancellations according to policy - UPDATED"""
     conn = get_db()
 
     try:
@@ -2322,7 +2751,7 @@ def process_all_pending():
             SELECT c.*, s.membership_level 
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
-            WHERE c.status = 'pending'
+            WHERE c.status = 'pending' OR c.status IS NULL
         """
         ).fetchall()
 
@@ -2334,17 +2763,25 @@ def process_all_pending():
             if not tier:
                 continue
 
-            # Check if within deadline
-            lesson_datetime = datetime.strptime(
-                f"{cancellation['lesson_date']} {cancellation['lesson_time']}",
-                "%Y-%m-%d %H:%M:%S",
-            )
-            created_datetime = datetime.strptime(
-                cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-            )
+            # Check if within deadline using existing deadline_passed field or calculate it
+            deadline_passed = cancellation.get("deadline_passed", 0)
 
-            # Calculate hours between submission and lesson
-            hours_diff = (lesson_datetime - created_datetime).total_seconds() / 3600
+            if not deadline_passed:
+                # Calculate if not already set
+                try:
+                    lesson_datetime = datetime.strptime(
+                        f"{cancellation['lesson_date']} {cancellation['lesson_time']}",
+                        "%Y-%m-%d %H:%M:%S",
+                    )
+                    created_datetime = datetime.strptime(
+                        cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
+                    )
+                    hours_diff = (
+                        lesson_datetime - created_datetime
+                    ).total_seconds() / 3600
+                    deadline_passed = hours_diff < tier["deadline_hours"]
+                except:
+                    deadline_passed = False
 
             # Check monthly usage
             monthly_count = get_monthly_cancellation_count(cancellation["student_id"])
@@ -2353,28 +2790,44 @@ def process_all_pending():
             should_charge = False
             charge_reason = ""
 
-            if hours_diff < tier["deadline_hours"]:
+            if deadline_passed:
                 should_charge = True
                 charge_reason = "Submitted after deadline"
             elif monthly_count >= tier["free_notices"]:
                 should_charge = True
                 charge_reason = "Monthly free cancellation limit exceeded"
 
-            # Update cancellation
+            # Update cancellation - NOT marked as override since this is automatic
             if should_charge:
                 conn.execute(
-                    "UPDATE cancellations SET charged = 1, status = 'charged', manager_notes = ?, updated_at = ? WHERE id = ?",
+                    """UPDATE cancellations 
+                       SET charged = 1, status = 'charged', manager_notes = ?, 
+                           deadline_passed = ?, updated_at = ? 
+                       WHERE id = ?""",
                     (
                         f"Auto-processed: {charge_reason}",
+                        (
+                            1
+                            if deadline_passed
+                            else cancellation.get("deadline_passed", 0)
+                        ),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation["id"],
                     ),
                 )
             else:
                 conn.execute(
-                    "UPDATE cancellations SET status = 'approved', charged = 0, manager_notes = ?, updated_at = ? WHERE id = ?",
+                    """UPDATE cancellations 
+                       SET status = 'approved', charged = 0, manager_notes = ?, 
+                           deadline_passed = ?, updated_at = ? 
+                       WHERE id = ?""",
                     (
                         "Auto-processed: Within policy",
+                        (
+                            1
+                            if deadline_passed
+                            else cancellation.get("deadline_passed", 0)
+                        ),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation["id"],
                     ),
@@ -2467,11 +2920,11 @@ def get_student_details(student_id):
 @login_required
 @admin_required
 def get_cancellation_details(cancellation_id):
-    """Get detailed cancellation information"""
+    """Get detailed cancellation information - UPDATED with new fields"""
     conn = get_db()
 
     try:
-        # Get cancellation with student info
+        # Get cancellation with student info - UPDATED query
         cancellation = conn.execute(
             """
             SELECT c.*, s.first_name, s.last_name, s.parent_first, s.parent_last, 
@@ -2486,35 +2939,38 @@ def get_cancellation_details(cancellation_id):
         if not cancellation:
             return jsonify({"success": False, "message": "Cancellation not found"})
 
+        # Convert Row to dict to use .get() method
+        cancellation_dict = dict(cancellation)
+
         # Get membership tier info for policy analysis
-        tier = get_membership_tier(cancellation["membership_level"])
+        tier = get_membership_tier(cancellation_dict["membership_level"])
 
         # Calculate policy compliance
         try:
             lesson_datetime = datetime.strptime(
-                f"{cancellation['lesson_date']} {cancellation['lesson_time']}",
+                f"{cancellation_dict['lesson_date']} {cancellation_dict['lesson_time']}",
                 "%Y-%m-%d %H:%M:%S",
             )
         except ValueError:
             # Handle time without seconds
             lesson_datetime = datetime.strptime(
-                f"{cancellation['lesson_date']} {cancellation['lesson_time']}:00",
+                f"{cancellation_dict['lesson_date']} {cancellation_dict['lesson_time']}:00",
                 "%Y-%m-%d %H:%M:%S",
             )
 
         created_datetime = datetime.strptime(
-            cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
+            cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
         )
         hours_notice = (lesson_datetime - created_datetime).total_seconds() / 3600
 
         # Get monthly usage
-        monthly_count = get_monthly_cancellation_count(cancellation["student_id"])
+        monthly_count = get_monthly_cancellation_count(cancellation_dict["student_id"])
 
         # Parse sequential lessons
         sequential_lessons = []
-        if cancellation["sequential_lessons"]:
+        if cancellation_dict["sequential_lessons"]:
             try:
-                sequential_lessons = eval(cancellation["sequential_lessons"])
+                sequential_lessons = eval(cancellation_dict["sequential_lessons"])
             except:
                 sequential_lessons = []
 
@@ -2532,21 +2988,28 @@ def get_cancellation_details(cancellation_id):
 
         conn.close()
 
+        # Use deadline_passed from database if available, otherwise calculate
+        within_deadline = True
+        if cancellation_dict.get("deadline_passed") is not None:
+            within_deadline = not bool(cancellation_dict["deadline_passed"])
+        elif tier:
+            within_deadline = hours_notice >= tier["deadline_hours"]
+
         return jsonify(
             {
                 "success": True,
                 "cancellation": {
-                    **dict(cancellation),
+                    **cancellation_dict,
                     "sequential_lessons": sequential_lessons,
                 },
                 "student": {
-                    "first_name": cancellation["first_name"],
-                    "last_name": cancellation["last_name"],
-                    "parent_first": cancellation["parent_first"] or "",
-                    "parent_last": cancellation["parent_last"] or "",
-                    "email": cancellation["email"],
-                    "phone": cancellation["phone"] or "",
-                    "membership_level": cancellation["membership_level"],
+                    "first_name": cancellation_dict["first_name"],
+                    "last_name": cancellation_dict["last_name"],
+                    "parent_first": cancellation_dict["parent_first"] or "",
+                    "parent_last": cancellation_dict["parent_last"] or "",
+                    "email": cancellation_dict["email"],
+                    "phone": cancellation_dict["phone"] or "",
+                    "membership_level": cancellation_dict["membership_level"],
                 },
                 "policy": {
                     "monthly_limit": tier["free_notices"] if tier else 1,
@@ -2558,11 +3021,10 @@ def get_cancellation_details(cancellation_id):
                         tier["deadline_display"] if tier else "6pm previous day"
                     ),
                     "hours_notice": round(hours_notice, 1),
-                    "within_deadline": hours_notice
-                    >= (tier["deadline_hours"] if tier else 18),
+                    "within_deadline": within_deadline,
                     "policy_result": (
                         "Within policy"
-                        if hours_notice >= (tier["deadline_hours"] if tier else 18)
+                        if within_deadline
                         and monthly_count < (tier["free_notices"] if tier else 1)
                         else "Policy violation"
                     ),
@@ -2573,24 +3035,26 @@ def get_cancellation_details(cancellation_id):
 
     except Exception as e:
         conn.close()
-        print(f"Error in get_cancellation_details: {str(e)}")  # For debugging
+        print(f"Error in get_cancellation_details: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
 
 
-# Update the existing manager_cancellations route to handle AJAX requests
+# Update the existing manager_cancellations route to handle student and view parameters properly
+# Debug version of the manager_cancellations route
 @app.route("/manager/cancellations")
 @login_required
 @admin_required
 def manager_cancellations():
-    """Manager cancellations page - updated to handle AJAX"""
+    """Manager cancellations page - UPDATED with consistent date processing"""
     # Get filter parameters
-    filter_status = request.args.get("status", "all")
-    filter_month = request.args.get("month", datetime.now().strftime("%Y-%m"))
+    filter_status = request.args.get("status", "")
     search = request.args.get("search", "")
     date_range = request.args.get("date_range", "month")
     membership = request.args.get("membership", "")
-    sort_by = request.args.get("sort", "recent")
+    sort_by = request.args.get("sort", "submit_date")
     student_id = request.args.get("student")
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
 
     # Check if this is an AJAX request
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -2601,20 +3065,26 @@ def manager_cancellations():
     where_clauses = []
     params = []
 
-    # Add student filter - ADD THIS SECTION
+    # Add student filter
     if student_id:
         where_clauses.append("c.student_id = ?")
         params.append(student_id)
 
-    # Status filters
-    if filter_status == "pending":
-        where_clauses.append("c.status = 'pending'")
+    # Status filters - UPDATED with new options
+    if filter_status == "free":
+        where_clauses.append("c.charged = 0 AND c.status = 'approved'")
     elif filter_status == "charged":
         where_clauses.append("c.charged = 1")
-    elif filter_status == "free":
-        where_clauses.append("c.charged = 0 AND c.status = 'approved'")
     elif filter_status == "excluded":
         where_clauses.append("c.excluded = 1")
+    elif filter_status == "note":
+        where_clauses.append(
+            "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''"
+        )
+    elif filter_status == "deadline_passed":
+        where_clauses.append("c.deadline_passed = 1")
+    elif filter_status == "override":
+        where_clauses.append("c.is_override = 1")
 
     # Search filter
     if search:
@@ -2624,13 +3094,20 @@ def manager_cancellations():
         search_param = f"%{search}%"
         params.extend([search_param, search_param, search_param])
 
-    # Date range filter
+    # Date range filter - UPDATED with new options
     if date_range == "today":
         where_clauses.append("DATE(c.created_at) = DATE('now')")
-    elif date_range == "week":
+    elif date_range == "yesterday":
+        where_clauses.append("DATE(c.created_at) = DATE('now', '-1 day')")
+    elif date_range == "7days":
         where_clauses.append("c.created_at >= DATE('now', '-7 days')")
     elif date_range == "month":
         where_clauses.append("c.created_at >= DATE('now', '-30 days')")
+    elif date_range == "all":
+        pass  # No date filter
+    elif date_range == "custom" and date_from and date_to:
+        where_clauses.append("DATE(c.created_at) BETWEEN ? AND ?")
+        params.extend([date_from, date_to])
 
     # Membership filter
     if membership:
@@ -2639,14 +3116,17 @@ def manager_cancellations():
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-    # Sort order
-    order_by = "c.created_at DESC"  # default
-    if sort_by == "lesson_date":
+    # Sort order - UPDATED with new options
+    if sort_by == "submit_date":
+        order_by = "c.created_at DESC"
+    elif sort_by == "lesson_date":
         order_by = "c.lesson_date DESC"
     elif sort_by == "student":
         order_by = "s.last_name, s.first_name"
     elif sort_by == "status":
         order_by = "c.status, c.charged, c.excluded"
+    else:
+        order_by = "c.created_at DESC"
 
     # Get cancellations with student info
     cancellations_raw = conn.execute(
@@ -2661,94 +3141,24 @@ def manager_cancellations():
         params,
     ).fetchall()
 
-    # Convert to list of dicts and parse dates
+    # Process cancellations data with consistent date formatting
     cancellations = []
     for row in cancellations_raw:
-        cancellation = dict(row)
-
-        # Convert date strings to datetime objects
-        created_at_dt = None
-        try:
-            # Parse lesson date (this is the date the lesson was scheduled for)
-            if cancellation["lesson_date"]:
-                cancellation["lesson_date"] = datetime.strptime(
-                    cancellation["lesson_date"], "%Y-%m-%d"
-                ).date()
-
-            # Parse lesson time
-            if cancellation["lesson_time"]:
-                lesson_time_str = cancellation["lesson_time"]
-                try:
-                    # Try parsing with seconds first
-                    cancellation["lesson_time"] = datetime.strptime(
-                        lesson_time_str, "%H:%M:%S"
-                    ).time()
-                except ValueError:
-                    # If that fails, try parsing without seconds
-                    try:
-                        cancellation["lesson_time"] = datetime.strptime(
-                            lesson_time_str, "%H:%M"
-                        ).time()
-                    except ValueError:
-                        # If both fail, set a default time
-                        cancellation["lesson_time"] = datetime.strptime(
-                            "00:00", "%H:%M"
-                        ).time()
-
-            # Parse submission date/time (when the cancellation was submitted)
-            if cancellation["created_at"]:
-                created_at_dt = datetime.strptime(
-                    cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-                )
-                cancellation["created_at"] = created_at_dt
-                cancellation["submitted_date"] = (
-                    created_at_dt.date()
-                )  # This should be different from lesson_date
-                cancellation["submitted_time"] = created_at_dt.strftime("%I:%M %p")
-
-                # Calculate time ago
-                now = datetime.now()
-                time_diff = now - created_at_dt
-                if time_diff.days > 0:
-                    cancellation["time_ago"] = f"{time_diff.days} days ago"
-                elif time_diff.seconds > 3600:
-                    hours = time_diff.seconds // 3600
-                    cancellation["time_ago"] = f"{hours} hours ago"
-                else:
-                    minutes = max(1, time_diff.seconds // 60)
-                    cancellation["time_ago"] = f"{minutes} minutes ago"
-            else:
-                # Handle case where created_at is None or empty
-                created_at_dt = datetime.now()
-                cancellation["created_at"] = created_at_dt
-                cancellation["submitted_date"] = created_at_dt.date()
-                cancellation["submitted_time"] = created_at_dt.strftime("%I:%M %p")
-                cancellation["time_ago"] = "Just now"
-
-        except ValueError as e:
-            print(
-                f"Date parsing error for cancellation {cancellation.get('id', 'unknown')}: {e}"
-            )
-            # Set default values if parsing fails - make sure they're different
-            created_at_dt = datetime.now()
-            cancellation["lesson_date"] = (
-                datetime.now().date()
-            )  # This would be the lesson date
-            cancellation["lesson_time"] = datetime.now().time()
-            cancellation["created_at"] = created_at_dt
-            cancellation["submitted_date"] = (
-                created_at_dt.date()
-            )  # This would be today (submission date)
-            cancellation["submitted_time"] = created_at_dt.strftime("%I:%M %p")
-            cancellation["time_ago"] = "Unknown"
+        cancellation = process_cancellation_dates(row)
 
         # Add computed fields
         cancellation["student_name"] = (
             f"{cancellation['first_name']} {cancellation['last_name']}"
         )
 
-        # Status class for CSS
-        if cancellation["excluded"]:
+        # Status class for CSS - UPDATED with new status types
+        if cancellation.get("cancellation_note"):
+            cancellation["status_class"] = "note"
+        elif cancellation.get("deadline_passed"):
+            cancellation["status_class"] = "deadline-passed"
+        elif cancellation.get("is_override"):
+            cancellation["status_class"] = "override"
+        elif cancellation["excluded"]:
             cancellation["status_class"] = "excluded"
         elif cancellation["charged"]:
             cancellation["status_class"] = "charged"
@@ -2757,9 +3167,40 @@ def manager_cancellations():
         else:
             cancellation["status_class"] = "pending"
 
+        # Calculate deadline status
+        tier = get_membership_tier(cancellation["membership_level"])
+        if tier and cancellation.get("created_at"):
+            lesson_datetime = datetime.combine(
+                cancellation["lesson_date"], cancellation["lesson_time"]
+            )
+            hours_notice = (
+                lesson_datetime - cancellation["created_at"]
+            ).total_seconds() / 3600
+            cancellation["within_deadline"] = hours_notice >= tier["deadline_hours"]
+        else:
+            cancellation["within_deadline"] = True
+
+        # Add usage statistics
+        cancellation["used_this_month"] = get_monthly_cancellation_count(
+            cancellation.get("student_id")
+        )
+        cancellation["monthly_limit"] = tier["free_notices"] if tier else 1
+
+        # Additional fields
+        cancellation["reschedule_requested"] = bool(
+            cancellation.get("reschedule_requested")
+        )
+        cancellation["reschedule_preferences"] = cancellation.get(
+            "reschedule_preferences", ""
+        )
+        cancellation["error_report"] = cancellation.get("error_report", "")
+        cancellation["approved_by"] = cancellation.get("approved_by", "")
+
         # Add urgency flags
-        if created_at_dt:
-            hours_since = (datetime.now() - created_at_dt).total_seconds() / 3600
+        if cancellation.get("created_at"):
+            hours_since = (
+                datetime.now() - cancellation["created_at"]
+            ).total_seconds() / 3600
             cancellation["is_recent"] = hours_since < 2
             cancellation["is_urgent"] = (
                 hours_since > 24 and cancellation.get("status") == "pending"
@@ -2768,56 +3209,6 @@ def manager_cancellations():
             cancellation["is_recent"] = False
             cancellation["is_urgent"] = False
 
-        # Parse sequential lessons if they exist
-        sequential_lessons = []
-        if cancellation.get("sequential_lessons"):
-            try:
-                # Handle both string and already parsed data
-                if isinstance(cancellation["sequential_lessons"], str):
-                    sequential_lessons = eval(cancellation["sequential_lessons"])
-                else:
-                    sequential_lessons = cancellation["sequential_lessons"]
-
-                # Convert string dates to datetime objects for template
-                for lesson in sequential_lessons:
-                    if isinstance(lesson.get("date"), str):
-                        lesson["date"] = datetime.strptime(
-                            lesson["date"], "%Y-%m-%d"
-                        ).date()
-                    if isinstance(lesson.get("time"), str):
-                        try:
-                            lesson["time"] = datetime.strptime(
-                                lesson["time"], "%H:%M:%S"
-                            ).time()
-                        except ValueError:
-                            lesson["time"] = datetime.strptime(
-                                lesson["time"], "%H:%M"
-                            ).time()
-            except:
-                sequential_lessons = []
-
-        cancellation["sequential_lessons"] = sequential_lessons
-
-        # Additional fields that template expects
-        cancellation["reschedule_requested"] = bool(
-            cancellation.get("reschedule_requested")
-        )
-        cancellation["reschedule_preferences"] = cancellation.get(
-            "reschedule_preferences", ""
-        )
-        cancellation["error_report"] = cancellation.get("error_report", "")
-        cancellation["within_deadline"] = True  # Calculate based on your business logic
-        cancellation["used_this_month"] = get_monthly_cancellation_count(
-            cancellation.get("student_id")
-        )
-
-        # Get membership tier info for monthly limit
-        tier = get_membership_tier(cancellation["membership_level"])
-        cancellation["monthly_limit"] = tier["free_notices"] if tier else 1
-
-        cancellation["approved_by"] = cancellation.get("approved_by", "")
-        cancellation["approval_date"] = cancellation.get("approval_date", "")
-
         cancellations.append(cancellation)
 
     # Get summary stats
@@ -2825,13 +3216,13 @@ def manager_cancellations():
         f"""
         SELECT
             COUNT(*) as total_cancellations,
-            SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending_review,
-            SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_submissions,
-            SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free_this_month,
-            SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_this_month,
-            SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_this_month,
-            SUM(CASE WHEN DATE(c.created_at) = DATE('now') AND c.status = 'approved' THEN 1 ELSE 0 END) as today_processed,
-            SUM(CASE WHEN c.created_at >= DATE('now', '-1 day') AND c.status = 'pending' THEN 1 ELSE 0 END) as urgent_cancellations
+            SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
+            SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free_cancellations,
+            SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_cancellations,
+            SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations,
+            SUM(CASE WHEN c.is_override = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as override_this_month,
+            SUM(CASE WHEN c.deadline_passed = 1 AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as deadline_passed,
+            SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
         WHERE {where_sql}
         """,
@@ -2843,13 +3234,13 @@ def manager_cancellations():
         if stats_raw
         else {
             "total_cancellations": 0,
-            "pending_review": 0,
-            "today_submissions": 0,
-            "free_this_month": 0,
-            "charged_this_month": 0,
-            "excluded_this_month": 0,
-            "today_processed": 0,
-            "urgent_cancellations": 0,
+            "today_cancellations": 0,
+            "free_cancellations": 0,
+            "charged_cancellations": 0,
+            "excluded_cancellations": 0,
+            "override_this_month": 0,
+            "deadline_passed": 0,
+            "with_notes": 0,
         }
     )
 
@@ -2864,7 +3255,24 @@ def manager_cancellations():
         "Welcome Package",
     ]
 
-    # Mock pagination (you can implement real pagination if needed)
+    # Handle student context for filtering
+    current_student_id = None
+    filtered_student_name = ""
+
+    if student_id:
+        try:
+            student_info = conn.execute(
+                "SELECT first_name, last_name FROM students WHERE id = ?", (student_id,)
+            ).fetchone()
+            if student_info:
+                current_student_id = int(student_id)
+                filtered_student_name = (
+                    f"{student_info['first_name']} {student_info['last_name']}"
+                )
+        except (ValueError, TypeError):
+            pass
+
+    # Mock pagination
     pagination = type(
         "Pagination",
         (),
@@ -2881,129 +3289,560 @@ def manager_cancellations():
 
     conn.close()
 
-    # If AJAX request, return just the content we need to update
-    if is_ajax:
-        # For AJAX requests, we could return JSON data instead of full HTML
-        # But for simplicity, we'll return the full template and let JS parse it
-        pass
-
     return render_template(
         "manager_cancellations.html",
         cancellations=cancellations,
         stats=stats,
         filter_status=filter_status,
-        filter_month=filter_month,
         membership_tiers=membership_tiers,
         pagination=pagination,
+        current_student_id=current_student_id,
+        filtered_student_name=filtered_student_name,
     )
+
+
+# Add these helper functions to your app.py file in the UTILITY FUNCTIONS section
+
+
+def prepare_cancellations_for_json(cancellations):
+    """
+    Prepare cancellation data specifically for JSON serialization
+    """
+    json_cancellations = []
+    for cancellation in cancellations:
+        # Create a clean dict with only serializable data
+        json_cancellation = {
+            "id": cancellation.get("id"),
+            "student_name": cancellation.get("student_name", ""),
+            "first_name": cancellation.get("first_name", ""),
+            "last_name": cancellation.get("last_name", ""),
+            "membership_level": cancellation.get("membership_level", ""),
+            "lesson_date": str(cancellation.get("lesson_date", "")),
+            "lesson_time": str(cancellation.get("lesson_time", "")),
+            "created_at": str(cancellation.get("created_at", "")),
+            "status": cancellation.get("status", ""),
+            "charged": bool(cancellation.get("charged", False)),
+            "excluded": bool(cancellation.get("excluded", False)),
+            "deadline_passed": bool(cancellation.get("deadline_passed", False)),
+            "is_override": bool(cancellation.get("is_override", False)),
+            "cancellation_note": str(cancellation.get("cancellation_note", "") or ""),
+            "manager_notes": str(cancellation.get("manager_notes", "") or ""),
+            "reschedule_requested": bool(
+                cancellation.get("reschedule_requested", False)
+            ),
+            "reschedule_preferences": str(
+                cancellation.get("reschedule_preferences", "") or ""
+            ),
+            "error_report": str(cancellation.get("error_report", "") or ""),
+        }
+        json_cancellations.append(json_cancellation)
+    return json_cancellations
+
+
+def make_json_serializable(obj):
+    """
+    Convert objects to JSON serializable format
+    """
+    from datetime import datetime, date, time
+
+    if isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, (date, time, datetime)):
+        return str(obj)
+    elif hasattr(obj, "__dict__"):
+        return make_json_serializable(obj.__dict__)
+    else:
+        return obj
+
+
+def get_analytics_summary(date_range="month", status_filter="", membership_filter=""):
+    """
+    Get analytics summary for dashboard widgets
+    """
+    conn = get_db()
+
+    try:
+        # Build filters similar to main analytics
+        date_conditions = {
+            "today": "DATE(c.created_at) = DATE('now')",
+            "7days": "c.created_at >= DATE('now', '-7 days')",
+            "month": "c.created_at >= DATE('now', '-30 days')",
+            "all": "1=1",
+        }
+
+        date_clause = date_conditions.get(date_range, date_conditions["month"])
+        where_clause = f"WHERE {date_clause}"
+        params = []
+
+        if status_filter:
+            status_conditions = {
+                "free": "c.charged = 0 AND c.excluded = 0 AND c.status = 'approved'",
+                "charged": "c.charged = 1 AND c.excluded = 0",
+                "excluded": "c.excluded = 1",
+                "deadline_passed": "c.deadline_passed = 1",
+                "override": "c.is_override = 1",
+            }
+            if status_filter in status_conditions:
+                where_clause += f" AND {status_conditions[status_filter]}"
+
+        if membership_filter:
+            where_clause += " AND s.membership_level = ?"
+            params.append(membership_filter)
+
+        summary_query = f"""
+            SELECT
+                COUNT(*) as total_count,
+                COUNT(DISTINCT c.student_id) as unique_students,
+                AVG(CASE WHEN c.charged = 1 THEN 1.0 ELSE 0.0 END) as charge_rate,
+                COUNT(CASE WHEN c.is_override = 1 THEN 1 END) as override_count
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            {where_clause}
+        """
+
+        result = conn.execute(summary_query, params).fetchone()
+        conn.close()
+
+        return {
+            "total_count": result["total_count"] or 0,
+            "unique_students": result["unique_students"] or 0,
+            "charge_rate": round((result["charge_rate"] or 0) * 100, 1),
+            "override_count": result["override_count"] or 0,
+        }
+
+    except Exception as e:
+        conn.close()
+        print(f"Error in get_analytics_summary: {e}")
+        return {
+            "total_count": 0,
+            "unique_students": 0,
+            "charge_rate": 0.0,
+            "override_count": 0,
+        }
+
+
+# Replace your manager_analytics route with this version that fixes the data structure issues
 
 
 @app.route("/manager/analytics")
 @login_required
 @admin_required
 def manager_analytics():
-    """Manager analytics page"""
+    """Manager analytics page with consistent data between stats and charts"""
+    # Get filter parameters
+    date_range = request.args.get("date_range", "month")
+    status_filter = request.args.get("status", "")
+    membership_filter = request.args.get("membership", "")
+    format_type = request.args.get("format", "html")
+
     conn = get_db()
 
     try:
-        # Monthly trends (last 12 months)
-        monthly_trends_raw = conn.execute(
+        print(f"\n=== ANALYTICS DEBUG START ===")
+        print(
+            f"Filters: date_range={date_range}, status={status_filter}, membership={membership_filter}"
+        )
+
+        # FIRST: Let's see what data we actually have
+        total_in_db = conn.execute(
+            "SELECT COUNT(*) as count FROM cancellations"
+        ).fetchone()["count"]
+        print(f"Total cancellations in database: {total_in_db}")
+
+        # Check date range of actual data
+        date_range_info = conn.execute(
             """
             SELECT 
-                strftime('%Y-%m', created_at) as month,
-                COUNT(*) as total_cancellations,
-                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free_cancellations,
-                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged_cancellations
+                MIN(created_at) as earliest,
+                MAX(created_at) as latest,
+                COUNT(*) as total
             FROM cancellations
-            WHERE created_at >= date('now', '-12 months')
-            GROUP BY strftime('%Y-%m', created_at)
-            ORDER BY month
         """
-        ).fetchall()
+        ).fetchone()
 
-        monthly_trends = [dict(row) for row in monthly_trends_raw]
+        if date_range_info:
+            print(
+                f"Data spans: {date_range_info['earliest']} to {date_range_info['latest']}"
+            )
 
-        # Membership tier distribution
-        tier_distribution_raw = conn.execute(
-            """
-            SELECT 
-                s.membership_level, 
-                COUNT(s.id) as student_count,
-                COALESCE(AVG(cancellation_counts.monthly_avg), 0) as avg_monthly_cancellations
-            FROM students s
-            LEFT JOIN (
-                SELECT 
-                    student_id, 
-                    COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT strftime('%Y-%m', created_at)), 0) as monthly_avg
-                FROM cancellations
-                WHERE created_at >= date('now', '-6 months')
-                GROUP BY student_id
-            ) cancellation_counts ON s.id = cancellation_counts.student_id
-            GROUP BY s.membership_level
-            ORDER BY student_count DESC
+        # Build date filter for FILTERED data (stats)
+        date_conditions = {
+            "today": "DATE(c.created_at) = DATE('now')",
+            "7days": "c.created_at >= DATE('now', '-7 days')",
+            "month": "c.created_at >= DATE('now', '-30 days')",
+            "all": "1=1",  # No date filter - this is what finds all 14!
+        }
+        date_clause = date_conditions.get(date_range, date_conditions["month"])
+
+        # Build status filter
+        status_conditions = {
+            "free": "c.charged = 0 AND c.excluded = 0 AND c.status = 'approved'",
+            "charged": "c.charged = 1 AND c.excluded = 0",
+            "excluded": "c.excluded = 1",
+            "deadline_passed": "c.deadline_passed = 1",
+            "override": "c.is_override = 1",
+            "note": "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''",
+        }
+        status_clause = status_conditions.get(status_filter, "1=1")
+
+        # Build membership filter
+        where_clause = f"WHERE {date_clause} AND {status_clause}"
+        params = []
+
+        if membership_filter:
+            where_clause += " AND s.membership_level = ?"
+            params.append(membership_filter)
+
+        print(f"Filter WHERE clause: {where_clause}")
+        print(f"Filter params: {params}")
+
+        # 1. Summary statistics with applied filters
+        stats_query = f"""
+            SELECT
+                CAST(COUNT(*) AS INTEGER) as total_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) AS INTEGER) as free_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 1 AND c.excluded = 0 THEN 1 ELSE 0 END) AS INTEGER) as charged_cancellations,
+                CAST(SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) AS INTEGER) as excluded_cancellations,
+                CAST(SUM(CASE WHEN c.is_override = 1 THEN 1 ELSE 0 END) AS INTEGER) as override_cancellations,
+                CAST(SUM(CASE WHEN c.deadline_passed = 1 THEN 1 ELSE 0 END) AS INTEGER) as deadline_passed,
+                CAST(SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' THEN 1 ELSE 0 END) AS INTEGER) as with_notes
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            {where_clause}
         """
-        ).fetchall()
 
-        tier_distribution = [dict(row) for row in tier_distribution_raw]
+        stats_raw = conn.execute(stats_query, params).fetchone()
 
-        # Top students
-        top_students_raw = conn.execute(
-            """
+        # Process stats
+        stats = {}
+        if stats_raw:
+            for key in stats_raw.keys():
+                value = stats_raw[key]
+                stats[key] = int(value) if value is not None else 0
+        else:
+            stats = {
+                "total_cancellations": 0,
+                "free_cancellations": 0,
+                "charged_cancellations": 0,
+                "excluded_cancellations": 0,
+                "override_cancellations": 0,
+                "deadline_passed": 0,
+                "with_notes": 0,
+            }
+
+        print(f"STATS with current filters: {stats}")
+
+        # 2. Monthly trends - USE SAME FILTERS for consistency!
+        monthly_trends_query = f"""
             SELECT 
-                s.first_name, 
-                s.last_name, 
-                s.membership_level, 
-                COUNT(c.id) as cancellation_count
+                strftime('%Y-%m', c.created_at) as month,
+                CAST(COUNT(*) AS INTEGER) as total_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) AS INTEGER) as free_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 1 AND c.excluded = 0 THEN 1 ELSE 0 END) AS INTEGER) as charged_cancellations,
+                CAST(SUM(CASE WHEN c.is_override = 1 THEN 1 ELSE 0 END) AS INTEGER) as override_cancellations
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            {where_clause}
+            GROUP BY strftime('%Y-%m', c.created_at)
+            ORDER BY month ASC
+        """
+
+        print("Monthly trends query with same filters:")
+        print(monthly_trends_query)
+        print(f"With params: {params}")
+
+        monthly_trends_raw = conn.execute(monthly_trends_query, params).fetchall()
+        monthly_trends = []
+
+        print(f"Monthly trends raw results: {len(monthly_trends_raw)} months")
+
+        if monthly_trends_raw:
+            total_from_trends = 0
+            for trend in monthly_trends_raw:
+                try:
+                    month_date = datetime.strptime(trend["month"], "%Y-%m")
+                    trend_data = {
+                        "month": month_date.strftime("%b %Y"),
+                        "month_short": month_date.strftime("%m/%y"),
+                        "total_cancellations": int(trend["total_cancellations"] or 0),
+                        "free_cancellations": int(trend["free_cancellations"] or 0),
+                        "charged_cancellations": int(
+                            trend["charged_cancellations"] or 0
+                        ),
+                        "override_cancellations": int(
+                            trend["override_cancellations"] or 0
+                        ),
+                    }
+                    monthly_trends.append(trend_data)
+                    total_from_trends += trend_data["total_cancellations"]
+                    print(
+                        f"  {trend_data['month']}: {trend_data['total_cancellations']} total"
+                    )
+                except (ValueError, TypeError) as e:
+                    print(f"Error parsing month {trend['month']}: {e}")
+                    continue
+
+            print(f"Total from trends: {total_from_trends}")
+            print(f"Total from stats: {stats['total_cancellations']}")
+
+            if total_from_trends != stats["total_cancellations"]:
+                print("⚠️  WARNING: Trends total doesn't match stats total!")
+
+        # If no monthly data found, create structure based on actual data
+        if not monthly_trends:
+            print("No monthly trends found, checking if any cancellations exist...")
+
+            if stats["total_cancellations"] > 0:
+                print("Stats show cancellations exist, but trends query found none!")
+
+                # Let's see what months actually have data (no filters)
+                all_months_query = """
+                    SELECT DISTINCT 
+                        strftime('%Y-%m', created_at) as month,
+                        COUNT(*) as count
+                    FROM cancellations 
+                    GROUP BY strftime('%Y-%m', created_at)
+                    ORDER BY month DESC
+                """
+                all_months = conn.execute(all_months_query).fetchall()
+                print(
+                    f"All months in DB: {[(m['month'], m['count']) for m in all_months]}"
+                )
+
+                # Create trend for current month with aggregated data
+                current_month = datetime.now()
+                monthly_trends = [
+                    {
+                        "month": current_month.strftime("%b %Y"),
+                        "month_short": current_month.strftime("%m/%y"),
+                        "total_cancellations": stats["total_cancellations"],
+                        "free_cancellations": stats["free_cancellations"],
+                        "charged_cancellations": stats["charged_cancellations"],
+                        "override_cancellations": stats["override_cancellations"],
+                    }
+                ]
+                print(f"Created synthetic monthly trend: {monthly_trends[0]}")
+            else:
+                # Truly no data
+                current_month = datetime.now()
+                monthly_trends = [
+                    {
+                        "month": current_month.strftime("%b %Y"),
+                        "month_short": current_month.strftime("%m/%y"),
+                        "total_cancellations": 0,
+                        "free_cancellations": 0,
+                        "charged_cancellations": 0,
+                        "override_cancellations": 0,
+                    }
+                ]
+
+        # 3. Top students (with same filters)
+        top_students_query = f"""
+            SELECT 
+                s.first_name, s.last_name, s.membership_level, 
+                CAST(COUNT(c.id) AS INTEGER) as cancellation_count
             FROM students s
             JOIN cancellations c ON s.id = c.student_id
-            WHERE c.created_at >= date('now', '-6 months')
-            GROUP BY s.id
+            {where_clause}
+            GROUP BY s.id, s.first_name, s.last_name, s.membership_level
+            HAVING cancellation_count > 0
             ORDER BY cancellation_count DESC
             LIMIT 10
         """
-        ).fetchall()
 
-        top_students = [dict(row) for row in top_students_raw]
+        top_students_raw = conn.execute(top_students_query, params).fetchall()
+        top_students = [dict(s) for s in top_students_raw]
 
-        # Revenue impact
-        revenue_impact_raw = conn.execute(
-            """
-            SELECT
-                strftime('%Y-%m', created_at) as month,
-                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) * 25 as estimated_charges
-            FROM cancellations
-            WHERE created_at >= date('now', '-12 months')
-            GROUP BY strftime('%Y-%m', created_at)
-            ORDER BY month
+        # 4. Membership tier analysis (with same filters)
+        tier_analysis_query = f"""
+            SELECT 
+                s.membership_level,
+                CAST(COUNT(DISTINCT s.id) AS INTEGER) as student_count,
+                CAST(COUNT(c.id) AS INTEGER) as total_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) AS INTEGER) as free_cancellations,
+                CAST(SUM(CASE WHEN c.charged = 1 AND c.excluded = 0 THEN 1 ELSE 0 END) AS INTEGER) as charged_cancellations,
+                CAST(ROUND(COUNT(c.id) * 1.0 / NULLIF(COUNT(DISTINCT s.id), 0), 2) AS REAL) as avg_monthly_cancellations
+            FROM students s
+            JOIN cancellations c ON s.id = c.student_id
+            {where_clause}
+            GROUP BY s.membership_level
+            HAVING total_cancellations > 0
+            ORDER BY student_count DESC
         """
+
+        tier_distribution_raw = conn.execute(tier_analysis_query, params).fetchall()
+        tier_distribution = [dict(t) for t in tier_distribution_raw]
+
+        # 5. Filtered cancellations for table (with same filters)
+        filtered_cancellations_query = f"""
+            SELECT c.*, s.first_name, s.last_name, s.membership_level,
+                   (s.first_name || ' ' || s.last_name) as student_name
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            {where_clause}
+            ORDER BY c.created_at DESC
+            LIMIT 50
+        """
+
+        filtered_cancellations_raw = conn.execute(
+            filtered_cancellations_query, params
         ).fetchall()
 
-        revenue_impact = [dict(row) for row in revenue_impact_raw]
+        # Process cancellations
+        filtered_cancellations = []
+        for cancellation in filtered_cancellations_raw:
+            processed_cancellation = process_cancellation_dates(cancellation)
+            filtered_cancellations.append(processed_cancellation)
+
+        # 6. Revenue impact (no filters - always show all for broader context)
+        revenue_impact_query = """
+            SELECT
+                strftime('%Y-%m', c.created_at) as month,
+                CAST(SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) AS INTEGER) as charged_count,
+                CAST(SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) * 25 AS INTEGER) as estimated_revenue
+            FROM cancellations c
+            WHERE c.created_at >= DATE('now', '-12 months')
+            GROUP BY strftime('%Y-%m', c.created_at)
+            ORDER BY month ASC
+        """
+
+        revenue_impact_raw = conn.execute(revenue_impact_query).fetchall()
+        revenue_impact = []
+
+        for revenue in revenue_impact_raw:
+            try:
+                month_date = datetime.strptime(revenue["month"], "%Y-%m")
+                revenue_impact.append(
+                    {
+                        "month": month_date.strftime("%b %Y"),
+                        "charged_count": int(revenue["charged_count"] or 0),
+                        "estimated_revenue": int(revenue["estimated_revenue"] or 0),
+                    }
+                )
+            except (ValueError, TypeError):
+                continue
 
         conn.close()
 
+        print(f"FINAL RESULTS:")
+        print(f"  Stats: {stats}")
+        print(f"  Monthly trends: {len(monthly_trends)} months")
+        print(f"  First month: {monthly_trends[0] if monthly_trends else 'None'}")
+        print(f"=== ANALYTICS DEBUG END ===\n")
+
+        # Handle JSON request for AJAX
+        if format_type == "json":
+            json_data = {
+                "success": True,
+                "stats": stats,
+                "monthly_trends": monthly_trends,
+                "top_students": top_students,
+                "tier_distribution": tier_distribution,
+                "filtered_cancellations": prepare_cancellations_for_json(
+                    filtered_cancellations
+                ),
+                "revenue_impact": revenue_impact,
+            }
+            return jsonify(json_data)
+
+        # Regular HTML response
+        log_action(
+            "analytics_viewed",
+            f"Filters: {date_range}, {status_filter}, {membership_filter}",
+        )
+
         return render_template(
             "manager_analytics.html",
+            stats=stats,
             monthly_trends=monthly_trends,
             tier_distribution=tier_distribution,
             top_students=top_students,
+            filtered_cancellations=filtered_cancellations,
             revenue_impact=revenue_impact,
+            current_filters={
+                "date_range": date_range,
+                "status": status_filter,
+                "membership": membership_filter,
+            },
+            debug_info={
+                "trends_count": len(monthly_trends),
+                "has_data": len(monthly_trends) > 0
+                and any(t["total_cancellations"] > 0 for t in monthly_trends),
+                "first_month": monthly_trends[0]["month"] if monthly_trends else "None",
+                "total_in_first": (
+                    monthly_trends[0]["total_cancellations"] if monthly_trends else 0
+                ),
+            },
         )
 
     except Exception as e:
         conn.close()
+        print(f"ERROR in manager_analytics: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+
+        log_action("analytics_error", f"Error loading analytics: {str(e)}")
+
+        # Return safe fallback
+        fallback_stats = {
+            "total_cancellations": 0,
+            "free_cancellations": 0,
+            "charged_cancellations": 0,
+            "excluded_cancellations": 0,
+            "override_cancellations": 0,
+            "deadline_passed": 0,
+            "with_notes": 0,
+        }
+
+        fallback_trends = [
+            {
+                "month": datetime.now().strftime("%b %Y"),
+                "month_short": datetime.now().strftime("%m/%y"),
+                "total_cancellations": 0,
+                "free_cancellations": 0,
+                "charged_cancellations": 0,
+                "override_cancellations": 0,
+            }
+        ]
+
+        if format_type == "json":
+            return jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "stats": fallback_stats,
+                    "monthly_trends": fallback_trends,
+                    "tier_distribution": [],
+                    "top_students": [],
+                    "filtered_cancellations": [],
+                    "revenue_impact": [],
+                }
+            )
+
         return render_template(
             "manager_analytics.html",
-            monthly_trends=[],
+            stats=fallback_stats,
+            monthly_trends=fallback_trends,
             tier_distribution=[],
             top_students=[],
+            filtered_cancellations=[],
             revenue_impact=[],
-            error_message=str(e),
+            error_message=f"Analytics error: {str(e)}",
+            current_filters={"date_range": "month", "status": "", "membership": ""},
+            debug_info={
+                "trends_count": 1,
+                "has_data": False,
+                "first_month": "Error",
+                "total_in_first": 0,
+            },
         )
 
 
 # Manager API endpoints
-@app.route("/manager/api/student/<int:student_id>", methods=["PUT"])
+@app.route("/manager/api/student/<int:student_id>", methods=["PUT", "POST"])
 @login_required
 @admin_required
 def update_student(student_id):
@@ -3100,22 +3939,40 @@ def delete_student(student_id):
 @login_required
 @admin_required
 def exclude_cancellation(cancellation_id):
-    """Exclude cancellation from policy (illness, etc.)"""
+    """Exclude cancellation from policy (illness, etc.) - UPDATED with override tracking"""
     data = request.json
+    reason = data.get("reason", "")
+
+    if not reason.strip():
+        return jsonify({"success": False, "message": "Exclusion reason is required"})
 
     conn = get_db()
-    conn.execute(
-        "UPDATE cancellations SET excluded = 1, approved_by = ? WHERE id = ?",
-        (session["user_email"], cancellation_id),
-    )
-    conn.commit()
-    conn.close()
 
-    log_action(
-        "cancellation_excluded",
-        f"Cancellation ID: {cancellation_id}, Reason: {data.get('reason', 'Not specified')}",
-    )
-    return jsonify({"success": True})
+    try:
+        conn.execute(
+            """UPDATE cancellations 
+               SET excluded = 1, exclusion_reason = ?, approved_by = ?, 
+                   is_override = 1, updated_at = ? 
+               WHERE id = ?""",
+            (
+                reason,
+                session["user_email"],
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                cancellation_id,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        log_action(
+            "cancellation_excluded",
+            f"Cancellation ID: {cancellation_id}, Reason: {reason}, By: {session['user_email']}",
+        )
+        return jsonify({"success": True})
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"success": False, "message": str(e)})
 
 
 @app.route("/manager/api/bulk-import", methods=["POST"])
@@ -3223,6 +4080,145 @@ def export_students():
 
     log_action("export_students", f"Exported {len(students)} students")
     return response
+
+
+@app.route("/manager/api/student/<int:student_id>/details", methods=["GET"])
+@login_required
+@admin_required
+def get_student_details_for_edit(student_id):
+    """Get student details for editing (different from the existing one)"""
+    try:
+        conn = get_db()
+
+        student = conn.execute(
+            "SELECT * FROM students WHERE id = ?", (student_id,)
+        ).fetchone()
+
+        if not student:
+            return jsonify({"success": False, "message": "Student not found"})
+
+        conn.close()
+
+        return jsonify({"success": True, "student": dict(student)})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/manager/api/student/<int:student_id>", methods=["POST"])
+@login_required
+@admin_required
+def update_student_post(student_id):
+    """Update student information via POST (for the edit form)"""
+    try:
+        data = request.json
+        conn = get_db()
+
+        conn.execute(
+            """
+            UPDATE students 
+            SET first_name = ?, last_name = ?, parent_first = ?, parent_last = ?,
+                email = ?, phone = ?, membership_level = ?, updated_at = ?
+            WHERE id = ?
+        """,
+            (
+                data["first_name"],
+                data["last_name"],
+                data.get("parent_first", ""),
+                data.get("parent_last", ""),
+                data["email"],
+                data.get("phone", ""),
+                data["membership_level"],
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                student_id,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        log_action("student_updated", f"Student ID: {student_id}")
+        return jsonify({"success": True, "message": "Student updated successfully"})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/manager/api/student/<int:student_id>/delete", methods=["DELETE"])
+@login_required
+@admin_required
+def delete_student_api(student_id):
+    """Delete student via API"""
+    try:
+        conn = get_db()
+
+        # Get student info for logging
+        student = conn.execute(
+            "SELECT email, first_name, last_name FROM students WHERE id = ?",
+            (student_id,),
+        ).fetchone()
+
+        if not student:
+            return jsonify({"success": False, "message": "Student not found"})
+
+        # Delete cancellations first (foreign key constraint)
+        conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
+        conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+        conn.commit()
+        conn.close()
+
+        log_action(
+            "student_deleted",
+            f"Student: {student['first_name']} {student['last_name']} ({student['email']})",
+        )
+        return jsonify({"success": True, "message": "Student deleted successfully"})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/manager/api/student/<int:student_id>/membership", methods=["POST"])
+@login_required
+@admin_required
+def change_student_membership(student_id):
+    """Change student membership level"""
+    try:
+        data = request.json
+        new_membership = data.get("membership_level")
+
+        if not new_membership:
+            return jsonify(
+                {"success": False, "message": "Membership level is required"}
+            )
+
+        conn = get_db()
+
+        # Get student info for logging
+        student = conn.execute(
+            "SELECT first_name, last_name, membership_level FROM students WHERE id = ?",
+            (student_id,),
+        ).fetchone()
+
+        if not student:
+            return jsonify({"success": False, "message": "Student not found"})
+
+        # Update membership
+        conn.execute(
+            "UPDATE students SET membership_level = ?, updated_at = ? WHERE id = ?",
+            (new_membership, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), student_id),
+        )
+        conn.commit()
+        conn.close()
+
+        log_action(
+            "membership_changed",
+            f"Student: {student['first_name']} {student['last_name']}, "
+            f"From: {student['membership_level']}, To: {new_membership}",
+        )
+
+        return jsonify({"success": True, "message": "Membership updated successfully"})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
 
 
 # ===================================
@@ -4695,18 +5691,81 @@ def process_template_variables(template_body, template_subject, variables):
     return processed_body, processed_subject
 
 
+# Add these functions to your app.py file to standardize date formatting
+
+
+@app.template_filter("format_date")
+def format_date_filter(date_value):
+    """Format date as 'August 28, 2025'"""
+    if date_value is None:
+        return "Unknown"
+
+    if isinstance(date_value, str):
+        try:
+            if "T" in date_value:  # ISO format with time
+                date_value = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
+            elif len(date_value) == 10:  # YYYY-MM-DD format
+                date_value = datetime.strptime(date_value, "%Y-%m-%d")
+            else:  # Try parsing as datetime string
+                date_value = datetime.strptime(date_value, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return str(date_value)
+    elif isinstance(date_value, date_type) and not isinstance(date_value, datetime):
+        # Convert date to datetime for consistent formatting
+        date_value = datetime.combine(date_value, time_type())
+
+    if isinstance(date_value, datetime):
+        return date_value.strftime("%B %d, %Y")
+
+    return str(date_value)
+
+
+@app.template_filter("format_datetime")
+def format_datetime_filter(dt_value):
+    """Format datetime as 'August 28, 2025 at 3:30 PM'"""
+    if dt_value is None:
+        return "Unknown"
+
+    if isinstance(dt_value, str):
+        try:
+            if "T" in dt_value:
+                dt_value = datetime.fromisoformat(dt_value.replace("Z", "+00:00"))
+            else:
+                dt_value = datetime.strptime(dt_value, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return str(dt_value)
+
+    if isinstance(dt_value, datetime):
+        return dt_value.strftime("%B %d, %Y at %I:%M %p")
+
+    return str(dt_value)
+
+
+@app.template_filter("format_time")
+def format_time_filter(time_value):
+    """Format time as '3:30 PM'"""
+    if time_value is None:
+        return "Unknown"
+
+    if isinstance(time_value, str):
+        try:
+            # Handle both HH:MM:SS and HH:MM formats
+            if len(time_value.split(":")) == 3:
+                time_value = datetime.strptime(time_value, "%H:%M:%S").time()
+            else:
+                time_value = datetime.strptime(time_value, "%H:%M").time()
+        except (ValueError, TypeError):
+            return str(time_value)
+
+    if isinstance(time_value, time_type):
+        return time_value.strftime("%I:%M %p")
+
+    return str(time_value)
+
+
+# Update the get_template_variables function to use consistent formatting
 def get_template_variables(student=None, cancellation=None, extra_vars=None):
-    """
-    Generate template variables from student and cancellation data
-
-    Args:
-        student: Student record from database
-        cancellation: Cancellation record from database
-        extra_vars: Additional variables dict
-
-    Returns:
-        dict: Template variables
-    """
+    """Generate template variables with consistent date formatting"""
     variables = {
         "current_date": datetime.now().strftime("%B %d, %Y"),
         "current_time": datetime.now().strftime("%I:%M %p"),
@@ -4751,7 +5810,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
         )
 
     if cancellation:
-        # Format dates and times
+        # Format dates consistently
         if isinstance(cancellation["lesson_date"], str):
             lesson_date = datetime.strptime(cancellation["lesson_date"], "%Y-%m-%d")
         else:
@@ -4772,7 +5831,9 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
         variables.update(
             {
                 "lesson_date": lesson_date.strftime("%B %d, %Y"),
-                "lesson_date_short": lesson_date.strftime("%m/%d/%Y"),
+                "lesson_date_short": lesson_date.strftime(
+                    "%B %d, %Y"
+                ),  # Also use full format
                 "lesson_time": lesson_time.strftime("%I:%M %p"),
                 "lesson_time_24h": lesson_time.strftime("%H:%M"),
                 "cancellation_status": (
@@ -4786,7 +5847,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
             }
         )
 
-        # Sequential lessons
+        # Sequential lessons with consistent formatting
         if cancellation.get("sequential_lessons"):
             try:
                 sequential = (
@@ -4795,14 +5856,38 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                     else cancellation["sequential_lessons"]
                 )
                 if sequential:
-                    sequential_text = ", ".join(
-                        [
-                            f"{lesson['date']} at {lesson['time']}"
-                            for lesson in sequential
-                        ]
-                    )
+                    formatted_lessons = []
+                    for lesson in sequential:
+                        lesson_date_str = lesson["date"]
+                        lesson_time_str = lesson["time"]
+
+                        # Parse and format date
+                        if isinstance(lesson_date_str, str):
+                            lesson_date_obj = datetime.strptime(
+                                lesson_date_str, "%Y-%m-%d"
+                            )
+                        else:
+                            lesson_date_obj = lesson_date_str
+
+                        # Parse and format time
+                        if isinstance(lesson_time_str, str):
+                            try:
+                                lesson_time_obj = datetime.strptime(
+                                    lesson_time_str, "%H:%M:%S"
+                                ).time()
+                            except ValueError:
+                                lesson_time_obj = datetime.strptime(
+                                    lesson_time_str, "%H:%M"
+                                ).time()
+                        else:
+                            lesson_time_obj = lesson_time_str
+
+                        formatted_lessons.append(
+                            f"{lesson_date_obj.strftime('%B %d, %Y')} at {lesson_time_obj.strftime('%I:%M %p')}"
+                        )
+
                     variables["sequential_lessons"] = (
-                        f"Additional lessons: {sequential_text}"
+                        f"Additional lessons: {', '.join(formatted_lessons)}"
                     )
                 else:
                     variables["sequential_lessons"] = "No additional lessons"
@@ -5060,4 +6145,4 @@ if __name__ == "__main__":
             print("Database verification passed!")
 
     print("Starting Flask application...")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=5000)

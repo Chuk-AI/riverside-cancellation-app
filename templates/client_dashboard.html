@@ -60,6 +60,11 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
     border: 1px solid #0ea5e9;
   }
+
+  .remaining-free-zero {
+    color: #dc2626 !important;
+    font-weight: bold;
+  }
 </style>
 {% endblock %} {% block content %}
 <!-- Welcome Header -->
@@ -74,14 +79,16 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
               Welcome back, {{ client.first_name }}!
             </h1>
             <p class="mb-0 opacity-75">
-              Manage your lesson cancellations and view your account status
+              Submit a cancellation notice and view your account status
             </p>
           </div>
           <div class="col-md-4 text-md-end">
             <div class="d-flex d-md-block gap-2">
               <a href="{{ url_for('client_cancel') }}" class="btn btn-warning">
                 <i class="fas fa-calendar-times me-1"></i>
-                Cancel Lesson
+                {% if cancellation_status.remaining > 0 %} Cancel A Lesson {%
+                else %} {{ cancellation_status.remaining }} Free Cancellations
+                Left {% endif %}
               </a>
             </div>
           </div>
@@ -138,7 +145,7 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
       >
         <h5 class="mb-0">
           <i class="fas fa-calendar-check me-2"></i>
-          This Month's Status
+          Status This Month
         </h5>
         <small class="text-muted">{{ current_month }}</small>
       </div>
@@ -161,7 +168,9 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
 
         <div class="row text-center">
           <div class="col-6">
-            <h4 class="text-success mb-0">
+            <h4
+              class="{% if cancellation_status.remaining == 0 %}remaining-free-zero{% else %}text-success{% endif %} mb-0"
+            >
               {{ cancellation_status.remaining }}
             </h4>
             <small class="text-muted">Remaining Free</small>
@@ -198,8 +207,9 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
           </p>
           <p class="mb-0 small text-muted">
             <strong>Remember:</strong> Sequential lessons can be included in one
-            notice. Cancellation notices are accepted during the lesson month or
-            up to 7 days before the month starts.
+            notice. Lesson cancellations notices are accepted during the month
+            of the cancelled lesson or up to 7 days before the start of that
+            month.
           </p>
         </div>
         <div class="col-md-4 text-md-end">
@@ -229,7 +239,7 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
           <i class="fas fa-calendar-times fa-3x"></i>
         </div>
         <h5>Cancel a Lesson</h5>
-        <p class="text-muted">Submit a new cancellation request</p>
+        <p class="text-muted">Submit a new cancellation notice</p>
       </div>
     </div>
   </div>
@@ -298,8 +308,8 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
                 >
               </h6>
               <small class="text-muted">
-                Submitted {{ cancellation.created_at.strftime('%m/%d/%Y at %I:%M
-                %p') }}
+                Submitted {{ cancellation.created_at.strftime('%B %d, %Y at
+                %I:%M %p') }}
               </small>
             </div>
             <div class="text-end">

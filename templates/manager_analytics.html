@@ -20,6 +20,10 @@ endblock %} {% block extra_css %}
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     border-radius: 0.75rem;
     border: 1px solid #e2e8f0;
+    height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
   .metric-number {
@@ -27,6 +31,15 @@ endblock %} {% block extra_css %}
     font-weight: 700;
     color: #3b82f6;
     line-height: 1;
+    margin-bottom: 0.5rem;
+  }
+
+  .metric-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
   }
 
   .chart-container {
@@ -37,6 +50,55 @@ endblock %} {% block extra_css %}
 
   .chart-container.tall {
     height: 400px;
+  }
+
+  .filters-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .filter-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .filter-label {
+    font-weight: 600;
+    color: #374151;
+    min-width: 120px;
+  }
+
+  .btn-filter {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+  }
+
+  .table-analytics {
+    font-size: 0.875rem;
+  }
+
+  .table-analytics th {
+    font-weight: 600;
+    color: #374151;
+    border-top: none;
+    background-color: #f8fafc;
+  }
+
+  .percentage-display {
+    font-size: 0.75rem;
+    color: #6b7280;
+    font-weight: 500;
   }
 </style>
 {% endblock %} {% block content %}
@@ -52,54 +114,209 @@ endblock %} {% block extra_css %}
   </div>
 </div>
 
-<div class="row mb-4">
+<!-- Debug Information (remove in production) -->
+{% if error_message %}
+<div class="alert alert-warning alert-dismissible fade show" role="alert">
+  <strong>Debug Info:</strong> {{ error_message }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="alert alert-info alert-dismissible fade show" role="alert">
+  <strong>Debug:</strong>
+  Stats: Total={{ stats.total_cancellations }}, Free={{ stats.free_cancellations
+  }}, Charged={{ stats.charged_cancellations }}, Override={{
+  stats.override_cancellations }} | Monthly Trends: {{ monthly_trends|length }}
+  months | Tier Distribution: {{ tier_distribution|length }} tiers
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+
+<!-- Filters Section -->
+<div class="filters-card">
+  <h5 class="mb-3">
+    <i class="fas fa-filter me-2"></i>
+    Filters
+  </h5>
+
+  <div class="filter-group">
+    <label class="filter-label">Date Range:</label>
+    <div class="btn-group" role="group">
+      <input
+        type="radio"
+        class="btn-check"
+        name="date_range"
+        id="date_today"
+        value="today"
+      />
+      <label class="btn btn-outline-primary btn-filter" for="date_today"
+        >Today</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="date_range"
+        id="date_7days"
+        value="7days"
+      />
+      <label class="btn btn-outline-primary btn-filter" for="date_7days"
+        >7 Days</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="date_range"
+        id="date_month"
+        value="month"
+        checked
+      />
+      <label class="btn btn-outline-primary btn-filter" for="date_month"
+        >30 Days</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="date_range"
+        id="date_all"
+        value="all"
+      />
+      <label class="btn btn-outline-primary btn-filter" for="date_all"
+        >All Time</label
+      >
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <label class="filter-label">Status:</label>
+    <div class="btn-group" role="group">
+      <input
+        type="radio"
+        class="btn-check"
+        name="status_filter"
+        id="status_all"
+        value=""
+        checked
+      />
+      <label class="btn btn-outline-secondary btn-filter" for="status_all"
+        >All</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="status_filter"
+        id="status_free"
+        value="free"
+      />
+      <label class="btn btn-outline-success btn-filter" for="status_free"
+        >Free</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="status_filter"
+        id="status_charged"
+        value="charged"
+      />
+      <label class="btn btn-outline-warning btn-filter" for="status_charged"
+        >Charged</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="status_filter"
+        id="status_deadline"
+        value="deadline_passed"
+      />
+      <label class="btn btn-outline-danger btn-filter" for="status_deadline"
+        >Passed Deadline</label
+      >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="status_filter"
+        id="status_override"
+        value="override"
+      />
+      <label class="btn btn-outline-info btn-filter" for="status_override"
+        >Override</label
+      >
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <label class="filter-label">Membership:</label>
+    <select class="form-select" id="membership_filter" style="max-width: 200px">
+      <option value="">All Memberships</option>
+      <option value="Bronze">Bronze</option>
+      <option value="Silver">Silver</option>
+      <option value="Gold">Gold</option>
+      <option value="Intro Package">Intro Package</option>
+      <option value="Welcome Package">Welcome Package</option>
+      <option value="Guest">Guest</option>
+      <option value="Legacy">Legacy</option>
+    </select>
+  </div>
+
+  <div class="text-end">
+    <button type="button" class="btn btn-primary" onclick="applyFilters()">
+      <i class="fas fa-sync-alt me-2"></i>Update Analytics
+    </button>
+  </div>
+</div>
+
+<!-- Top Metrics Row -->
+<div class="row mb-4" id="metrics-row">
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="metric-card">
-      <div class="metric-number">{{ monthly_trends|length or 0 }}</div>
-      <h6 class="mb-2">Months of Data</h6>
+      <div class="metric-number" id="total-cancellations">
+        {{ stats.total_cancellations or 0 }}
+      </div>
+      <div class="metric-label">Total Cancellations</div>
     </div>
   </div>
 
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="metric-card">
-      <div class="metric-number">
-        {% set total = 0 %} {% for trend in monthly_trends %} {% set total =
-        total + trend.total_cancellations %} {% endfor %} {{ total }}
+      <div class="metric-number text-success" id="free-cancellations">
+        {{ stats.free_cancellations or 0 }}
       </div>
-      <h6 class="mb-2">Total Cancellations</h6>
+      <div class="metric-label">Free Cancellations</div>
     </div>
   </div>
 
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="metric-card">
-      <div class="metric-number">
-        {% set free_total = 0 %} {% for trend in monthly_trends %} {% set
-        free_total = free_total + trend.free_cancellations %} {% endfor %} {{
-        free_total }}
+      <div class="metric-number text-warning" id="charged-cancellations">
+        {{ stats.charged_cancellations or 0 }}
       </div>
-      <h6 class="mb-2">Free Cancellations</h6>
+      <div class="metric-label">Charged Cancellations</div>
     </div>
   </div>
 
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="metric-card">
-      <div class="metric-number">
-        {% set charged_total = 0 %} {% for trend in monthly_trends %} {% set
-        charged_total = charged_total + trend.charged_cancellations %} {% endfor
-        %} {{ charged_total }}
+      <div class="metric-number text-info" id="override-cancellations">
+        {{ stats.override_cancellations or 0 }}
       </div>
-      <h6 class="mb-2">Charged Cancellations</h6>
+      <div class="metric-label">Override Decisions</div>
     </div>
   </div>
 </div>
 
+<!-- Charts Row -->
 <div class="row mb-4">
   <div class="col-lg-8 mb-4">
     <div class="analytics-card">
       <div class="card-header">
         <h5 class="mb-0">
           <i class="fas fa-chart-line me-2"></i>
-          Monthly Cancellation Trends
+          Cancellation Trends
         </h5>
       </div>
       <div class="card-body">
@@ -114,21 +331,102 @@ endblock %} {% block extra_css %}
     <div class="analytics-card">
       <div class="card-header">
         <h5 class="mb-0">
-          <i class="fas fa-users me-2"></i>
-          Membership Distribution
+          <i class="fas fa-chart-pie me-2"></i>
+          Status Distribution
         </h5>
       </div>
       <div class="card-body">
         <div class="chart-container">
-          <canvas id="membershipChart"></canvas>
+          <canvas id="statusChart"></canvas>
         </div>
       </div>
     </div>
   </div>
 </div>
 
+<!-- Data Table and Top Students Row -->
 <div class="row mb-4">
-  <div class="col-lg-6 mb-4">
+  <div class="col-lg-8 mb-4">
+    <div class="analytics-card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-table me-2"></i>
+          Cancellation Details
+        </h5>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-primary"
+          onclick="exportTableData()"
+        >
+          <i class="fas fa-download me-1"></i>Export
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table
+            class="table table-hover table-analytics mb-0"
+            id="analytics-table"
+          >
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Membership</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody id="table-data">
+              {% for cancellation in filtered_cancellations %}
+              <tr>
+                <td>{{ cancellation.student_name }}</td>
+                <td>{{ cancellation.lesson_date|format_date }}</td>
+                <td>
+                  {% if cancellation.is_override %}
+                  <span class="badge bg-info">Override</span>
+                  {% elif cancellation.deadline_passed %}
+                  <span class="badge bg-danger">Deadline Passed</span>
+                  {% elif cancellation.charged %}
+                  <span class="badge bg-warning">Charged</span>
+                  {% elif cancellation.status == 'approved' %}
+                  <span class="badge bg-success">Free</span>
+                  {% else %}
+                  <span class="badge bg-secondary">Pending</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge bg-secondary"
+                    >{{ cancellation.membership_level }}</span
+                  >
+                </td>
+                <td>
+                  {% if cancellation.cancellation_note %}
+                  <i
+                    class="fas fa-sticky-note text-primary"
+                    title="{{ cancellation.cancellation_note }}"
+                  ></i>
+                  {% else %}
+                  <span class="text-muted">-</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                  No cancellations found for selected filters
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 mb-4">
     <div class="analytics-card">
       <div class="card-header">
         <h5 class="mb-0">
@@ -138,12 +436,12 @@ endblock %} {% block extra_css %}
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table table-hover mb-0">
-            <thead class="table-light">
+          <table class="table table-hover table-analytics mb-0">
+            <thead>
               <tr>
                 <th>Student</th>
+                <th>Count</th>
                 <th>Membership</th>
-                <th>Cancellations</th>
               </tr>
             </thead>
             <tbody>
@@ -151,13 +449,13 @@ endblock %} {% block extra_css %}
               <tr>
                 <td>{{ student.first_name }} {{ student.last_name }}</td>
                 <td>
-                  <span class="badge bg-secondary"
-                    >{{ student.membership_level }}</span
+                  <strong class="text-primary"
+                    >{{ student.cancellation_count }}</strong
                   >
                 </td>
                 <td>
-                  <strong class="text-primary"
-                    >{{ student.cancellation_count }}</strong
+                  <span class="badge bg-secondary"
+                    >{{ student.membership_level }}</span
                   >
                 </td>
               </tr>
@@ -174,49 +472,29 @@ endblock %} {% block extra_css %}
       </div>
     </div>
   </div>
-
-  <div class="col-lg-6 mb-4">
-    <div class="analytics-card">
-      <div class="card-header">
-        <h5 class="mb-0">
-          <i class="fas fa-dollar-sign me-2"></i>
-          Revenue Impact
-        </h5>
-      </div>
-      <div class="card-body">
-        <div class="chart-container">
-          <canvas id="revenueChart"></canvas>
-        </div>
-        <div class="mt-3 text-center">
-          <h4 class="text-success mb-1">
-            ${% set total_revenue = 0 %} {% for revenue in revenue_impact %} {%
-            set total_revenue = total_revenue + revenue.estimated_charges %} {%
-            endfor %} {{ total_revenue }}
-          </h4>
-          <small class="text-muted">Total Revenue (12 months)</small>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
+<!-- Membership Analysis Row -->
 <div class="row">
   <div class="col-12">
     <div class="analytics-card">
       <div class="card-header">
         <h5 class="mb-0">
-          <i class="fas fa-table me-2"></i>
-          Membership Level Details
+          <i class="fas fa-users me-2"></i>
+          Membership Level Analysis
         </h5>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table table-hover mb-0">
-            <thead class="table-light">
+          <table class="table table-hover table-analytics mb-0">
+            <thead>
               <tr>
                 <th>Membership Level</th>
                 <th>Total Students</th>
+                <th>Total Cancellations</th>
                 <th>Avg Monthly Cancellations</th>
+                <th>Free Cancellations</th>
+                <th>Charged Cancellations</th>
               </tr>
             </thead>
             <tbody>
@@ -228,11 +506,24 @@ endblock %} {% block extra_css %}
                   >
                 </td>
                 <td><strong>{{ tier.student_count }}</strong></td>
-                <td>{{ "%.2f"|format(tier.avg_monthly_cancellations) }}</td>
+                <td><strong>{{ tier.total_cancellations or 0 }}</strong></td>
+                <td>
+                  {{ "%.2f"|format(tier.avg_monthly_cancellations or 0) }}
+                </td>
+                <td>
+                  <span class="text-success"
+                    >{{ tier.free_cancellations or 0 }}</span
+                  >
+                </td>
+                <td>
+                  <span class="text-warning"
+                    >{{ tier.charged_cancellations or 0 }}</span
+                  >
+                </td>
               </tr>
               {% else %}
               <tr>
-                <td colspan="3" class="text-center text-muted py-4">
+                <td colspan="6" class="text-center text-muted py-4">
                   No membership data available
                 </td>
               </tr>
@@ -246,161 +537,575 @@ endblock %} {% block extra_css %}
 </div>
 {% endblock %} {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+<!-- COMPLETE JavaScript section replacement for manager_analytics.html -->
+
 <script>
+  console.log('=== ZERO-DATA COMPATIBLE CHART SYSTEM ===');
+
+  // Chart configuration and global variables
   const chartColors = {
       primary: '#3b82f6',
       success: '#10b981',
       warning: '#f59e0b',
       danger: '#ef4444',
       info: '#06b6d4',
-      secondary: '#6b7280'
+      secondary: '#6b7280',
+      gray: '#e9ecef'
   };
 
-  // Monthly Trends Chart
-  const monthlyCtx = document.getElementById('monthlyTrendsChart').getContext('2d');
-  const monthlyChart = new Chart(monthlyCtx, {
-      type: 'line',
-      data: {
-          labels: [
-              {% for trend in monthly_trends %}
-                  '{{ trend.month }}'{% if not loop.last %},{% endif %}
-              {% endfor %}
-          ],
-          datasets: [{
-              label: 'Total Cancellations',
-              data: [
-                  {% for trend in monthly_trends %}
-                      {{ trend.total_cancellations }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-              ],
-              borderColor: chartColors.primary,
-              backgroundColor: chartColors.primary + '20',
-              tension: 0.4,
-              fill: true
-          }, {
-              label: 'Free Cancellations',
-              data: [
-                  {% for trend in monthly_trends %}
-                      {{ trend.free_cancellations }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-              ],
-              borderColor: chartColors.success,
-              backgroundColor: chartColors.success + '20',
-              tension: 0.4,
-              fill: true
-          }, {
-              label: 'Charged Cancellations',
-              data: [
-                  {% for trend in monthly_trends %}
-                      {{ trend.charged_cancellations }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-              ],
-              borderColor: chartColors.warning,
-              backgroundColor: chartColors.warning + '20',
-              tension: 0.4,
-              fill: true
-          }]
-      },
-      options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-              legend: {
-                  position: 'top'
-              }
-          },
-          scales: {
-              y: {
-                  beginAtZero: true,
-                  ticks: {
-                      stepSize: 1
-                  }
-              }
-          }
-      }
-  });
+  let monthlyChart = null;
+  let statusChart = null;
+  let chartsInitialized = false;
 
-  // Membership Distribution Chart
-  const membershipCtx = document.getElementById('membershipChart').getContext('2d');
-  const membershipChart = new Chart(membershipCtx, {
-      type: 'doughnut',
-      data: {
-          labels: [
-              {% for tier in tier_distribution %}
-                  '{{ tier.membership_level }}'{% if not loop.last %},{% endif %}
-              {% endfor %}
-          ],
-          datasets: [{
-              data: [
-                  {% for tier in tier_distribution %}
-                      {{ tier.student_count }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-              ],
-              backgroundColor: [
-                  chartColors.primary,
-                  chartColors.success,
-                  chartColors.warning,
-                  chartColors.danger,
-                  chartColors.info,
-                  chartColors.secondary,
-                  '#8b5cf6'
-              ],
-              borderWidth: 2,
-              borderColor: '#ffffff'
-          }]
-      },
-      options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-              legend: {
-                  position: 'bottom'
-              }
-          }
-      }
-  });
+  // Utility functions
+  function ensureNumber(value) {
+      const num = Number(value);
+      return isNaN(num) ? 0 : num;
+  }
 
-  // Revenue Chart
-  const revenueCtx = document.getElementById('revenueChart').getContext('2d');
-  const revenueChart = new Chart(revenueCtx, {
-      type: 'bar',
-      data: {
-          labels: [
-              {% for revenue in revenue_impact %}
-                  '{{ revenue.month }}'{% if not loop.last %},{% endif %}
-              {% endfor %}
-          ],
-          datasets: [{
-              label: 'Estimated Revenue ($)',
-              data: [
-                  {% for revenue in revenue_impact %}
-                      {{ revenue.estimated_charges }}{% if not loop.last %},{% endif %}
-                  {% endfor %}
-              ],
-              backgroundColor: chartColors.success,
-              borderColor: chartColors.success,
-              borderWidth: 1
-          }]
-      },
-      options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-              legend: {
-                  display: false
-              }
-          },
-          scales: {
-              y: {
-                  beginAtZero: true,
-                  ticks: {
-                      callback: function(value) {
-                          return '$' + value;
+  function debugDOMElements() {
+      const monthlyCanvas = document.getElementById('monthlyTrendsChart');
+      const statusCanvas = document.getElementById('statusChart');
+
+      const debugInfo = {
+          monthlyExists: !!monthlyCanvas,
+          statusExists: !!statusCanvas,
+          chartJsLoaded: typeof Chart !== 'undefined',
+          chartJsVersion: typeof Chart !== 'undefined' ? Chart.version : 'Not loaded'
+      };
+
+      console.log('DOM Debug:', debugInfo);
+
+      // Safe debug display updates
+      const debugElements = {
+          monthly: document.getElementById('debug-monthly-canvas'),
+          status: document.getElementById('debug-status-canvas'),
+          chartjs: document.getElementById('debug-chartjs')
+      };
+
+      if (debugElements.monthly) {
+          debugElements.monthly.textContent = debugInfo.monthlyExists ? 'Found ✓' : 'Missing ✗';
+      }
+      if (debugElements.status) {
+          debugElements.status.textContent = debugInfo.statusExists ? 'Found ✓' : 'Missing ✗';
+      }
+      if (debugElements.chartjs) {
+          debugElements.chartjs.textContent = debugInfo.chartJsLoaded ? `Loaded ✓ (v${debugInfo.chartJsVersion})` : 'Missing ✗';
+      }
+
+      return debugInfo;
+  }
+
+  // Create status chart that works with zero data
+  function createStatusChart(statusCtx, statusData) {
+      const total = statusData.free + statusData.charged + statusData.override + statusData.excluded;
+      console.log('Creating status chart with total:', total);
+
+      if (total === 0) {
+          // Zero-state chart with placeholder
+          console.log('📊 Creating zero-state status chart');
+          return new Chart(statusCtx.getContext('2d'), {
+              type: 'doughnut',
+              data: {
+                  labels: ['No Data Available'],
+                  datasets: [{
+                      data: [1],
+                      backgroundColor: [chartColors.gray],
+                      borderWidth: 1,
+                      borderColor: '#dee2e6'
+                  }]
+              },
+              options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                      legend: {
+                          display: false
+                      },
+                      tooltip: {
+                          filter: function() {
+                              return false; // Disable tooltips for zero state
+                          }
+                      }
+                  },
+                  elements: {
+                      arc: {
+                          borderWidth: 0
+                      }
+                  },
+                  animation: {
+                      onComplete: function(chart) {
+                          // Draw "No Data" text in center
+                          const ctx = chart.ctx;
+                          ctx.save();
+                          ctx.fillStyle = '#6c757d';
+                          ctx.font = 'bold 16px Arial';
+                          ctx.textAlign = 'center';
+                          ctx.textBaseline = 'middle';
+                          const centerX = chart.width / 2;
+                          const centerY = chart.height / 2;
+                          ctx.fillText('No Data', centerX, centerY - 10);
+                          ctx.font = '12px Arial';
+                          ctx.fillText('Available', centerX, centerY + 8);
+                          ctx.restore();
                       }
                   }
               }
+          });
+      } else {
+          // Regular chart with data
+          console.log('📊 Creating status chart with data');
+          return new Chart(statusCtx.getContext('2d'), {
+              type: 'doughnut',
+              data: {
+                  labels: ['Free', 'Charged', 'Override', 'Excluded'],
+                  datasets: [{
+                      data: [statusData.free, statusData.charged, statusData.override, statusData.excluded],
+                      backgroundColor: [
+                          chartColors.success,
+                          chartColors.warning,
+                          chartColors.info,
+                          chartColors.danger
+                      ],
+                      borderWidth: 2,
+                      borderColor: '#ffffff'
+                  }]
+              },
+              options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                      legend: {
+                          position: 'bottom',
+                          display: true
+                      },
+                      tooltip: {
+                          callbacks: {
+                              label: function(context) {
+                                  const value = context.parsed;
+                                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                  return `${context.label}: ${value} (${percentage}%)`;
+                              }
+                          }
+                      }
+                  }
+              }
+          });
+      }
+  }
+
+  // Update status chart with new data
+  function updateStatusChart(chart, statusData) {
+      const total = statusData.free + statusData.charged + statusData.override + statusData.excluded;
+      console.log('Updating status chart, new total:', total);
+
+      if (total === 0) {
+          // Update to zero state
+          chart.data.labels = ['No Data Available'];
+          chart.data.datasets[0].data = [1];
+          chart.data.datasets[0].backgroundColor = [chartColors.gray];
+          chart.options.plugins.legend.display = false;
+          chart.options.plugins.tooltip.filter = function() { return false; };
+
+          // Update animation for text overlay
+          chart.options.animation = {
+              onComplete: function(chart) {
+                  const ctx = chart.ctx;
+                  ctx.save();
+                  ctx.fillStyle = '#6c757d';
+                  ctx.font = 'bold 16px Arial';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  const centerX = chart.width / 2;
+                  const centerY = chart.height / 2;
+                  ctx.fillText('No Data', centerX, centerY - 10);
+                  ctx.font = '12px Arial';
+                  ctx.fillText('Available', centerX, centerY + 8);
+                  ctx.restore();
+              }
+          };
+      } else {
+          // Update to real data
+          chart.data.labels = ['Free', 'Charged', 'Override', 'Excluded'];
+          chart.data.datasets[0].data = [statusData.free, statusData.charged, statusData.override, statusData.excluded];
+          chart.data.datasets[0].backgroundColor = [
+              chartColors.success,
+              chartColors.warning,
+              chartColors.info,
+              chartColors.danger
+          ];
+          chart.options.plugins.legend.display = true;
+          chart.options.plugins.tooltip.filter = null; // Re-enable tooltips
+          chart.options.animation = {}; // Remove text overlay animation
+      }
+
+      chart.update('none');
+  }
+
+  // Initialize charts
+  function initializeCharts() {
+      if (chartsInitialized && monthlyChart && statusChart) {
+          console.log('📊 Charts already initialized');
+          return true;
+      }
+
+      console.log('🔄 Starting chart initialization...');
+
+      const debugInfo = debugDOMElements();
+
+      if (!debugInfo.chartJsLoaded) {
+          console.error('❌ Chart.js not loaded');
+          return false;
+      }
+
+      try {
+          // 1. Initialize Monthly Trends Chart
+          const monthlyCtx = document.getElementById('monthlyTrendsChart');
+          if (monthlyCtx && !monthlyChart) {
+              console.log('📊 Creating monthly trends chart...');
+
+              const monthlyLabels = [
+                  {% for trend in monthly_trends %}
+                      '{{ trend.month }}'{% if not loop.last %},{% endif %}
+                  {% endfor %}
+              ];
+
+              const monthlyData = {
+                  total: [{% for trend in monthly_trends %}{{ trend.total_cancellations }}{% if not loop.last %},{% endif %}{% endfor %}],
+                  free: [{% for trend in monthly_trends %}{{ trend.free_cancellations }}{% if not loop.last %},{% endif %}{% endfor %}],
+                  charged: [{% for trend in monthly_trends %}{{ trend.charged_cancellations }}{% if not loop.last %},{% endif %}{% endfor %}],
+                  override: [{% for trend in monthly_trends %}{{ trend.override_cancellations }}{% if not loop.last %},{% endif %}{% endfor %}]
+              };
+
+              console.log('Monthly data:', { labelCount: monthlyLabels.length, dataPoints: monthlyData.total.length });
+
+              if (monthlyLabels.length === 0) {
+                  // Create with placeholder data
+                  monthlyLabels.push('No Data');
+                  monthlyData.total = [0];
+                  monthlyData.free = [0];
+                  monthlyData.charged = [0];
+                  monthlyData.override = [0];
+              }
+
+              monthlyChart = new Chart(monthlyCtx.getContext('2d'), {
+                  type: 'line',
+                  data: {
+                      labels: monthlyLabels,
+                      datasets: [{
+                          label: 'Total',
+                          data: monthlyData.total,
+                          borderColor: chartColors.primary,
+                          backgroundColor: chartColors.primary + '20',
+                          tension: 0.4,
+                          fill: true
+                      }, {
+                          label: 'Free',
+                          data: monthlyData.free,
+                          borderColor: chartColors.success,
+                          backgroundColor: chartColors.success + '20',
+                          tension: 0.4,
+                          fill: false
+                      }, {
+                          label: 'Charged',
+                          data: monthlyData.charged,
+                          borderColor: chartColors.warning,
+                          backgroundColor: chartColors.warning + '20',
+                          tension: 0.4,
+                          fill: false
+                      }, {
+                          label: 'Override',
+                          data: monthlyData.override,
+                          borderColor: chartColors.info,
+                          backgroundColor: chartColors.info + '20',
+                          tension: 0.4,
+                          fill: false
+                      }]
+                  },
+                  options: {
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                          legend: {
+                              position: 'top'
+                          }
+                      },
+                      scales: {
+                          y: {
+                              beginAtZero: true,
+                              ticks: {
+                                  stepSize: 1
+                              }
+                          }
+                      }
+                  }
+              });
+              console.log('✅ Monthly chart created');
+          } else if (!monthlyCtx) {
+              console.error('❌ Monthly chart canvas not found');
+          }
+
+          // 2. Initialize Status Chart with zero-data support
+          const statusCtx = document.getElementById('statusChart');
+          if (statusCtx && !statusChart) {
+              console.log('🍩 Creating status chart...');
+
+              const statusData = {
+                  free: ensureNumber({{ stats.free_cancellations or 0 }}),
+                  charged: ensureNumber({{ stats.charged_cancellations or 0 }}),
+                  override: ensureNumber({{ stats.override_cancellations or 0 }}),
+                  excluded: ensureNumber({{ stats.excluded_cancellations or 0 }})
+              };
+
+              console.log('Status data:', statusData);
+
+              statusChart = createStatusChart(statusCtx, statusData);
+              console.log('✅ Status chart created');
+          } else if (!statusCtx) {
+              console.error('❌ Status chart canvas not found');
+          }
+
+          // Mark as initialized
+          chartsInitialized = (!!monthlyChart && !!statusChart);
+
+          console.log('🔍 Final verification:', {
+              monthlyChart: !!monthlyChart,
+              statusChart: !!statusChart,
+              initialized: chartsInitialized
+          });
+
+          return chartsInitialized;
+
+      } catch (error) {
+          console.error('💥 Chart initialization error:', error);
+          return false;
+      }
+  }
+
+  // Update charts
+  function updateCharts(data) {
+      console.log('🔄 Updating charts...');
+
+      if (!monthlyChart || !statusChart) {
+          console.log('📊 Charts missing, initializing...');
+          const success = initializeCharts();
+          if (!success) {
+              console.error('❌ Failed to initialize charts');
+              return;
           }
       }
+
+      // Update monthly trends
+      if (monthlyChart && data.monthly_trends && Array.isArray(data.monthly_trends)) {
+          console.log('📊 Updating monthly chart');
+          try {
+              if (data.monthly_trends.length === 0) {
+                  monthlyChart.data.labels = ['No Data'];
+                  monthlyChart.data.datasets[0].data = [0];
+                  monthlyChart.data.datasets[1].data = [0];
+                  monthlyChart.data.datasets[2].data = [0];
+                  monthlyChart.data.datasets[3].data = [0];
+              } else {
+                  monthlyChart.data.labels = data.monthly_trends.map(t => t.month || 'Unknown');
+                  monthlyChart.data.datasets[0].data = data.monthly_trends.map(t => ensureNumber(t.total_cancellations));
+                  monthlyChart.data.datasets[1].data = data.monthly_trends.map(t => ensureNumber(t.free_cancellations));
+                  monthlyChart.data.datasets[2].data = data.monthly_trends.map(t => ensureNumber(t.charged_cancellations));
+                  monthlyChart.data.datasets[3].data = data.monthly_trends.map(t => ensureNumber(t.override_cancellations));
+              }
+              monthlyChart.update('none');
+              console.log('✅ Monthly chart updated');
+          } catch (error) {
+              console.error('❌ Monthly chart update error:', error);
+          }
+      }
+
+      // Update status chart
+      if (statusChart && data.stats) {
+          console.log('🍩 Updating status chart');
+          try {
+              const statusData = {
+                  free: ensureNumber(data.stats.free_cancellations),
+                  charged: ensureNumber(data.stats.charged_cancellations),
+                  override: ensureNumber(data.stats.override_cancellations),
+                  excluded: ensureNumber(data.stats.excluded_cancellations)
+              };
+
+              updateStatusChart(statusChart, statusData);
+              console.log('✅ Status chart updated');
+          } catch (error) {
+              console.error('❌ Status chart update error:', error);
+          }
+      }
+  }
+
+  // Update metrics
+  function updateMetrics(stats) {
+      console.log('📊 Updating metrics');
+
+      const safeStats = {
+          total_cancellations: ensureNumber(stats?.total_cancellations),
+          free_cancellations: ensureNumber(stats?.free_cancellations),
+          charged_cancellations: ensureNumber(stats?.charged_cancellations),
+          override_cancellations: ensureNumber(stats?.override_cancellations)
+      };
+
+      const elements = {
+          total: document.getElementById('total-cancellations'),
+          free: document.getElementById('free-cancellations'),
+          charged: document.getElementById('charged-cancellations'),
+          override: document.getElementById('override-cancellations')
+      };
+
+      Object.keys(elements).forEach(key => {
+          if (elements[key]) {
+              elements[key].textContent = safeStats[key + '_cancellations'] || safeStats[key];
+          }
+      });
+  }
+
+  // Update table
+  function updateTable(cancellations) {
+      console.log('📋 Updating table');
+
+      const tbody = document.getElementById('table-data');
+      if (!tbody) return;
+
+      tbody.innerHTML = '';
+
+      if (!cancellations || cancellations.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No cancellations found</td></tr>';
+          return;
+      }
+
+      cancellations.forEach(c => {
+          const row = tbody.insertRow();
+          row.innerHTML = `
+              <td>${c.student_name || 'Unknown'}</td>
+              <td>${c.lesson_date ? new Date(c.lesson_date).toLocaleDateString() : 'Unknown'}</td>
+              <td>${getStatusBadge(c)}</td>
+              <td><span class="badge bg-secondary">${c.membership_level || 'Unknown'}</span></td>
+              <td>${c.cancellation_note ? '<i class="fas fa-sticky-note text-primary"></i>' : '<span class="text-muted">-</span>'}</td>
+          `;
+      });
+  }
+
+  function getStatusBadge(cancellation) {
+      if (cancellation.is_override) {
+          return '<span class="badge bg-info">Override</span>';
+      } else if (cancellation.deadline_passed) {
+          return '<span class="badge bg-danger">Deadline Passed</span>';
+      } else if (cancellation.charged) {
+          return '<span class="badge bg-warning">Charged</span>';
+      } else if (cancellation.status === 'approved') {
+          return '<span class="badge bg-success">Free</span>';
+      } else {
+          return '<span class="badge bg-secondary">Pending</span>';
+      }
+  }
+
+  // Apply filters
+  function applyFilters() {
+      console.log('🎯 Applying filters...');
+
+      const dateRange = document.querySelector('input[name="date_range"]:checked')?.value || 'month';
+      const status = document.querySelector('input[name="status_filter"]:checked')?.value || '';
+      const membership = document.getElementById('membership_filter')?.value || '';
+
+      const params = new URLSearchParams({
+          date_range: dateRange,
+          status: status,
+          membership: membership,
+          format: 'json'
+      });
+
+      const metricsRow = document.getElementById('metrics-row');
+      if (metricsRow) metricsRow.style.opacity = '0.6';
+
+      fetch('/manager/analytics?' + params.toString())
+          .then(response => {
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              return response.json();
+          })
+          .then(data => {
+              console.log('📥 Filter response:', data);
+
+              if (data.success) {
+                  updateMetrics(data.stats);
+                  updateCharts(data);
+                  updateTable(data.filtered_cancellations);
+              } else {
+                  console.error('Filter failed:', data.error);
+                  alert('Filter update failed: ' + (data.error || 'Unknown error'));
+              }
+
+              if (metricsRow) metricsRow.style.opacity = '1';
+          })
+          .catch(error => {
+              console.error('Filter error:', error);
+              if (metricsRow) metricsRow.style.opacity = '1';
+              alert('Network error. Please try again.');
+          });
+  }
+
+  // Export table
+  function exportTableData() {
+      const table = document.getElementById('analytics-table');
+      if (!table) {
+          alert('Table not found');
+          return;
+      }
+
+      let csv = '';
+      for (let row of table.rows) {
+          const cols = [];
+          for (let col of row.cells) {
+              cols.push('"' + col.innerText.replace(/"/g, '""') + '"');
+          }
+          csv += cols.join(',') + '\n';
+      }
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'analytics.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+  }
+
+  // Initialize on DOM ready
+  document.addEventListener('DOMContentLoaded', function() {
+      console.log('🚀 DOM ready, starting initialization...');
+
+      if (typeof Chart === 'undefined') {
+          console.error('❌ Chart.js not loaded');
+          alert('Chart.js not loaded. Please refresh the page.');
+          return;
+      }
+
+      setTimeout(() => {
+          const success = initializeCharts();
+
+          if (success) {
+              console.log('🎉 Analytics ready!');
+
+              // Auto-hide debug info
+              setTimeout(() => {
+                  const debugEl = document.getElementById('debug-info');
+                  if (debugEl) {
+                      debugEl.style.transition = 'opacity 1s';
+                      debugEl.style.opacity = '0';
+                      setTimeout(() => debugEl.style.display = 'none', 1000);
+                  }
+              }, 3000);
+          } else {
+              console.error('❌ Initialization failed');
+              alert('Chart initialization failed. Please refresh the page.');
+          }
+      }, 200);
   });
 </script>
 {% endblock %}

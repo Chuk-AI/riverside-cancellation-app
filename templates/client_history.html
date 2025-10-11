@@ -155,13 +155,13 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       </div>
     </div>
 
-    <!-- Current Status Summary -->
+    <!-- Current Month Summary -->
     <div class="monthly-summary">
       <div class="row align-items-center">
         <div class="col-md-8">
           <h6 class="mb-2">
             <i class="fas fa-calendar-check me-2"></i>
-            Current Month Summary ({{ current_month }})
+            Current Month ({{ current_month }})
           </h6>
           <div class="row">
             <div class="col-sm-6">
@@ -184,8 +184,9 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
               class="status-badge {% if current_month_stats.remaining > 0 %}status-free{% else %}status-charged{% endif %}"
             >
               {% if current_month_stats.remaining > 0 %} {{
-              current_month_stats.remaining }} Free Left {% else %} No Free Left
-              {% endif %}
+              current_month_stats.remaining }} Free Cancellation{% if
+              current_month_stats.remaining != 1 %}s{% endif %} Left {% else %}
+              No Free Cancellations Left {% endif %}
             </span>
           </div>
         </div>
@@ -253,8 +254,8 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                     </h6>
                     <small class="text-muted">
                       <i class="fas fa-clock me-1"></i>
-                      Submitted {{ cancellation.created_at.strftime('%m/%d/%Y at
-                      %I:%M %p') }}
+                      Submitted {{ cancellation.created_at.strftime('%B %d, %Y
+                      at %I:%M %p') }}
                     </small>
                   </div>
                   <div>
@@ -264,11 +265,12 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                     </span>
                     {% elif cancellation.charged %}
                     <span class="status-badge status-charged">
-                      <i class="fas fa-dollar-sign me-1"></i>Charged
+                      <i class="fas fa-dollar-sign me-1"></i>Not Free
+                      Cancellation
                     </span>
                     {% else %}
                     <span class="status-badge status-free">
-                      <i class="fas fa-check me-1"></i>Free
+                      <i class="fas fa-check me-1"></i>Free Cancellation
                     </span>
                     {% endif %}
                   </div>
@@ -284,7 +286,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                     {% for seq_lesson in cancellation.sequential_lessons %}
                     <li class="small">
                       <i class="fas fa-arrow-right me-1"></i>
-                      {{ seq_lesson.date.strftime('%m/%d/%Y') }} at {{
+                      {{ seq_lesson.date.strftime('%B %d, %Y') }} at {{
                       seq_lesson.time.strftime('%I:%M %p') }}
                     </li>
                     {% endfor %}
@@ -294,7 +296,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 <div class="mt-2">
                   <small class="text-success">
                     <i class="fas fa-calendar-plus me-1"></i>
-                    Rescheduling requested
+                    Booking Requested
                   </small>
                 </div>
                 {% endif %} {% if cancellation.excluded and
@@ -353,12 +355,13 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 count against your limit
               </li>
               <li>
-                <strong>Charged:</strong> Cancellation was late or you had no
-                free cancellations remaining
+                <strong>Not Free:</strong> Cancellation was not within the
+                policy and the cancelled lesson will be applied to the usage
+                record
               </li>
               <li>
-                <strong>Excluded:</strong> Manager approved exception (illness,
-                emergency, etc.)
+                <strong>Excluded:</strong> An illness exemption was accepted and
+                the lesson will be removed from the usage record
               </li>
             </ul>
           </div>

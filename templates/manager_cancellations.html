@@ -26,7 +26,9 @@
     .cancellation-card.free::before { background: #10b981; }
     .cancellation-card.charged::before { background: #f59e0b; }
     .cancellation-card.excluded::before { background: #3b82f6; }
-    .cancellation-card.pending::before { background: #6b7280; }
+    .cancellation-card.note::before { background: #8b5cf6; }
+    .cancellation-card.deadline-passed::before { background: #ef4444; }
+    .cancellation-card.override::before { background: #06b6d4; }
     
     .cancellation-card:hover {
         border-color: var(--primary-color);
@@ -46,7 +48,9 @@
     .status-free { background: #d1fae5; color: #065f46; }
     .status-charged { background: #fef3c7; color: #92400e; }
     .status-excluded { background: #dbeafe; color: #1e40af; }
-    .status-pending { background: #f3f4f6; color: #374151; }
+    .status-note { background: #ede9fe; color: #5b21b6; }
+    .status-deadline-passed { background: #fee2e2; color: #991b1b; }
+    .status-override { background: #cffafe; color: #0e7490; }
     
     .filter-tabs {
         background: white;
@@ -160,7 +164,6 @@
         }
     }
 
-    /* Fix stats layout to be horizontal */
     .stats-card {
         background: white;
         border: 1px solid #e2e8f0;
@@ -192,6 +195,89 @@
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
+
+    .usage-over-limit {
+        color: #ef4444 !important;
+    }
+
+    .deadline-passed {
+        color: #ef4444 !important;
+    }
+
+    .view-toggle {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.5rem;
+        padding: 0.25rem;
+        display: inline-flex;
+    }
+    
+    .view-toggle button {
+        background: none;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        color: #6b7280;
+        transition: all 0.2s;
+    }
+    
+    .view-toggle button.active {
+        background: var(--primary-color);
+        color: white;
+    }
+
+    .list-view .cancellation-item {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+        transition: all 0.2s ease;
+    }
+
+    .list-view .cancellation-item:hover {
+        border-color: var(--primary-color);
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+    }
+
+    .date-picker-container {
+        position: relative;
+        display: none;
+    }
+
+    .date-picker-container.show {
+        display: block;
+    }
+
+    .override-reason-required {
+        border-color: #ef4444 !important;
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1) !important;
+    }
+
+    .btn-purple { 
+        background-color: #8b5cf6; 
+        color: white; 
+        border-color: #8b5cf6; 
+    }
+    
+    .btn-purple:hover { 
+        background-color: #7c3aed; 
+        border-color: #7c3aed; 
+        color: white;
+    }
+    
+    .bg-purple { 
+        background-color: #8b5cf6 !important; 
+    }
+    
+    .text-purple { 
+        color: #8b5cf6 !important; 
+    }
+    
+    .border-purple { 
+        border-color: #8b5cf6 !important; 
+    }
 </style>
 {% endblock %}
 
@@ -208,6 +294,14 @@
                 <p class="text-muted mb-0">Review, approve, and manage cancellation requests</p>
             </div>
             <div class="d-flex gap-2">
+                <div class="view-toggle">
+                    <button type="button" class="active" onclick="switchView('card')" id="cardViewBtn">
+                        <i class="fas fa-th-large me-1"></i>Cards
+                    </button>
+                    <button type="button" onclick="switchView('list')" id="listViewBtn">
+                        <i class="fas fa-list me-1"></i>List
+                    </button>
+                </div>
                 <button class="btn btn-outline-info" onclick="refreshData()">
                     <i class="fas fa-sync me-1"></i>
                     Refresh
@@ -221,50 +315,105 @@
     </div>
 </div>
 
-<!-- Quick Stats - Fixed to be horizontal -->
-<div class="row mb-4">
-    <div class="col-lg-3 col-md-6 mb-3">
-        <div class="stats-card">
-            <div class="icon text-primary">
-                <i class="fas fa-clock"></i>
+<!-- Student Filter Context (Show when filtering by specific student) -->
+{% if current_student_id and filtered_student_name %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-info border-0 shadow-sm">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="alert-heading mb-1">
+                        <i class="fas fa-filter me-2"></i>
+                        Viewing Cancellations for Specific Student
+                    </h6>
+                    <p class="mb-0">
+                        Showing {{ total_results }} cancellation{% if total_results != 1 %}s{% endif %} for
+                        <strong>{{ filtered_student_name }}</strong>
+                        {% if request.args.get('date_range') and request.args.get('date_range') != 'all' %}
+                            <span class="text-muted">
+                                ({{ 
+                                    {
+                                        'today': 'today',
+                                        'yesterday': 'yesterday', 
+                                        '7days': 'last 7 days',
+                                        'month': 'this month',
+                                        'custom': 'custom date range'
+                                    }[request.args.get('date_range')] or 'filtered date range'
+                                }})
+                            </span>
+                        {% endif %}
+                    </p>
+                </div>
+                <div>
+                    <button class="btn btn-outline-primary btn-sm" onclick="viewStudentDetails({{ current_student_id }}, '{{ filtered_student_name }}', '')">
+                        <i class="fas fa-user me-1"></i>
+                        Student Details
+                    </button>
+                    <a href="{{ url_for('manager_cancellations') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-times me-1"></i>
+                        Clear Filter
+                    </a>
+                </div>
             </div>
-            <div class="number text-primary">{{ stats.pending_review }}</div>
-            <div class="label">Pending Review</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Updated Stats - 5 boxes as requested -->
+<div class="row mb-4">
+    <div class="col-lg mb-3">
+        <div class="stats-card">
+            <div class="icon text-info">
+                <i class="fas fa-calendar-day"></i>
+            </div>
+            <div class="number text-info">{{ stats.today_cancellations }}</div>
+            <div class="label">Today</div>
         </div>
     </div>
     
-    <div class="col-lg-3 col-md-6 mb-3">
+    <div class="col-lg mb-3">
         <div class="stats-card">
             <div class="icon text-success">
                 <i class="fas fa-check-circle"></i>
             </div>
-            <div class="number text-success">{{ stats.today_processed }}</div>
-            <div class="label">Processed Today</div>
+            <div class="number text-success">{{ stats.free_cancellations }}</div>
+            <div class="label">Free This Month</div>
         </div>
     </div>
     
-    <div class="col-lg-3 col-md-6 mb-3">
+    <div class="col-lg mb-3">
         <div class="stats-card">
             <div class="icon text-warning">
                 <i class="fas fa-dollar-sign"></i>
             </div>
-            <div class="number text-warning">{{ stats.charged_this_month }}</div>
+            <div class="number text-warning">{{ stats.charged_cancellations }}</div>
             <div class="label">Charged This Month</div>
         </div>
     </div>
     
-    <div class="col-lg-3 col-md-6 mb-3">
+    <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-info">
+            <div class="icon text-primary">
                 <i class="fas fa-shield-alt"></i>
             </div>
-            <div class="number text-info">{{ stats.excluded_this_month }}</div>
+            <div class="number text-primary">{{ stats.excluded_cancellations }}</div>
             <div class="label">Excluded This Month</div>
+        </div>
+    </div>
+
+    <div class="col-lg mb-3">
+        <div class="stats-card">
+            <div class="icon text-secondary">
+                <i class="fas fa-user-shield"></i>
+            </div>
+            <div class="number text-secondary">{{ stats.override_this_month|default(0) }}</div>
+            <div class="label">Override This Month</div>
         </div>
     </div>
 </div>
 
-<!-- Quick Actions -->
+<!-- Updated Quick Actions -->
 <div class="quick-actions">
     <div class="row align-items-center">
         <div class="col-md-8">
@@ -277,13 +426,13 @@
                     <i class="fas fa-check-double me-1"></i>
                     Process All Pending
                 </button>
-                <button class="btn btn-sm btn-warning" onclick="reviewLateSubmissions()">
-                    <i class="fas fa-exclamation-triangle me-1"></i>
-                    Review Late Submissions
+                <button class="btn btn-sm btn-danger" onclick="reviewPassedDeadline()">
+                    <i class="fas fa-clock me-1"></i>
+                    Passed Deadline
                 </button>
-                <button class="btn btn-sm btn-info" onclick="viewMembershipConflicts()">
-                    <i class="fas fa-question-circle me-1"></i>
-                    Membership Conflicts
+                <button class="btn btn-sm btn-purple" onclick="viewNotesSubmissions()">
+                    <i class="fas fa-sticky-note me-1"></i>
+                    Notes
                 </button>
             </div>
         </div>
@@ -325,10 +474,10 @@
     </div>
 </div>
 
-<!-- Search and Filters -->
+<!-- Updated Search and Filters -->
 <div class="search-section">
     <div class="row align-items-end">
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
             <label class="form-label">Search</label>
             <div class="input-group">
                 <input type="text" 
@@ -346,10 +495,12 @@
             <label class="form-label">Status</label>
             <select class="form-select" id="statusFilter" onchange="applyFilters()">
                 <option value="">All Status</option>
-                <option value="pending" {{ 'selected' if request.args.get('status') == 'pending' else '' }}>Pending</option>
                 <option value="free" {{ 'selected' if request.args.get('status') == 'free' else '' }}>Free</option>
                 <option value="charged" {{ 'selected' if request.args.get('status') == 'charged' else '' }}>Charged</option>
                 <option value="excluded" {{ 'selected' if request.args.get('status') == 'excluded' else '' }}>Excluded</option>
+                <option value="note" {{ 'selected' if request.args.get('status') == 'note' else '' }}>Note</option>
+                <option value="deadline_passed" {{ 'selected' if request.args.get('status') == 'deadline_passed' else '' }}>Passed Deadline</option>
+                <option value="override" {{ 'selected' if request.args.get('status') == 'override' else '' }}>Override</option>
             </select>
         </div>
         
@@ -357,10 +508,21 @@
             <label class="form-label">Date Range</label>
             <select class="form-select" id="dateRangeFilter" onchange="applyFilters()">
                 <option value="today" {{ 'selected' if request.args.get('date_range') == 'today' else '' }}>Today</option>
-                <option value="week" {{ 'selected' if request.args.get('date_range') == 'week' else '' }}>This Week</option>
+                <option value="yesterday" {{ 'selected' if request.args.get('date_range') == 'yesterday' else '' }}>Yesterday</option>
+                <option value="7days" {{ 'selected' if request.args.get('date_range') == '7days' else '' }}>7 Days</option>
                 <option value="month" {{ 'selected' if request.args.get('date_range') == 'month' else '' }}>This Month</option>
                 <option value="all" {{ 'selected' if request.args.get('date_range') == 'all' else '' }}>All Time</option>
+                <option value="custom" {{ 'selected' if request.args.get('date_range') == 'custom' else '' }}>Custom</option>
             </select>
+        </div>
+        
+        <!-- Custom Date Picker (Hidden by default) -->
+        <div class="col-md-2 mb-3 date-picker-container" id="customDatePicker">
+            <label class="form-label">From - To</label>
+            <div class="input-group">
+                <input type="date" class="form-control" id="dateFrom" placeholder="From">
+                <input type="date" class="form-control" id="dateTo" placeholder="To">
+            </div>
         </div>
         
         <div class="col-md-2 mb-3">
@@ -378,7 +540,7 @@
         <div class="col-md-2 mb-3">
             <label class="form-label">Sort By</label>
             <select class="form-select" id="sortFilter" onchange="applyFilters()">
-                <option value="recent" {{ 'selected' if request.args.get('sort') == 'recent' else '' }}>Most Recent</option>
+                <option value="submit_date" {{ 'selected' if request.args.get('sort') == 'submit_date' else '' }}>Submit Date</option>
                 <option value="lesson_date" {{ 'selected' if request.args.get('sort') == 'lesson_date' else '' }}>Lesson Date</option>
                 <option value="student" {{ 'selected' if request.args.get('sort') == 'student' else '' }}>Student Name</option>
                 <option value="status" {{ 'selected' if request.args.get('sort') == 'status' else '' }}>Status</option>
@@ -393,30 +555,30 @@
     </div>
 </div>
 
-<!-- Filter Tabs -->
+<!-- Updated Filter Tabs -->
 <div class="filter-tabs">
     <button class="filter-tab active" onclick="filterByStatus('all')" id="tab-all">
-        All Cancellations
+        All
         <span class="badge bg-secondary ms-1">{{ stats.total_cancellations }}</span>
     </button>
-    <button class="filter-tab" onclick="filterByStatus('pending')" id="tab-pending">
-        Pending Review
-        <span class="badge bg-warning ms-1">{{ stats.pending_review }}</span>
-    </button>
     <button class="filter-tab" onclick="filterByStatus('today')" id="tab-today">
-        Today's Submissions
-        <span class="badge bg-info ms-1">{{ stats.today_submissions }}</span>
+        Today
+        <span class="badge bg-info ms-1">{{ stats.today_cancellations }}</span>
     </button>
-    <button class="filter-tab" onclick="filterByStatus('urgent')" id="tab-urgent">
-        Urgent/Late
-        <span class="badge bg-danger ms-1">{{ stats.urgent_cancellations }}</span>
+    <button class="filter-tab" onclick="filterByStatus('deadline_passed')" id="tab-deadline">
+        Passed Deadline
+        <span class="badge bg-danger ms-1">{{ stats.deadline_passed|default(0) }}</span>
+    </button>
+    <button class="filter-tab" onclick="filterByStatus('notes')" id="tab-notes">
+        Notes
+        <span class="badge bg-purple ms-1">{{ stats.with_notes|default(0) }}</span>
     </button>
 </div>
 
-<!-- Cancellations List -->
+<!-- Card View (Default) -->
 <div class="row" id="cancellationsList">
     {% for cancellation in cancellations %}
-    <div class="col-lg-6 mb-4">
+    <div class="col-lg-6 mb-4 cancellation-item-wrapper">
         <div class="cancellation-card {{ cancellation.status_class }}" data-id="{{ cancellation.id }}">
             {% if cancellation.is_urgent %}
             <div class="timeline-indicator urgent"></div>
@@ -446,25 +608,40 @@
                             <span class="status-badge status-charged">Charged</span>
                         {% elif cancellation.status == 'approved' %}
                             <span class="status-badge status-free">Free</span>
-                        {% else %}
-                            <span class="status-badge status-pending">Pending</span>
+                        {% elif cancellation.cancellation_note %}
+                            <span class="status-badge status-note">Note</span>
+                        {% elif not cancellation.within_deadline %}
+                            <span class="status-badge status-deadline-passed">Passed Deadline</span>
+                        {% elif cancellation.is_override %}
+                            <span class="status-badge status-override">Override</span>
                         {% endif %}
                     </div>
                 </div>
                 
-                <!-- Lesson Details - Fixed date display -->
+                <!-- Lesson Details with consistent date formatting -->
                 <div class="row mb-3">
                     <div class="col-6">
                         <small class="text-muted">Lesson Date</small>
-                        <p class="mb-0"><strong>{{ cancellation.lesson_date.strftime('%B %d, %Y') }}</strong></p>
-                        <small class="text-muted">{{ cancellation.lesson_time.strftime('%I:%M %p') }}</small>
+                        <p class="mb-0"><strong>{{ cancellation.lesson_date|format_date }}</strong></p>
+                        <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
                     </div>
                     <div class="col-6">
                         <small class="text-muted">Submitted</small>
-                        <p class="mb-0"><strong>{{ cancellation.submitted_date.strftime('%m/%d/%Y') }}</strong></p>
+                        <p class="mb-0"><strong>{{ cancellation.submitted_date|format_date }}</strong></p>
                         <small class="text-muted">{{ cancellation.submitted_time }} ({{ cancellation.time_ago }})</small>
                     </div>
                 </div>
+                
+                <!-- Cancellation Note (if exists) -->
+                {% if cancellation.cancellation_note %}
+                <div class="details-panel" style="border-left-color: #8b5cf6;">
+                    <h6 class="mb-2">
+                        <i class="fas fa-sticky-note me-1"></i>
+                        Cancellation Note
+                    </h6>
+                    <p class="small mb-0">{{ cancellation.cancellation_note }}</p>
+                </div>
+                {% endif %}
                 
                 <!-- Additional Details -->
                 {% if cancellation.sequential_lessons and cancellation.sequential_lessons|length > 0 %}
@@ -477,7 +654,7 @@
                         {% for seq_lesson in cancellation.sequential_lessons %}
                         <li class="small">
                             <i class="fas fa-arrow-right me-1"></i>
-                            {{ seq_lesson.date.strftime('%m/%d/%Y') }} at {{ seq_lesson.time.strftime('%I:%M %p') }}
+                            {{ seq_lesson.date|format_date }} at {{ seq_lesson.time|format_time }}
                         </li>
                         {% endfor %}
                     </ul>
@@ -488,7 +665,7 @@
                 <div class="details-panel">
                     <h6 class="mb-2">
                         <i class="fas fa-calendar-plus me-1"></i>
-                        Rescheduling Requested
+                        Booking Request
                     </h6>
                     <p class="small mb-0">{{ cancellation.reschedule_preferences }}</p>
                 </div>
@@ -515,22 +692,24 @@
                                     <span class="text-success">Within Deadline</span>
                                 {% else %}
                                     <i class="fas fa-times-circle text-danger me-1"></i>
-                                    <span class="text-danger">After Deadline</span>
+                                    <span class="deadline-passed">Passed Deadline</span>
                                 {% endif %}
                             </p>
                         </div>
                         <div class="col-6">
                             <small class="text-muted">Free Cancellations</small>
                             <p class="mb-0">
-                                <span class="text-info">{{ cancellation.used_this_month }}/{{ cancellation.monthly_limit }}</span>
+                                <span class="{{ 'usage-over-limit' if cancellation.used_this_month > cancellation.monthly_limit else 'text-info' }}">
+                                    {{ cancellation.used_this_month }}/{{ cancellation.monthly_limit }}
+                                </span>
                                 <small class="text-muted">used this month</small>
                             </p>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Override Controls (if status is pending) -->
-                {% if cancellation.status == 'pending' %}
+                <!-- Manager Override Controls -->
+                {% if cancellation.status == 'pending' or not cancellation.status %}
                 <div class="override-controls">
                     <h6 class="mb-3">
                         <i class="fas fa-user-shield me-1"></i>
@@ -541,21 +720,21 @@
                             <button class="btn btn-success btn-sm w-100" 
                                     onclick="processAsFree({{ cancellation.id }})">
                                 <i class="fas fa-check me-1"></i>
-                                Process as Free
+                                Free
                             </button>
                         </div>
                         <div class="col-md-4 mb-2">
                             <button class="btn btn-warning btn-sm w-100" 
                                     onclick="processAsCharged({{ cancellation.id }})">
                                 <i class="fas fa-dollar-sign me-1"></i>
-                                Process as Charged
+                                Charge
                             </button>
                         </div>
                         <div class="col-md-4 mb-2">
                             <button class="btn btn-info btn-sm w-100" 
                                     onclick="excludeFromPolicy({{ cancellation.id }})">
                                 <i class="fas fa-shield-alt me-1"></i>
-                                Exclude (Medical/Emergency)
+                                Exclude
                             </button>
                         </div>
                     </div>
@@ -564,8 +743,9 @@
                         <div class="input-group input-group-sm">
                             <input type="text" 
                                    class="form-control" 
-                                   placeholder="Override reason (optional)"
-                                   id="reason-{{ cancellation.id }}">
+                                   placeholder="Override reason"
+                                   id="reason-{{ cancellation.id }}"
+                                   required>
                             <button class="btn btn-outline-secondary" 
                                     onclick="addNote({{ cancellation.id }})">
                                 <i class="fas fa-sticky-note"></i>
@@ -620,15 +800,128 @@
     {% endfor %}
 </div>
 
+<!-- List View (Hidden by default) -->
+<div id="listView" style="display: none;">
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Student</th>
+                        <th>Lesson Date</th>
+                        <th>Submit Date</th>
+                        <th>Status</th>
+                        <th>Note</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="listViewTable">
+                    {% for cancellation in cancellations %}
+                    <tr class="cancellation-row" data-id="{{ cancellation.id }}">
+                        <td>
+                            <div>
+                                <strong>{{ cancellation.student_name }}</strong><br>
+                                <small class="text-muted">{{ cancellation.membership_level }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <div>
+                                <strong>{{ cancellation.lesson_date|format_date }}</strong><br>
+                                <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <div>
+                                <strong>{{ cancellation.submitted_date|format_date }}</strong><br>
+                                <small class="text-muted">{{ cancellation.time_ago }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            {% if cancellation.excluded %}
+                                <span class="badge bg-info">Excluded</span>
+                            {% elif cancellation.charged %}
+                                <span class="badge bg-warning">Charged</span>
+                            {% elif cancellation.status == 'approved' %}
+                                <span class="badge bg-success">Free</span>
+                            {% elif cancellation.cancellation_note %}
+                                <span class="badge bg-purple">Note</span>
+                            {% elif not cancellation.within_deadline %}
+                                <span class="badge bg-danger">Passed Deadline</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if cancellation.cancellation_note %}
+                                <small class="text-truncate" style="max-width: 150px; display: block;">
+                                    {{ cancellation.cancellation_note }}
+                                </small>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary btn-sm" 
+                                        onclick="viewCancellationDetails({{ cancellation.id }})">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" 
+                                        onclick="viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')">
+                                    <i class="fas fa-user"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <!-- No Results -->
 <div class="text-center py-5" id="noResults" style="display: {% if not cancellations %}block{% else %}none{% endif %};">
     <i class="fas fa-search fa-3x text-muted mb-3"></i>
-    <h4>No Cancellations Found</h4>
-    <p class="text-muted">Try adjusting your filters or search criteria</p>
-    <button class="btn btn-outline-primary" onclick="clearFilters()">
-        <i class="fas fa-times me-1"></i>
-        Clear All Filters
-    </button>
+    {% if current_student_id and filtered_student_name %}
+        <h4>No Cancellations Found for {{ filtered_student_name }}</h4>
+        <p class="text-muted">
+            This student hasn't submitted any cancellations
+            {% if request.args.get('date_range') and request.args.get('date_range') != 'all' %}
+                {{ 
+                    {
+                        'today': 'today',
+                        'yesterday': 'yesterday', 
+                        '7days': 'in the last 7 days',
+                        'month': 'this month',
+                        'custom': 'in the selected date range'
+                    }[request.args.get('date_range')] or 'in the filtered time period'
+                }}
+            {% endif %}
+        </p>
+        <div class="mt-3">
+            <a href="{{ url_for('manager_cancellations', date_range='all', student=current_student_id) }}" 
+               class="btn btn-outline-info me-2">
+                <i class="fas fa-calendar me-1"></i>
+                View All Time
+            </a>
+            <a href="{{ url_for('manager_cancellations') }}" class="btn btn-outline-secondary me-2">
+                <i class="fas fa-times me-1"></i>
+                Clear Student Filter
+            </a>
+            <button class="btn btn-outline-primary" onclick="viewStudentDetails({{ current_student_id }}, '{{ filtered_student_name }}', '')">
+                <i class="fas fa-user me-1"></i>
+                View Student Details
+            </button>
+        </div>
+    {% else %}
+        <h4>No Cancellations Found</h4>
+        <p class="text-muted">Try adjusting your filters or search criteria</p>
+        <button class="btn btn-outline-primary" onclick="clearFilters()">
+            <i class="fas fa-times me-1"></i>
+            Clear All Filters
+        </button>
+    {% endif %}
 </div>
 
 <!-- Student Details Modal -->
@@ -696,37 +989,42 @@
 
 {% block extra_js %}
 <script>
+// Consolidated JavaScript for manager_cancellations.html
 let batchMode = false;
 let autoRefresh = false;
 let refreshInterval;
+let currentView = 'card';
 let currentFilters = {
     search: '{{ request.args.get("search", "") }}',
     status: '{{ request.args.get("status", "") }}',
     date_range: '{{ request.args.get("date_range", "month") }}',
     membership: '{{ request.args.get("membership", "") }}',
-    sort: '{{ request.args.get("sort", "recent") }}',
+    sort: '{{ request.args.get("sort", "submit_date") }}',
     student: '{{ request.args.get("student", "") }}'
 };
 
-// AJAX filter functions - no more page refreshes
-function applyFilters() {
-    const searchInput = document.getElementById('searchInput');
-    const statusFilter = document.getElementById('statusFilter');
-    const dateRangeFilter = document.getElementById('dateRangeFilter');
-    const membershipFilter = document.getElementById('membershipFilter');
-    const sortFilter = document.getElementById('sortFilter');
+// View switching functionality
+function switchView(view) {
+    currentView = view;
+    const cardView = document.getElementById('cancellationsList');
+    const listView = document.getElementById('listView');
+    const cardBtn = document.getElementById('cardViewBtn');
+    const listBtn = document.getElementById('listViewBtn');
     
-    currentFilters = {
-        search: searchInput.value,
-        status: statusFilter.value,
-        date_range: dateRangeFilter.value,
-        membership: membershipFilter.value,
-        sort: sortFilter.value
-    };
-    
-    loadCancellations();
+    if (view === 'card') {
+        cardView.style.display = 'block';
+        listView.style.display = 'none';
+        cardBtn.classList.add('active');
+        listBtn.classList.remove('active');
+    } else {
+        cardView.style.display = 'none';
+        listView.style.display = 'block';
+        cardBtn.classList.remove('active');
+        listBtn.classList.add('active');
+    }
 }
 
+// SINGLE loadCancellations function (removed duplicate)
 function loadCancellations() {
     const params = new URLSearchParams(currentFilters);
     
@@ -751,51 +1049,66 @@ function loadCancellations() {
             document.getElementById('cancellationsList').innerHTML = newList.innerHTML;
         }
         
+        // Update list view table
+        const newTable = doc.getElementById('listViewTable');
+        if (newTable) {
+            document.getElementById('listViewTable').innerHTML = newTable.innerHTML;
+        }
+        
         // Update stats if they're in the response
         updateStats(doc);
         
         // Show/hide no results
-        const cancellations = document.querySelectorAll('#cancellationsList .cancellation-card');
+        const cancellations = document.querySelectorAll('#cancellationsList .cancellation-card, #listViewTable tr');
         document.getElementById('noResults').style.display = cancellations.length === 0 ? 'block' : 'none';
         
-        // Animate new cards
-        animateCards();
+        // Animate new cards if in card view
+        if (currentView === 'card') {
+            animateCards();
+        }
+        
+        // Update student context after loading new data
+        updateStudentContext();
     })
     .catch(error => {
         console.error('Error loading cancellations:', error);
-        // Fallback to page refresh
-        window.location.reload();
+        showAlert('Error loading data', 'error');
     });
 }
 
-function updateStats(doc) {
-    // Update stats numbers if they exist in the response
-    const statsCards = document.querySelectorAll('.stats-card .number');
-    const newStatsCards = doc.querySelectorAll('.stats-card .number');
-    
-    statsCards.forEach((card, index) => {
-        if (newStatsCards[index]) {
-            card.textContent = newStatsCards[index].textContent;
-        }
-    });
-}
-
-function clearFilters() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('statusFilter').value = '';
-    document.getElementById('dateRangeFilter').value = 'month';
-    document.getElementById('membershipFilter').value = '';
-    document.getElementById('sortFilter').value = 'recent';
+// Updated filter functions
+function applyFilters() {
+    const searchInput = document.getElementById('searchInput');
+    const statusFilter = document.getElementById('statusFilter');
+    const dateRangeFilter = document.getElementById('dateRangeFilter');
+    const membershipFilter = document.getElementById('membershipFilter');
+    const sortFilter = document.getElementById('sortFilter');
     
     currentFilters = {
-        search: '',
-        status: '',
-        date_range: 'month',
-        membership: '',
-        sort: 'recent'
+        search: searchInput.value,
+        status: statusFilter.value,
+        date_range: dateRangeFilter.value,
+        membership: membershipFilter.value,
+        sort: sortFilter.value
     };
     
-    applyFilters();
+    // Preserve student filter if it exists
+    const currentStudentId = {{ current_student_id|default('null') }};
+    if (currentStudentId) {
+        currentFilters.student = currentStudentId;
+    }
+    
+    // Add custom date range if selected
+    if (dateRangeFilter.value === 'custom') {
+        const dateFrom = document.getElementById('dateFrom').value;
+        const dateTo = document.getElementById('dateTo').value;
+        if (dateFrom && dateTo) {
+            currentFilters.date_from = dateFrom;
+            currentFilters.date_to = dateTo;
+        }
+    }
+    
+    loadCancellations();
 }
 
 function filterByStatus(status) {
@@ -810,11 +1123,17 @@ function filterByStatus(status) {
     } else if (status === 'today') {
         document.getElementById('dateRangeFilter').value = 'today';
         currentFilters.date_range = 'today';
-    } else if (status === 'urgent') {
-        document.getElementById('statusFilter').value = 'pending';
-        document.getElementById('dateRangeFilter').value = 'week';
-        currentFilters.status = 'pending';
-        currentFilters.date_range = 'week';
+        currentFilters.status = '';
+    } else if (status === 'deadline_passed') {
+        document.getElementById('statusFilter').value = 'deadline_passed';
+        document.getElementById('dateRangeFilter').value = '7days';
+        currentFilters.status = 'deadline_passed';
+        currentFilters.date_range = '7days';
+    } else if (status === 'notes') {
+        document.getElementById('statusFilter').value = 'note';
+        document.getElementById('dateRangeFilter').value = '7days';
+        currentFilters.status = 'note';
+        currentFilters.date_range = '7days';
     } else {
         document.getElementById('statusFilter').value = status;
         currentFilters.status = status;
@@ -823,40 +1142,99 @@ function filterByStatus(status) {
     applyFilters();
 }
 
-// Processing functions - now with proper AJAX
-function processAsFree(id) {
-    const reason = document.getElementById(`reason-${id}`)?.value || '';
+function updateStudentContext() {
+    const currentStudentId = {{ current_student_id|default('null') }};
+    const filteredStudentName = "{{ filtered_student_name|default('') }}";
     
-    fetch('/manager/api/cancellation/process', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            action: 'approve',
-            cancellation_id: id,
-            reason: reason
+    if (currentStudentId && filteredStudentName) {
+        // Store student context for use in other functions
+        window.currentFilteredStudent = {
+            id: currentStudentId,
+            name: filteredStudentName
+        };
+        
+        // Update the page title to reflect student filtering
+        document.title = `Cancellations for ${filteredStudentName} - Manager Dashboard`;
+        
+        // Add a visual indicator to the filter tabs when student filtering is active
+        document.querySelectorAll('.filter-tab').forEach(tab => {
+            if (!tab.querySelector('.student-filter-indicator')) {
+                const indicator = document.createElement('span');
+                indicator.className = 'student-filter-indicator badge bg-info ms-1';
+                indicator.innerHTML = '<i class="fas fa-user"></i>';
+                indicator.title = `Filtered by ${filteredStudentName}`;
+                tab.appendChild(indicator);
+            }
+        });
+    } else {
+        // Reset title when no student filter is active
+        document.title = 'Cancellation Management - Manager Dashboard';
+        
+        // Remove student filter indicators
+        document.querySelectorAll('.student-filter-indicator').forEach(indicator => {
+            indicator.remove();
+        });
+        
+        window.currentFilteredStudent = null;
+    }
+}
+
+// Processing functions with mandatory reason validation
+function processAsFree(id) {
+    const reasonInput = document.getElementById(`reason-${id}`);
+    const reason = reasonInput?.value?.trim() || '';
+    
+    if (!reason) {
+        reasonInput.classList.add('override-reason-required');
+        showAlert('Override reason is required', 'error');
+        reasonInput.focus();
+        return;
+    }
+    
+    const confirmMessage = `Are you sure you want to process this as a FREE cancellation?\n\nReason: ${reason}`;
+    
+    if (confirm(confirmMessage)) {
+        fetch('/manager/api/cancellation/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'approve',
+                cancellation_id: id,
+                reason: reason
+            })
         })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert('Cancellation processed as free successfully!', 'success');
-            loadCancellations(); // Reload without page refresh
-        } else {
-            showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Network error occurred', 'error');
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Cancellation processed as free successfully!', 'success');
+                loadCancellations();
+            } else {
+                showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Network error occurred', 'error');
+        });
+    }
 }
 
 function processAsCharged(id) {
-    const reason = document.getElementById(`reason-${id}`)?.value || '';
+    const reasonInput = document.getElementById(`reason-${id}`);
+    const reason = reasonInput?.value?.trim() || '';
     
-    if (confirm('Are you sure you want to process this as a charged cancellation?')) {
+    if (!reason) {
+        reasonInput.classList.add('override-reason-required');
+        showAlert('Override reason is required', 'error');
+        reasonInput.focus();
+        return;
+    }
+    
+    const confirmMessage = `Are you sure you want to process this as a CHARGED cancellation?\n\nReason: ${reason}`;
+    
+    if (confirm(confirmMessage)) {
         fetch('/manager/api/cancellation/process', {
             method: 'POST',
             headers: {
@@ -885,9 +1263,19 @@ function processAsCharged(id) {
 }
 
 function excludeFromPolicy(id) {
-    const reason = prompt('Please provide a reason for exclusion (medical note, emergency, etc.):');
+    const reasonInput = document.getElementById(`reason-${id}`);
+    const reason = reasonInput?.value?.trim() || '';
     
-    if (reason) {
+    if (!reason) {
+        reasonInput.classList.add('override-reason-required');
+        showAlert('Override reason is required', 'error');
+        reasonInput.focus();
+        return;
+    }
+    
+    const confirmMessage = `Are you sure you want to EXCLUDE this cancellation from policy?\n\nReason: ${reason}`;
+    
+    if (confirm(confirmMessage)) {
         fetch(`/manager/api/cancellation/${id}/exclude`, {
             method: 'POST',
             headers: {
@@ -911,6 +1299,80 @@ function excludeFromPolicy(id) {
             showAlert('Network error occurred', 'error');
         });
     }
+}
+
+// Quick action functions
+function reviewPassedDeadline() {
+    filterByStatus('deadline_passed');
+}
+
+function viewNotesSubmissions() {
+    filterByStatus('notes');
+}
+
+function processAllPending() {
+    if (confirm('Process all pending cancellations according to policy?')) {
+        fetch('/manager/api/cancellation/process-all-pending', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(`${data.processed || 0} cancellations processed automatically!`, 'success');
+                loadCancellations();
+            } else {
+                showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
+            }
+        });
+    }
+}
+
+function clearFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('statusFilter').value = '';
+    document.getElementById('dateRangeFilter').value = 'month';
+    document.getElementById('membershipFilter').value = '';
+    document.getElementById('sortFilter').value = 'submit_date';
+    document.getElementById('customDatePicker').classList.remove('show');
+    
+    currentFilters = {
+        search: '',
+        status: '',
+        date_range: 'month',
+        membership: '',
+        sort: 'submit_date'
+    };
+    
+    // Preserve student filter if it exists (only clear other filters)
+    const currentStudentId = {{ current_student_id|default('null') }};
+    if (currentStudentId) {
+        currentFilters.student = currentStudentId;
+    }
+    
+    applyFilters();
+}
+
+function clearStudentFilter() {
+    // Remove student from current filters and redirect
+    const params = new URLSearchParams(window.location.search);
+    params.delete('student');
+    
+    const newUrl = `{{ url_for('manager_cancellations') }}?${params.toString()}`;
+    window.location.href = newUrl;
+}
+
+function updateStats(doc) {
+    const statsCards = document.querySelectorAll('.stats-card .number');
+    const newStatsCards = doc.querySelectorAll('.stats-card .number');
+    
+    statsCards.forEach((card, index) => {
+        if (newStatsCards[index]) {
+            card.textContent = newStatsCards[index].textContent;
+        }
+    });
 }
 
 // Utility function to show alerts
@@ -1071,7 +1533,7 @@ function toggleAutoRefresh() {
         btn.classList.add('active');
         refreshInterval = setInterval(() => {
             loadCancellations();
-        }, 30000); // Refresh every 30 seconds
+        }, 30000);
     } else {
         btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Auto Refresh';
         btn.classList.remove('active');
@@ -1085,19 +1547,321 @@ function exportCancellations() {
     window.location.href = `{{ url_for('manager_cancellations') }}?${params.toString()}`;
 }
 
+
+function formatDate(dateString) {
+    if (!dateString) return 'Unknown';
+    
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
+    } catch (error) {
+        return dateString;
+    }
+}
+
+function formatTime(timeString) {
+    if (!timeString) return 'Unknown';
+    
+    try {
+        // Handle both full datetime and time-only strings
+        let timeObj;
+        if (timeString.includes('T') || timeString.includes(' ')) {
+            timeObj = new Date(timeString);
+        } else {
+            // Time only - create a date with the time
+            timeObj = new Date(`1970-01-01T${timeString}`);
+        }
+        
+        return timeObj.toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit',
+            hour12: true 
+        });
+    } catch (error) {
+        return timeString;
+    }
+}
+
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return 'Unknown';
+    
+    try {
+        const dt = new Date(dateTimeString);
+        const date = dt.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
+        const time = dt.toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit',
+            hour12: true 
+        });
+        return `${date} at ${time}`;
+    } catch (error) {
+        return dateTimeString;
+    }
+}
+
+// Complete cancellation details function
+function viewCancellationDetails(cancellationId) {
+    const modal = new bootstrap.Modal(document.getElementById('cancellationDetailsModal'));
+    modal.show();
+    
+    document.getElementById('cancellationDetailsModalLabel').innerHTML = 
+        `<i class="fas fa-file-alt me-2"></i>Cancellation Details - ID: ${cancellationId}`;
+    
+    window.currentCancellationId = cancellationId;
+    
+    fetch(`/manager/api/cancellation/${cancellationId}/details`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const cancellation = data.cancellation;
+                const student = data.student;
+                const policy = data.policy;
+                
+                const content = `
+                    <div class="row">
+                        <!-- Student Information -->
+                        <div class="col-md-6 mb-3">
+                            <div class="card h-100">
+                                <div class="card-header bg-primary text-white">
+                                    <h6 class="mb-0"><i class="fas fa-user me-1"></i>Student Information</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Name:</strong> ${student.first_name} ${student.last_name}</p>
+                                    <p><strong>Parent:</strong> ${student.parent_first || ''} ${student.parent_last || ''}</p>
+                                    <p><strong>Email:</strong> <a href="mailto:${student.email}">${student.email}</a></p>
+                                    <p><strong>Phone:</strong> ${student.phone || 'Not provided'}</p>
+                                    <p><strong>Membership:</strong> <span class="badge bg-primary">${student.membership_level}</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Lesson Details -->
+                        <div class="col-md-6 mb-3">
+                            <div class="card h-100">
+                                <div class="card-header bg-info text-white">
+                                    <h6 class="mb-0"><i class="fas fa-calendar me-1"></i>Lesson Details</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Date:</strong> ${formatDate(cancellation.lesson_date)}</p>
+                                    <p><strong>Time:</strong> ${formatTime(cancellation.lesson_time)}</p>
+                                    <p><strong>Submitted:</strong> ${formatDateTime(cancellation.created_at)}</p>
+                                    <p><strong>Hours Notice:</strong> ${policy.hours_notice} hours</p>
+                                    <p><strong>Status:</strong> 
+                                        <span class="badge ${getStatusBadgeClass(cancellation)}">
+                                            ${getStatusText(cancellation)}
+                                        </span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Policy Analysis -->
+                        <div class="col-md-6 mb-3">
+                            <div class="card h-100">
+                                <div class="card-header ${policy.within_deadline ? 'bg-success' : 'bg-danger'} text-white">
+                                    <h6 class="mb-0"><i class="fas fa-gavel me-1"></i>Policy Analysis</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Deadline:</strong> ${policy.deadline_display}</p>
+                                    <p><strong>Within Deadline:</strong> 
+                                        <span class="badge ${policy.within_deadline ? 'bg-success' : 'bg-danger'}">
+                                            ${policy.within_deadline ? 'Yes' : 'No'}
+                                        </span>
+                                    </p>
+                                    <p><strong>Monthly Usage:</strong> ${policy.used_this_month}/${policy.monthly_limit}</p>
+                                    <p><strong>Remaining:</strong> ${policy.remaining}</p>
+                                    <p><strong>Policy Result:</strong> 
+                                        <span class="badge ${policy.policy_result === 'Within policy' ? 'bg-success' : 'bg-warning'}">
+                                            ${policy.policy_result}
+                                        </span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Charges & Overrides -->
+                        <div class="col-md-6 mb-3">
+                            <div class="card h-100">
+                                <div class="card-header bg-warning text-dark">
+                                    <h6 class="mb-0"><i class="fas fa-dollar-sign me-1"></i>Charges & Overrides</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Will be Charged:</strong> 
+                                        <span class="badge ${cancellation.charged ? 'bg-warning' : 'bg-success'}">
+                                            ${cancellation.charged ? 'Yes' : 'No'}
+                                        </span>
+                                    </p>
+                                    <p><strong>Excluded:</strong> 
+                                        <span class="badge ${cancellation.excluded ? 'bg-info' : 'bg-secondary'}">
+                                            ${cancellation.excluded ? 'Yes' : 'No'}
+                                        </span>
+                                    </p>
+                                    <p><strong>Manager Override:</strong> 
+                                        <span class="badge ${cancellation.is_override ? 'bg-primary' : 'bg-secondary'}">
+                                            ${cancellation.is_override ? 'Yes' : 'No'}
+                                        </span>
+                                    </p>
+                                    ${cancellation.approved_by ? `<p><strong>Approved By:</strong> ${cancellation.approved_by}</p>` : ''}
+                                    ${cancellation.exclusion_reason ? `<p><strong>Exclusion Reason:</strong><br><small>${cancellation.exclusion_reason}</small></p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Cancellation Note (if exists) -->
+                        ${cancellation.cancellation_note ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-purple text-white">
+                                    <h6 class="mb-0"><i class="fas fa-sticky-note me-1"></i>Cancellation Note</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-0">${cancellation.cancellation_note}</p>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Sequential Lessons (if exists) -->
+                        ${cancellation.sequential_lessons && cancellation.sequential_lessons.length > 0 ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-secondary text-white">
+                                    <h6 class="mb-0"><i class="fas fa-list me-1"></i>Sequential Lessons</h6>
+                                </div>
+                                <div class="card-body">
+                                    <ul class="list-unstyled mb-0">
+                                        ${cancellation.sequential_lessons.map(lesson => `
+                                            <li class="mb-2">
+                                                <i class="fas fa-arrow-right me-2 text-primary"></i>
+                                                <strong>${formatDate(lesson.date)}</strong> at <strong>${formatTime(lesson.time)}</strong>
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Reschedule Request (if exists) -->
+                        ${cancellation.reschedule_requested ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-success text-white">
+                                    <h6 class="mb-0"><i class="fas fa-calendar-plus me-1"></i>Reschedule Request</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Requested:</strong> Yes</p>
+                                    <p class="mb-0"><strong>Preferences:</strong><br>${cancellation.reschedule_preferences || 'No specific preferences provided'}</p>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Error Report (if exists) -->
+                        ${cancellation.error_report ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-danger text-white">
+                                    <h6 class="mb-0"><i class="fas fa-exclamation-triangle me-1"></i>Error Report</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-0">${cancellation.error_report}</p>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Manager Notes (if exists) -->
+                        ${cancellation.manager_notes ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-dark text-white">
+                                    <h6 class="mb-0"><i class="fas fa-clipboard me-1"></i>Manager Notes</h6>
+                                </div>
+                                <div class="card-body">
+                                    <pre class="mb-0" style="white-space: pre-wrap;">${cancellation.manager_notes}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <!-- Action History -->
+                        ${data.action_history && data.action_history.length > 0 ? `
+                        <div class="col-12 mb-3">
+                            <div class="card">
+                                <div class="card-header bg-info text-white">
+                                    <h6 class="mb-0"><i class="fas fa-history me-1"></i>Action History</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="timeline">
+                                        ${data.action_history.map(action => `
+                                            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                                                <div>
+                                                    <strong>${action.action.replace('_', ' ').toUpperCase()}</strong><br>
+                                                    <small class="text-muted">${action.details || 'No details'}</small>
+                                                </div>
+                                                <div class="text-end">
+                                                    <small class="text-muted">${formatDateTime(action.created_at)}</small>
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+                document.getElementById('cancellationDetailsContent').innerHTML = content;
+            } else {
+                document.getElementById('cancellationDetailsContent').innerHTML = 
+                    '<div class="alert alert-danger">Error loading cancellation details: ' + (data.message || 'Unknown error') + '</div>';
+            }
+        })
+        .catch(error => {
+            document.getElementById('cancellationDetailsContent').innerHTML = 
+                '<div class="alert alert-danger">Network error loading cancellation details</div>';
+            console.error('Error:', error);
+        });
+}
+
+function getStatusBadgeClass(cancellation) {
+    if (cancellation.excluded) return 'bg-info';
+    if (cancellation.charged) return 'bg-warning';
+    if (cancellation.status === 'approved') return 'bg-success';
+    if (cancellation.cancellation_note) return 'bg-purple';
+    if (cancellation.deadline_passed) return 'bg-danger';
+    if (cancellation.is_override) return 'bg-primary';
+    return 'bg-secondary';
+}
+
+function getStatusText(cancellation) {
+    if (cancellation.excluded) return 'Excluded';
+    if (cancellation.charged) return 'Charged';
+    if (cancellation.status === 'approved') return 'Free';
+    if (cancellation.cancellation_note) return 'With Note';
+    if (cancellation.deadline_passed) return 'Deadline Passed';
+    if (cancellation.is_override) return 'Override';
+    return 'Pending';
+}
+
 function viewStudentDetails(studentId, studentName, membershipLevel) {
-    // Show the modal
     const modal = new bootstrap.Modal(document.getElementById('studentDetailsModal'));
     modal.show();
     
-    // Update modal title
     document.getElementById('studentDetailsModalLabel').innerHTML = 
         `<i class="fas fa-user me-2"></i>Student Information - ${studentName}`;
     
-    // Store student ID for "View All Cancellations" button
     window.currentStudentId = studentId;
     
-    // Load student details
     fetch(`/manager/api/student/${studentId}/details`)
         .then(response => response.json())
         .then(data => {
@@ -1111,11 +1875,11 @@ function viewStudentDetails(studentId, studentName, membershipLevel) {
                                 </div>
                                 <div class="card-body">
                                     <p><strong>Student:</strong> ${data.student.first_name} ${data.student.last_name}</p>
-                                    <p><strong>Parent:</strong> ${data.student.parent_first} ${data.student.parent_last}</p>
+                                    <p><strong>Parent:</strong> ${data.student.parent_first || ''} ${data.student.parent_last || ''}</p>
                                     <p><strong>Email:</strong> ${data.student.email}</p>
-                                    <p><strong>Phone:</strong> ${data.student.phone}</p>
+                                    <p><strong>Phone:</strong> ${data.student.phone || ''}</p>
                                     <p><strong>Membership:</strong> <span class="badge bg-primary">${data.student.membership_level}</span></p>
-                                    <p><strong>Student Since:</strong> ${new Date(data.student.created_at).toLocaleDateString()}</p>
+                                    <p><strong>Student Since:</strong> ${formatDate(data.student.created_at)}</p>
                                 </div>
                             </div>
                         </div>
@@ -1163,8 +1927,8 @@ function viewStudentDetails(studentId, studentName, membershipLevel) {
                                         data.recent_cancellations.map(c => `
                                             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
                                                 <div>
-                                                    <strong>${new Date(c.lesson_date).toLocaleDateString()}</strong> at ${c.lesson_time}
-                                                    <br><small class="text-muted">Submitted: ${new Date(c.created_at).toLocaleDateString()}</small>
+                                                    <strong>${formatDate(c.lesson_date)}</strong> at ${formatTime(c.lesson_time)}
+                                                    <br><small class="text-muted">Submitted: ${formatDate(c.created_at)}</small>
                                                 </div>
                                                 <div>
                                                     <span class="badge ${c.charged ? 'bg-warning' : (c.excluded ? 'bg-info' : 'bg-success')}">
@@ -1195,23 +1959,21 @@ function viewStudentDetails(studentId, studentName, membershipLevel) {
 
 function viewAllStudentCancellations() {
     if (window.currentStudentId) {
-        // Close the modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('studentDetailsModal'));
         modal.hide();
         
-        // Filter to show only this student's cancellations
         document.getElementById('searchInput').value = '';
         document.getElementById('statusFilter').value = '';
         document.getElementById('dateRangeFilter').value = 'all';
         document.getElementById('membershipFilter').value = '';
-        document.getElementById('sortFilter').value = 'recent';
+        document.getElementById('sortFilter').value = 'submit_date';
         
         currentFilters = {
             search: '',
             status: '',
             date_range: 'all',
             membership: '',
-            sort: 'recent',
+            sort: 'submit_date',
             student: window.currentStudentId
         };
         
@@ -1219,401 +1981,8 @@ function viewAllStudentCancellations() {
     }
 }
 
-function viewStudentHistory(studentId) {
-    // This is the old function - now redirect to viewStudentDetails
-    viewStudentDetails(studentId, 'Student', 'Unknown');
-}
 
-function viewCancellationDetails(cancellationId) {
-    // Show the modal
-    const modal = new bootstrap.Modal(document.getElementById('cancellationDetailsModal'));
-    modal.show();
-    
-    // Store cancellation ID for actions
-    window.currentCancellationId = cancellationId;
-    
-    // Load cancellation details
-    fetch(`/manager/api/cancellation/${cancellationId}/details`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                const c = data.cancellation;
-                const s = data.student;
-                
-                // Update modal title
-                document.getElementById('cancellationDetailsModalLabel').innerHTML = 
-                    `<i class="fas fa-file-alt me-2"></i>Cancellation Details - ${s.first_name} ${s.last_name}`;
-                
-                const content = `
-                    <div class="row">
-                        <!-- Student Information -->
-                        <div class="col-md-4">
-                            <div class="card h-100">
-                                <div class="card-header bg-primary text-white">
-                                    <h6 class="mb-0"><i class="fas fa-user me-1"></i>Student Information</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Name:</strong> ${s.first_name} ${s.last_name}</p>
-                                    <p><strong>Parent:</strong> ${s.parent_first} ${s.parent_last}</p>
-                                    <p><strong>Email:</strong><br><a href="mailto:${s.email}">${s.email}</a></p>
-                                    <p><strong>Phone:</strong><br><a href="tel:${s.phone}">${s.phone}</a></p>
-                                    <p><strong>Membership:</strong><br><span class="badge bg-secondary">${s.membership_level}</span></p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Lesson Information -->
-                        <div class="col-md-4">
-                            <div class="card h-100">
-                                <div class="card-header bg-success text-white">
-                                    <h6 class="mb-0"><i class="fas fa-calendar me-1"></i>Lesson Information</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Lesson Date:</strong><br>${new Date(c.lesson_date).toLocaleDateString('en-US', { 
-                                        weekday: 'long', 
-                                        year: 'numeric', 
-                                        month: 'long', 
-                                        day: 'numeric' 
-                                    })}</p>
-                                    <p><strong>Lesson Time:</strong><br>${c.lesson_time}</p>
-                                    <p><strong>Submitted:</strong><br>${new Date(c.created_at).toLocaleDateString()} at ${new Date(c.created_at).toLocaleTimeString()}</p>
-                                    <p><strong>Time Until Lesson:</strong><br>${calculateTimeUntilLesson(c.lesson_date, c.lesson_time)}</p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Status Information -->
-                        <div class="col-md-4">
-                            <div class="card h-100">
-                                <div class="card-header ${getStatusHeaderClass(c)} text-white">
-                                    <h6 class="mb-0"><i class="fas fa-info-circle me-1"></i>Status Information</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Current Status:</strong><br>${getStatusBadge(c)}</p>
-                                    <p><strong>Will be Charged:</strong><br>${c.charged ? '<span class="text-danger">Yes</span>' : '<span class="text-success">No</span>'}</p>
-                                    <p><strong>Excluded:</strong><br>${c.excluded ? '<span class="text-info">Yes</span>' : '<span class="text-muted">No</span>'}</p>
-                                    ${c.approved_by ? `<p><strong>Approved By:</strong><br>${c.approved_by}</p>` : ''}
-                                    <p><strong>Last Updated:</strong><br>${new Date(c.updated_at).toLocaleDateString()}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Policy Analysis -->
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div class="card">
-                                <div class="card-header bg-warning text-dark">
-                                    <h6 class="mb-0"><i class="fas fa-gavel me-1"></i>Policy Analysis</h6>
-                                </div>
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <p><strong>Membership Tier:</strong><br>${s.membership_level}</p>
-                                            <p><strong>Monthly Limit:</strong><br>${data.policy.monthly_limit} free cancellations</p>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <p><strong>Used This Month:</strong><br>${data.policy.used_this_month}/${data.policy.monthly_limit}</p>
-                                            <p><strong>Remaining:</strong><br>${data.policy.remaining}</p>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <p><strong>Deadline:</strong><br>${data.policy.deadline_display}</p>
-                                            <p><strong>Within Deadline:</strong><br>${data.policy.within_deadline ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>'}</p>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <p><strong>Hours Notice:</strong><br>${data.policy.hours_notice} hours</p>
-                                            <p><strong>Policy Result:</strong><br>${data.policy.policy_result}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Additional Details -->
-                    <div class="row mt-3">
-                        ${c.sequential_lessons && c.sequential_lessons.length > 0 ? `
-                        <div class="col-md-6">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h6 class="mb-0"><i class="fas fa-list me-1"></i>Sequential Lessons</h6>
-                                </div>
-                                <div class="card-body">
-                                    ${c.sequential_lessons.map(lesson => `
-                                        <div class="d-flex justify-content-between py-1 border-bottom">
-                                            <span>${new Date(lesson.date).toLocaleDateString()}</span>
-                                            <span>${lesson.time}</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        </div>
-                        ` : ''}
-                        
-                        ${c.reschedule_requested ? `
-                        <div class="col-md-6">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h6 class="mb-0"><i class="fas fa-calendar-plus me-1"></i>Rescheduling Request</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Requested:</strong> Yes</p>
-                                    <p><strong>Preferences:</strong><br>${c.reschedule_preferences || 'No specific preferences provided'}</p>
-                                </div>
-                            </div>
-                        </div>
-                        ` : ''}
-                    </div>
-                    
-                    ${c.error_report ? `
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div class="card border-danger">
-                                <div class="card-header bg-danger text-white">
-                                    <h6 class="mb-0"><i class="fas fa-exclamation-triangle me-1"></i>Error Report</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p>${c.error_report}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    ` : ''}
-                    
-                    ${c.manager_notes ? `
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h6 class="mb-0"><i class="fas fa-sticky-note me-1"></i>Manager Notes</h6>
-                                </div>
-                                <div class="card-body">
-                                    <pre class="mb-0">${c.manager_notes}</pre>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    ` : ''}
-                    
-                    <!-- Action History -->
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h6 class="mb-0"><i class="fas fa-history me-1"></i>Action History</h6>
-                                </div>
-                                <div class="card-body">
-                                    <div class="timeline">
-                                        <div class="timeline-item">
-                                            <strong>Created:</strong> ${new Date(c.created_at).toLocaleString()}
-                                            <span class="text-muted">- Initial submission</span>
-                                        </div>
-                                        ${c.updated_at !== c.created_at ? `
-                                        <div class="timeline-item">
-                                            <strong>Last Updated:</strong> ${new Date(c.updated_at).toLocaleString()}
-                                            <span class="text-muted">- Status or details modified</span>
-                                        </div>
-                                        ` : ''}
-                                        ${data.action_history && data.action_history.length > 0 ? 
-                                            data.action_history.map(action => `
-                                                <div class="timeline-item">
-                                                    <strong>${action.action}:</strong> ${new Date(action.created_at).toLocaleString()}
-                                                    <span class="text-muted">- ${action.details}</span>
-                                                </div>
-                                            `).join('')
-                                        : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                
-                document.getElementById('cancellationDetailsContent').innerHTML = content;
-            } else {
-                document.getElementById('cancellationDetailsContent').innerHTML = 
-                    '<div class="alert alert-danger">Error loading cancellation details</div>';
-            }
-        })
-        .catch(error => {
-            document.getElementById('cancellationDetailsContent').innerHTML = 
-                '<div class="alert alert-danger">Error loading cancellation details</div>';
-            console.error('Error:', error);
-        });
-}
 
-// Helper functions for the cancellation details modal
-function calculateTimeUntilLesson(lessonDate, lessonTime) {
-    const lessonDateTime = new Date(`${lessonDate}T${lessonTime}`);
-    const now = new Date();
-    const diffMs = lessonDateTime - now;
-    
-    if (diffMs < 0) {
-        return 'Lesson has passed';
-    }
-    
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    
-    if (diffDays > 0) {
-        return `${diffDays} day${diffDays !== 1 ? 's' : ''} and ${diffHours} hour${diffHours !== 1 ? 's' : ''}`;
-    } else {
-        return `${diffHours} hour${diffHours !== 1 ? 's' : ''}`;
-    }
-}
-
-function getStatusHeaderClass(cancellation) {
-    if (cancellation.excluded) return 'bg-info';
-    if (cancellation.charged) return 'bg-warning';
-    if (cancellation.status === 'approved') return 'bg-success';
-    return 'bg-secondary';
-}
-
-function getStatusBadge(cancellation) {
-    if (cancellation.excluded) {
-        return '<span class="badge bg-info">Excluded</span>';
-    } else if (cancellation.charged) {
-        return '<span class="badge bg-warning">Charged</span>';
-    } else if (cancellation.status === 'approved') {
-        return '<span class="badge bg-success">Approved (Free)</span>';
-    } else {
-        return '<span class="badge bg-secondary">Pending</span>';
-    }
-}
-
-function printCancellationDetails() {
-    if (window.currentCancellationId) {
-        // Create a new window with print-friendly content
-        const printWindow = window.open('', '_blank');
-        const content = document.getElementById('cancellationDetailsContent').innerHTML;
-        
-        printWindow.document.write(`
-            <html>
-            <head>
-                <title>Cancellation Details - ID ${window.currentCancellationId}</title>
-                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-                <style>
-                    @media print {
-                        .no-print { display: none !important; }
-                        body { font-size: 12px; }
-                        .card { border: 1px solid #dee2e6 !important; margin-bottom: 1rem; }
-                        .card-header { background-color: #f8f9fa !important; }
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container-fluid">
-                    <h2 class="mb-4">Cancellation Details - ID ${window.currentCancellationId}</h2>
-                    ${content}
-                </div>
-            </body>
-            </html>
-        `);
-        
-        printWindow.document.close();
-        printWindow.focus();
-        setTimeout(() => {
-            printWindow.print();
-            printWindow.close();
-        }, 250);
-    }
-}
-
-function emailCancellationDetails() {
-    if (window.currentCancellationId) {
-        // This would trigger an email functionality
-        showAlert('Email functionality would be implemented here', 'info');
-    }
-}
-
-function viewFullDetails(id) {
-    // Redirect to old function for backward compatibility
-    viewCancellationDetails(id);
-}
-
-function revertProcessing(id) {
-    if (confirm('Are you sure you want to revert this cancellation processing?')) {
-        fetch('/manager/api/cancellation/revert', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                cancellation_id: id
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showAlert('Cancellation processing reverted successfully!', 'info');
-                loadCancellations();
-            } else {
-                showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
-            }
-        });
-    }
-}
-
-function emailStudent(id) {
-    // Implementation for email student
-    showAlert('Email functionality would be implemented here', 'info');
-}
-
-function addNote(id) {
-    const note = document.getElementById(`reason-${id}`).value;
-    if (note) {
-        fetch('/manager/api/cancellation/note', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                cancellation_id: id,
-                note: note
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showAlert('Note added successfully!', 'success');
-                document.getElementById(`reason-${id}`).value = '';
-            } else {
-                showAlert('Error adding note: ' + (data.message || 'Unknown error'), 'error');
-            }
-        });
-    }
-}
-
-// Quick action functions
-function processAllPending() {
-    if (confirm('Process all pending cancellations according to policy?')) {
-        fetch('/manager/api/cancellation/process-all-pending', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showAlert(`${data.processed || 0} cancellations processed automatically!`, 'success');
-                loadCancellations();
-            } else {
-                showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
-            }
-        });
-    }
-}
-
-function reviewLateSubmissions() {
-    filterByStatus('urgent');
-}
-
-function viewMembershipConflicts() {
-    const params = new URLSearchParams(currentFilters);
-    params.set('conflicts', 'true');
-    window.location.href = `{{ url_for('manager_cancellations') }}?${params.toString()}`;
-}
 
 // Animation function
 function animateCards() {
@@ -1626,20 +1995,56 @@ function animateCards() {
             card.style.transition = 'all 0.3s ease';
             card.style.opacity = '1';
             card.style.transform = 'translateY(0)';
-        }, index * 50); // Faster animation
+        }, index * 50);
     });
 }
 
-// Initialize page
+// Remove red border when user starts typing
+document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('override-reason-required')) {
+        e.target.classList.remove('override-reason-required');
+    }
+});
+
+// SINGLE DOMContentLoaded event listener - consolidates all initialization
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize student context
+    updateStudentContext();
+    
+    // Animate cards on load
     animateCards();
     
+    // Set up date range filter listener
+    const dateRangeFilter = document.getElementById('dateRangeFilter');
+    if (dateRangeFilter) {
+        dateRangeFilter.addEventListener('change', function() {
+            const customPicker = document.getElementById('customDatePicker');
+            if (this.value === 'custom') {
+                customPicker.classList.add('show');
+            } else {
+                customPicker.classList.remove('show');
+            }
+        });
+    }
+    
     // Set up enter key for search
-    document.getElementById('searchInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            applyFilters();
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                applyFilters();
+            }
+        });
+    }
+    
+    // Initialize any existing custom date picker state
+    const currentDateRange = '{{ request.args.get("date_range", "") }}';
+    if (currentDateRange === 'custom') {
+        const customPicker = document.getElementById('customDatePicker');
+        if (customPicker) {
+            customPicker.classList.add('show');
         }
-    });
+    }
 });
 </script>
 {% endblock %}
