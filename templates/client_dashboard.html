@@ -55,6 +55,13 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     background: #f8fafc;
     transform: translateY(-2px);
   }
+  .quick-action-card.cancel-action:hover {
+    border-color: #f59e0b;
+    background: #fffbeb;
+  }
+  .quick-action-card.cancel-action .text-primary {
+    color: #f59e0b !important;
+  }
 
   .policy-summary {
     background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
@@ -86,9 +93,7 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
             <div class="d-flex d-md-block gap-2">
               <a href="{{ url_for('client_cancel') }}" class="btn btn-warning">
                 <i class="fas fa-calendar-times me-1"></i>
-                {% if cancellation_status.remaining > 0 %} Cancel A Lesson {%
-                else %} {{ cancellation_status.remaining }} Free Cancellations
-                Left {% endif %}
+                Cancel A Lesson
               </a>
             </div>
           </div>
@@ -145,7 +150,7 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
       >
         <h5 class="mb-0">
           <i class="fas fa-calendar-check me-2"></i>
-          Status This Month
+          Cancellation Status This Month
         </h5>
         <small class="text-muted">{{ current_month }}</small>
       </div>
@@ -195,12 +200,13 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
         <div class="col-md-8">
           <h5 class="mb-2">
             <i class="fas fa-info-circle me-2"></i>
-            Your Cancellation Policy
+            Cancellation Policy for {{ client.membership_level|title }}
+            Membership
           </h5>
           <p class="mb-2">
             <strong
-              >{{ cancellation_policy.limit }} free cancellation notices per
-              month</strong
+              >{{ cancellation_policy.free_notices }} free cancellation notices
+              per month</strong
             >
             if received by
             <strong>{{ cancellation_policy.deadline_display }}</strong>.
@@ -231,14 +237,14 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
 <div class="row mb-4">
   <div class="col-md-4 mb-3">
     <div
-      class="card quick-action-card h-100"
+      class="card quick-action-card cancel-action h-100"
       onclick="window.location.href='{{ url_for('client_cancel') }}'"
     >
       <div class="card-body text-center">
         <div class="text-primary mb-3">
           <i class="fas fa-calendar-times fa-3x"></i>
         </div>
-        <h5>Cancel a Lesson</h5>
+        <h5>Cancel A Lesson</h5>
         <p class="text-muted">Submit a new cancellation notice</p>
       </div>
     </div>
@@ -255,21 +261,6 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
         </div>
         <h5>View History</h5>
         <p class="text-muted">See your past cancellations</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-4 mb-3">
-    <div
-      class="card quick-action-card h-100"
-      onclick="window.open('mailto:managers@riversideequestrian.ca', '_blank')"
-    >
-      <div class="card-body text-center">
-        <div class="text-success mb-3">
-          <i class="fas fa-envelope fa-3x"></i>
-        </div>
-        <h5>Contact Support</h5>
-        <p class="text-muted">Report issues or ask questions</p>
       </div>
     </div>
   </div>
@@ -341,16 +332,15 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
         </h6>
         <p class="mb-3">
           If you notice any errors in your records or have questions about the
-          cancellation policy, please don't hesitate to contact us.
-        </p>
-        <div class="d-flex justify-content-center gap-2 flex-wrap">
+          cancellation policy, please don't hesitate to contact us at
           <a
             href="mailto:managers@riversideequestrian.ca"
-            class="btn btn-outline-primary btn-sm"
+            class="text-decoration-none"
           >
-            <i class="fas fa-envelope me-1"></i>
-            Email Support
+            managers@riversideequestrian.ca
           </a>
+        </p>
+        <div class="d-flex justify-content-center gap-2 flex-wrap">
           <a
             href="https://www.riversideequestrian.ca/cancellations"
             target="_blank"

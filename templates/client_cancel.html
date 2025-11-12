@@ -50,8 +50,11 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
   }
 
   .remaining-free-zero {
-    color: #dc2626 !important;
+    color: #ffffff !important;
     font-weight: bold;
+    background-color: #dc2626;
+    padding: 2px 6px;
+    border-radius: 4px;
   }
 
   @keyframes slideDown {
@@ -100,13 +103,13 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         <div class="col-md-8">
           <h6 class="mb-2">
             <i class="fas fa-user me-1"></i>
-            {{ client.first_name }} {{ client.last_name }} - {{
-            client.membership_level|title }}
+            Current Status for {{ client.first_name }} {{ client.last_name }} -
+            {{ client.membership_level|title }}
           </h6>
           <p class="mb-1">
-            <strong>Cancellation Policy:</strong> {{ cancellation_policy.limit
-            }} free notices per month, deadline {{
-            cancellation_policy.deadline_display }}
+            <strong>Cancellation Policy:</strong> {{
+            cancellation_policy.free_notices }} free notices per month, deadline
+            {{ cancellation_policy.deadline_display }}
           </p>
           <p class="mb-0">
             <strong>Free Cancellations:</strong> {{ cancellation_status.used }}
@@ -216,8 +219,8 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             </label>
           </div>
           <small class="text-muted">
-            All lessons between your cancelled lesson and return date will be
-            included in this notice.
+            All lessons between your cancelled lesson and the return date will
+            be included in this notice.
           </small>
         </div>
       </div>
@@ -252,10 +255,36 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             type="checkbox"
             id="wants_reschedule"
             name="wants_reschedule"
+            onchange="toggleReschedulePreferences()"
           />
           <label class="form-check-label" for="wants_reschedule">
             I would like to book another lesson
           </label>
+        </div>
+
+        <!-- Reschedule Preferences Section -->
+        <div
+          class="mt-3"
+          id="reschedulePreferencesSection"
+          style="display: none"
+        >
+          <div class="form-floating">
+            <textarea
+              class="form-control"
+              id="reschedule_preferences"
+              name="reschedule_preferences"
+              style="height: 100px"
+              placeholder="Please let us know your preferred date and time for rebooking"
+            ></textarea>
+            <label for="reschedule_preferences">
+              <i class="fas fa-calendar-alt me-1"></i>
+              Preferred Date and Time
+            </label>
+          </div>
+          <small class="text-muted">
+            Please provide your preferred dates and times for rescheduling.
+            We'll contact you to confirm availability.
+          </small>
         </div>
       </div>
     </div>
@@ -298,13 +327,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             required
           />
           <label class="form-check-label" for="policy_acknowledgment">
-            I have read and understand the
-            <a
-              href="https://www.riversideequestrian.ca/cancellations"
-              target="_blank"
-            >
-              Cancellation Policy
-            </a>
+            I agree to the above terms of the cancellation
           </label>
         </div>
 
@@ -343,6 +366,21 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       } else {
           section.classList.add('show');
           btn.innerHTML = '<i class="fas fa-minus me-2"></i>Remove additional lessons';
+      }
+  }
+
+  // Toggle reschedule preferences section
+  function toggleReschedulePreferences() {
+      const checkbox = document.getElementById('wants_reschedule');
+      const section = document.getElementById('reschedulePreferencesSection');
+
+      if (checkbox.checked) {
+          section.style.display = 'block';
+          section.style.animation = 'slideDown 0.3s ease';
+      } else {
+          section.style.display = 'none';
+          // Clear the text area when hiding
+          document.getElementById('reschedule_preferences').value = '';
       }
   }
 

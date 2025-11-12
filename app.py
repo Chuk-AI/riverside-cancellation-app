@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 # Email System Implementation for Riverside Equestrian
 import smtplib
+import ssl
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -39,6 +40,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from datetime import datetime
 import threading
+from functools import wraps
 
 
 load_dotenv()
@@ -1463,6 +1465,7 @@ def get_dashboard_stats():
         stats = {
             # 5-Box Layout Metrics (Primary)
             "today_cancellations": int(today_cancellations),
+            "yesterday_cancellations": int(yesterday_cancellations),
             "free_cancellations": int(free_cancellations),
             "charged_cancellations": int(charged_cancellations),
             "excluded_cancellations": int(excluded_cancellations),
@@ -1500,6 +1503,7 @@ def get_dashboard_stats():
         return {
             # 5-Box Layout Metrics
             "today_cancellations": 0,
+            "yesterday_cancellations": 0,
             "free_cancellations": 0,
             "charged_cancellations": 0,
             "excluded_cancellations": 0,
@@ -1807,6 +1811,29 @@ def client_cancel():
                 f"Email system error for cancellation {cancellation_id}: {str(e)}",
             )
             print(f"Email system error: {str(e)}")
+
+        # Send notification email to managers
+        try:
+            manager_result = send_manager_notification(client, cancellation_data)
+
+            if manager_result["success"]:
+                log_action(
+                    "email_sent",
+                    f"Manager notification sent for cancellation {cancellation_id}: {manager_result['message']}",
+                )
+                print(f"✅ Manager notification sent: {manager_result['message']}")
+            else:
+                log_action(
+                    "email_failed",
+                    f"Failed to send manager notification: {manager_result['message']}",
+                )
+                print(f"❌ Manager email failed: {manager_result['message']}")
+        except Exception as e:
+            log_action(
+                "email_error",
+                f"Manager email system error for cancellation {cancellation_id}: {str(e)}",
+            )
+            print(f"❌ Manager email error: {str(e)}")
 
         log_action(
             "cancellation_submitted",
@@ -2522,7 +2549,7 @@ def process_cancellation_dates(cancellation):
 @login_required
 @admin_required
 def process_cancellation():
-    """Process individual cancellation - UPDATED with override tracking"""
+    """Process individual cancellation - UPDATED with email notifications"""
     data = request.json
     action = data.get("action")  # 'approve' or 'charge'
     cancellation_id = data.get("cancellation_id")
@@ -2537,6 +2564,34 @@ def process_cancellation():
     conn = get_db()
 
     try:
+        # Get cancellation and student data BEFORE updating
+        cancellation_data = conn.execute(
+            """
+            SELECT c.*, s.first_name, s.last_name, s.email, s.phone, s.membership_level,
+                   s.parent_first, s.parent_last
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.id = ?
+            """,
+            (cancellation_id,),
+        ).fetchone()
+
+        if not cancellation_data:
+            return jsonify({"success": False, "message": "Cancellation not found"})
+
+        # Prepare student and cancellation data
+        student_dict = {
+            "id": cancellation_data["student_id"],
+            "first_name": cancellation_data["first_name"],
+            "last_name": cancellation_data["last_name"],
+            "email": cancellation_data["email"],
+            "phone": cancellation_data["phone"],
+            "membership_level": cancellation_data["membership_level"],
+            "parent_first": cancellation_data["parent_first"],
+            "parent_last": cancellation_data["parent_last"],
+        }
+
+        # Update database based on action
         if action == "approve":
             # Mark as approved (free cancellation) with override flag
             conn.execute(
@@ -2550,6 +2605,18 @@ def process_cancellation():
                     cancellation_id,
                 ),
             )
+
+            # Update cancellation dict with new values
+            updated_cancellation = dict(cancellation_data)
+            updated_cancellation.update(
+                {
+                    "charged": 0,
+                    "status": "approved",
+                    "is_override": 1,
+                    "manager_notes": f"Manager Override: {reason}",
+                }
+            )
+
             log_message = (
                 f"Cancellation {cancellation_id} approved as free (Override: {reason})"
             )
@@ -2567,6 +2634,18 @@ def process_cancellation():
                     cancellation_id,
                 ),
             )
+
+            # Update cancellation dict with new values
+            updated_cancellation = dict(cancellation_data)
+            updated_cancellation.update(
+                {
+                    "charged": 1,
+                    "status": "charged",
+                    "is_override": 1,
+                    "manager_notes": f"Manager Override: {reason}",
+                }
+            )
+
             log_message = (
                 f"Cancellation {cancellation_id} marked as charged (Override: {reason})"
             )
@@ -2575,10 +2654,58 @@ def process_cancellation():
             return jsonify({"success": False, "message": "Invalid action"})
 
         conn.commit()
+
+        # SEND EMAIL NOTIFICATIONS
+        email_results = send_override_notification_emails(
+            student_dict,
+            updated_cancellation,
+            action,
+            reason,
+            session.get("user_email", "Unknown Manager"),
+        )
+
         conn.close()
 
+        # Log the action
         log_action("cancellation_processed", log_message)
-        return jsonify({"success": True})
+
+        # Log email results
+        if email_results["client_email"].get("success"):
+            log_action(
+                "override_client_email",
+                f"Override confirmation sent to {student_dict['email']}",
+            )
+        else:
+            log_action(
+                "override_client_email_failed",
+                f"Failed to send override confirmation: {email_results['client_email'].get('message', 'Unknown error')}",
+            )
+
+        if email_results["manager_notification"].get("success"):
+            log_action(
+                "override_manager_email", f"Override notification sent to managers"
+            )
+        else:
+            log_action(
+                "override_manager_email_failed",
+                f"Failed to send override notification: {email_results['manager_notification'].get('message', 'Unknown error')}",
+            )
+
+        # Return success with email status
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Cancellation {action}d successfully",
+                "email_status": {
+                    "client_notified": email_results["client_email"].get(
+                        "success", False
+                    ),
+                    "managers_notified": email_results["manager_notification"].get(
+                        "success", False
+                    ),
+                },
+            }
+        )
 
     except Exception as e:
         conn.close()
@@ -2589,7 +2716,7 @@ def process_cancellation():
 @login_required
 @admin_required
 def batch_process_cancellations():
-    """Batch process multiple cancellations - UPDATED with override tracking"""
+    """Batch process multiple cancellations - UPDATED with email notifications"""
     data = request.json
     action = data.get("action")  # 'approve', 'charge', or 'exclude'
     cancellation_ids = data.get("cancellation_ids", [])
@@ -2599,11 +2726,44 @@ def batch_process_cancellations():
         return jsonify({"success": False, "message": "Missing required fields"})
 
     conn = get_db()
+    email_summary = {
+        "client_emails_sent": 0,
+        "client_emails_failed": 0,
+        "manager_notifications_sent": 0,
+    }
 
     try:
         processed_count = 0
 
         for cancellation_id in cancellation_ids:
+            # Get cancellation and student data
+            cancellation_data = conn.execute(
+                """
+                SELECT c.*, s.first_name, s.last_name, s.email, s.phone, s.membership_level,
+                       s.parent_first, s.parent_last
+                FROM cancellations c
+                JOIN students s ON c.student_id = s.id
+                WHERE c.id = ?
+                """,
+                (cancellation_id,),
+            ).fetchone()
+
+            if not cancellation_data:
+                continue
+
+            # Prepare data
+            student_dict = {
+                "id": cancellation_data["student_id"],
+                "first_name": cancellation_data["first_name"],
+                "last_name": cancellation_data["last_name"],
+                "email": cancellation_data["email"],
+                "phone": cancellation_data["phone"],
+                "membership_level": cancellation_data["membership_level"],
+                "parent_first": cancellation_data["parent_first"],
+                "parent_last": cancellation_data["parent_last"],
+            }
+
+            # Update database
             if action == "approve":
                 conn.execute(
                     """UPDATE cancellations 
@@ -2616,6 +2776,11 @@ def batch_process_cancellations():
                         cancellation_id,
                     ),
                 )
+                updated_cancellation = dict(cancellation_data)
+                updated_cancellation.update(
+                    {"charged": 0, "status": "approved", "is_override": 1}
+                )
+
             elif action == "charge":
                 conn.execute(
                     """UPDATE cancellations 
@@ -2628,6 +2793,11 @@ def batch_process_cancellations():
                         cancellation_id,
                     ),
                 )
+                updated_cancellation = dict(cancellation_data)
+                updated_cancellation.update(
+                    {"charged": 1, "status": "charged", "is_override": 1}
+                )
+
             elif action == "exclude":
                 conn.execute(
                     """UPDATE cancellations 
@@ -2641,17 +2811,45 @@ def batch_process_cancellations():
                         cancellation_id,
                     ),
                 )
+                updated_cancellation = dict(cancellation_data)
+                updated_cancellation.update({"excluded": 1, "is_override": 1})
+
+            # Send email notifications for each processed cancellation
+            if action in ["approve", "charge"]:  # Don't send emails for exclusions
+                email_results = send_override_notification_emails(
+                    student_dict,
+                    updated_cancellation,
+                    action,
+                    f"Batch {action}: {reason}",
+                    session.get("user_email", "Unknown Manager"),
+                )
+
+                # Track email results
+                if email_results["client_email"].get("success"):
+                    email_summary["client_emails_sent"] += 1
+                else:
+                    email_summary["client_emails_failed"] += 1
 
             processed_count += 1
 
         conn.commit()
         conn.close()
 
+        # Send single manager notification about batch operation
+        email_summary["manager_notifications_sent"] = 1  # Simplified for batch
+
         log_action(
             "batch_processing",
             f"Batch {action}: {processed_count} cancellations ({reason})",
         )
-        return jsonify({"success": True, "processed": processed_count})
+
+        return jsonify(
+            {
+                "success": True,
+                "processed": processed_count,
+                "email_summary": email_summary,
+            }
+        )
 
     except Exception as e:
         conn.close()
@@ -3217,6 +3415,7 @@ def manager_cancellations():
         SELECT
             COUNT(*) as total_cancellations,
             SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
+            SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday_cancellations,
             SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free_cancellations,
             SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_cancellations,
             SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations,
@@ -3235,6 +3434,7 @@ def manager_cancellations():
         else {
             "total_cancellations": 0,
             "today_cancellations": 0,
+            "yesterday_cancellations": 0,
             "free_cancellations": 0,
             "charged_cancellations": 0,
             "excluded_cancellations": 0,
@@ -4782,82 +4982,707 @@ def senior_tiers():
     return render_template("senior_tiers.html", tiers=tiers)
 
 
-@app.route("/senior/templates")
+# ===================================
+# TEMPLATE MANAGEMENT API ROUTES
+# ===================================
+
+
+@app.route("/senior/api/template-variables", methods=["GET"])
 @login_required
 @senior_admin_required
-def senior_templates():
-    """Senior manager email templates"""
-    conn = get_db()
+def get_template_variables_api():
+    """Get available template variables with categories"""
+    try:
+        # Sample variables for demonstration
+        sample_variables = {
+            "client_name": "John Smith",
+            "client_first_name": "John",
+            "client_last_name": "Smith",
+            "client_email": "john@example.com",
+            "client_phone": "604-123-4567",
+            "membership_tier": "Silver",
+            "parent_name": "Jane Smith",
+            "lesson_date": "March 15, 2024",
+            "lesson_time": "3:00 PM",
+            "cancellation_status": "Free cancellation",
+            "company_name": "Riverside Equestrian",
+            "contact_email": "managers@riversideequestrian.ca",
+            "current_date": "March 10, 2024",
+            "policy_url": "https://www.riversideequestrian.ca/cancellations",
+        }
 
-    # Get all email templates
-    templates = conn.execute("SELECT * FROM email_templates ORDER BY name").fetchall()
+        # Organize variables by category
+        variable_categories = {
+            "Student Information": [
+                "client_name",
+                "client_first_name",
+                "client_last_name",
+                "client_email",
+                "client_phone",
+                "membership_tier",
+                "parent_name",
+            ],
+            "Lesson Details": ["lesson_date", "lesson_time", "cancellation_status"],
+            "Company Information": [
+                "company_name",
+                "contact_email",
+                "policy_url",
+                "current_date",
+            ],
+        }
 
-    conn.close()
+        return jsonify(
+            {
+                "success": True,
+                "variables": sample_variables,
+                "categories": variable_categories,
+            }
+        )
 
-    return render_template("senior_templates.html", templates=templates)
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
 
 
-@app.route("/senior/delete-template/<template_id>", methods=["DELETE"])
+@app.route("/senior/api/template/<template_id>", methods=["GET"])
 @login_required
 @senior_admin_required
-def delete_template(template_id):
+def get_template_for_edit(template_id):
+    """Get template data for editing"""
+    try:
+        conn = get_db()
+        template = conn.execute(
+            "SELECT * FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        conn.close()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        template_dict = dict(template)
+        return jsonify({"success": True, "template": template_dict})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/template/save", methods=["POST"])
+@login_required
+@senior_admin_required
+def save_template_enhanced():
+    """Save or update email template"""
+    try:
+        data = request.json
+
+        # Validate required fields
+        required_fields = ["id", "name", "subject", "body", "type"]
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify(
+                    {"success": False, "message": f"Missing required field: {field}"}
+                )
+
+        # Clean and prepare data
+        template_data = {
+            "id": data["id"].strip().replace(" ", "_").lower(),
+            "name": data["name"].strip(),
+            "subject": data["subject"].strip(),
+            "body": data["body"],
+            "type": data.get("type", "client"),
+            "active": bool(data.get("active", True)),
+            "auto_send": bool(data.get("auto_send", True)),
+            "priority": data.get("priority", "normal"),
+            "delay_minutes": int(data.get("delay_minutes", 0)),
+            "include_attachment": bool(data.get("include_attachment", False)),
+        }
+
+        # Extract variables used in template
+        import re
+
+        variables_used = []
+        variable_pattern = r"\{\{(\w+)\}\}"
+
+        # Find variables in subject
+        subject_vars = re.findall(variable_pattern, template_data["subject"])
+        variables_used.extend(subject_vars)
+
+        # Find variables in body
+        body_vars = re.findall(variable_pattern, template_data["body"])
+        variables_used.extend(body_vars)
+
+        template_data["variables_used"] = ",".join(set(variables_used))
+
+        conn = get_db()
+
+        # Check if template exists
+        existing = conn.execute(
+            "SELECT id FROM email_templates WHERE id = ?", (template_data["id"],)
+        ).fetchone()
+
+        if existing:
+            # Update existing template
+            conn.execute(
+                """
+                UPDATE email_templates 
+                SET name = ?, subject = ?, body = ?, type = ?, active = ?, 
+                    auto_send = ?, priority = ?, delay_minutes = ?, 
+                    include_attachment = ?, variables_used = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    template_data["name"],
+                    template_data["subject"],
+                    template_data["body"],
+                    template_data["type"],
+                    template_data["active"],
+                    template_data["auto_send"],
+                    template_data["priority"],
+                    template_data["delay_minutes"],
+                    template_data["include_attachment"],
+                    template_data["variables_used"],
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    template_data["id"],
+                ),
+            )
+            action = "updated"
+        else:
+            # Insert new template
+            conn.execute(
+                """
+                INSERT INTO email_templates 
+                (id, name, subject, body, type, active, auto_send, priority, 
+                 delay_minutes, include_attachment, variables_used, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    template_data["id"],
+                    template_data["name"],
+                    template_data["subject"],
+                    template_data["body"],
+                    template_data["type"],
+                    template_data["active"],
+                    template_data["auto_send"],
+                    template_data["priority"],
+                    template_data["delay_minutes"],
+                    template_data["include_attachment"],
+                    template_data["variables_used"],
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            action = "created"
+
+        conn.commit()
+        conn.close()
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Template {action} successfully",
+                "template_id": template_data["id"],
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/template/<template_id>/delete", methods=["DELETE"])
+@login_required
+@senior_admin_required
+def delete_template_enhanced(template_id):
     """Delete email template"""
     try:
         conn = get_db()
+
+        # Check if template exists
+        template = conn.execute(
+            "SELECT name FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        # Delete template
         conn.execute("DELETE FROM email_templates WHERE id = ?", (template_id,))
         conn.commit()
         conn.close()
 
-        log_action("template_deleted", f"Deleted template: {template_id}")
-        return jsonify({"success": True})
+        return jsonify({"success": True, "message": "Template deleted successfully"})
+
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "message": str(e)})
 
 
-@app.route("/senior/import-templates", methods=["POST"])
+@app.route("/senior/api/template/<template_id>/toggle", methods=["POST"])
 @login_required
 @senior_admin_required
-def import_templates():
-    """Import email templates"""
+def toggle_template_enhanced(template_id):
+    """Toggle template active status"""
+    try:
+        conn = get_db()
+
+        # Get current status
+        template = conn.execute(
+            "SELECT active, name FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        new_status = not bool(template["active"])
+
+        # Update status
+        conn.execute(
+            "UPDATE email_templates SET active = ?, updated_at = ? WHERE id = ?",
+            (new_status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), template_id),
+        )
+        conn.commit()
+        conn.close()
+
+        status_text = "activated" if new_status else "deactivated"
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Template '{template['name']}' {status_text}",
+                "active": new_status,
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/template/<template_id>/duplicate", methods=["POST"])
+@login_required
+@senior_admin_required
+def duplicate_template_enhanced(template_id):
+    """Duplicate an email template"""
+    try:
+        conn = get_db()
+        template = conn.execute(
+            "SELECT * FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        template_dict = dict(template)
+
+        # Create new template data
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_id = f"{template_id}_copy_{timestamp}"
+
+        # Insert duplicated template
+        conn.execute(
+            """
+            INSERT INTO email_templates 
+            (id, name, subject, body, type, active, auto_send, priority, 
+             delay_minutes, include_attachment, variables_used, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id,
+                f"Copy of {template_dict['name']}",
+                template_dict["subject"],
+                template_dict["body"],
+                template_dict["type"],
+                False,  # Start inactive
+                template_dict.get("auto_send", True),
+                template_dict.get("priority", "normal"),
+                template_dict.get("delay_minutes", 0),
+                template_dict.get("include_attachment", False),
+                template_dict.get("variables_used", ""),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        log_action("template_duplicated", f"Duplicated {template_id} to {new_id}")
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "Template duplicated successfully",
+                "new_id": new_id,
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/template/<template_id>/test", methods=["POST"])
+@login_required
+@senior_admin_required
+def send_template_test_enhanced(template_id):
+    """Send test email for a template"""
     try:
         data = request.json
-        templates = data.get("templates", [])
+        test_email = data.get("test_email")
+
+        if not test_email:
+            return jsonify({"success": False, "message": "Test email address required"})
+
+        # Validate email format
+        import re
+
+        email_pattern = r"^[^@]+@[^@]+\.[^@]+$"
+        if not re.match(email_pattern, test_email):
+            return jsonify({"success": False, "message": "Invalid email format"})
+
+        # Get template
+        conn = get_db()
+        template = conn.execute(
+            "SELECT * FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        conn.close()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        template_dict = dict(template)
+
+        # Create sample data for testing
+        sample_student = {
+            "first_name": "Sarah",
+            "last_name": "Johnson",
+            "parent_first": "Michael",
+            "parent_last": "Johnson",
+            "email": test_email,
+            "phone": "604-123-4567",
+            "membership_level": "Silver",
+            "id": 999,
+        }
+
+        sample_cancellation = {
+            "lesson_date": "2024-03-15",
+            "lesson_time": "15:00:00",
+            "charged": False,
+            "sequential_lessons": None,
+            "reschedule_requested": False,
+            "reschedule_preferences": "",
+            "error_report": "",
+            "manager_notes": "",
+            "id": 999,
+        }
+
+        # Generate template variables
+        variables = get_template_variables(
+            sample_student,
+            sample_cancellation,
+            {
+                "status_message": "This is a test email with sample data.",
+                "test_mode": "true",
+            },
+        )
+
+        # Process template
+        body, subject = process_template_variables(
+            template_dict["body"], template_dict["subject"], variables
+        )
+
+        # Add test disclaimer
+        test_subject = f"[TEST] {subject}"
+        test_body = f"""
+        <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+            <h4 style="color: #856404; margin: 0 0 10px 0;">⚠️ TEST EMAIL</h4>
+            <p style="margin: 0; color: #856404;">
+                This is a test email with sample data from template: <strong>{template_dict['name']}</strong><br>
+                Template ID: {template_id}<br>
+                Sent from: {email_config.from_email}<br>
+                Test sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            </p>
+        </div>
+        {body}
+        <hr style="margin: 30px 0;">
+        <p style="font-size: 12px; color: #666;">
+            <strong>Template Variables Used:</strong><br>
+            {', '.join([f'{{{{{k}}}}}' for k in variables.keys() if f'{{{{{k}}}}}' in template_dict['body'] or f'{{{{{k}}}}}' in template_dict['subject']])}
+        </p>
+        """
+
+        # Send test email
+        result = send_email(
+            test_email,
+            test_subject,
+            test_body,
+            "test",
+            template_id=f"test_{template_id}",
+        )
+
+        if result["success"]:
+            log_action("test_email_sent", f"Template: {template_id}, To: {test_email}")
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/template/<template_id>/preview", methods=["GET"])
+@login_required
+@senior_admin_required
+def preview_template_enhanced(template_id):
+    """Get template preview with sample data"""
+    try:
+        conn = get_db()
+        template = conn.execute(
+            "SELECT * FROM email_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        conn.close()
+
+        if not template:
+            return jsonify({"success": False, "message": "Template not found"})
+
+        template_dict = dict(template)
+
+        # Create sample data
+        sample_variables = {
+            "client_name": "Sarah Johnson",
+            "client_first_name": "Sarah",
+            "lesson_date": "March 15, 2024",
+            "lesson_time": "3:00 PM",
+            "membership_tier": "Silver",
+            "cancellation_status": "Free cancellation",
+            "company_name": "Riverside Equestrian",
+            "current_date": datetime.now().strftime("%B %d, %Y"),
+        }
+
+        # Simple variable replacement
+        preview_body = template_dict["body"]
+        preview_subject = template_dict["subject"]
+
+        for key, value in sample_variables.items():
+            preview_body = preview_body.replace(f"{{{{{key}}}}}", str(value))
+            preview_subject = preview_subject.replace(f"{{{{{key}}}}}", str(value))
+
+        return jsonify(
+            {
+                "success": True,
+                "preview": {
+                    "subject": preview_subject,
+                    "body": preview_body,
+                    "template_name": template_dict["name"],
+                    "template_type": template_dict["type"],
+                },
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/templates/export", methods=["GET"])
+@login_required
+@senior_admin_required
+def export_templates_enhanced():
+    """Export all email templates to JSON"""
+    try:
+        conn = get_db()
+        templates = conn.execute(
+            "SELECT * FROM email_templates ORDER BY name"
+        ).fetchall()
+        conn.close()
+
+        # Convert to list of dictionaries
+        template_list = [dict(template) for template in templates]
+
+        # Create export data
+        export_data = {
+            "export_info": {
+                "exported_at": datetime.now().isoformat(),
+                "exported_by": session.get("user_email", "Unknown"),
+                "system": "Riverside Equestrian Cancellation System",
+                "version": "1.0",
+            },
+            "templates": template_list,
+        }
+
+        # Create JSON response
+        import json
+
+        response_data = json.dumps(export_data, indent=2, default=str)
+
+        response = app.response_class(
+            response_data,
+            mimetype="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=riverside_email_templates_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/senior/api/templates/import", methods=["POST"])
+@login_required
+@senior_admin_required
+def import_templates_enhanced():
+    """Import email templates from JSON"""
+    try:
+        data = request.json
+
+        # Handle both old and new format
+        if "templates" in data:
+            templates = data["templates"]
+        else:
+            templates = data
+
+        if not templates:
+            return jsonify(
+                {"success": False, "message": "No templates found in import data"}
+            )
+
+        imported_count = 0
+        updated_count = 0
+        errors = []
 
         conn = get_db()
-        imported_count = 0
 
-        for template in templates:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO email_templates 
-                (id, name, subject, body, type, active, auto_send, priority, delay_minutes, include_attachment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    template.get("id"),
-                    template.get(
-                        "title", template.get("id", "").replace("_", " ").title()
-                    ),
-                    template.get("subject", ""),
-                    template.get("body", ""),
-                    template.get("type", "client"),
-                    template.get("active", True),
-                    template.get("autoSend", True),
-                    template.get("priority", "normal"),
-                    template.get("delay", 0),
-                    template.get("includeAttachment", False),
-                ),
-            )
-            imported_count += 1
+        for template_data in templates:
+            try:
+                # Validate required fields
+                if not all(
+                    key in template_data for key in ["id", "name", "subject", "body"]
+                ):
+                    errors.append(
+                        f"Template missing required fields: {template_data.get('id', 'unknown')}"
+                    )
+                    continue
+
+                # Check if template exists
+                existing = conn.execute(
+                    "SELECT id FROM email_templates WHERE id = ?",
+                    (template_data["id"],),
+                ).fetchone()
+
+                if existing:
+                    # Update existing
+                    conn.execute(
+                        """
+                        UPDATE email_templates 
+                        SET name = ?, subject = ?, body = ?, type = ?, active = ?, 
+                            auto_send = ?, priority = ?, delay_minutes = ?, 
+                            include_attachment = ?, variables_used = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            template_data["name"],
+                            template_data["subject"],
+                            template_data["body"],
+                            template_data.get("type", "client"),
+                            template_data.get("active", True),
+                            template_data.get("auto_send", True),
+                            template_data.get("priority", "normal"),
+                            template_data.get("delay_minutes", 0),
+                            template_data.get("include_attachment", False),
+                            template_data.get("variables_used", ""),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            template_data["id"],
+                        ),
+                    )
+                    updated_count += 1
+                else:
+                    # Insert new
+                    conn.execute(
+                        """
+                        INSERT INTO email_templates 
+                        (id, name, subject, body, type, active, auto_send, priority, 
+                         delay_minutes, include_attachment, variables_used, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            template_data["id"],
+                            template_data["name"],
+                            template_data["subject"],
+                            template_data["body"],
+                            template_data.get("type", "client"),
+                            template_data.get("active", True),
+                            template_data.get("auto_send", True),
+                            template_data.get("priority", "normal"),
+                            template_data.get("delay_minutes", 0),
+                            template_data.get("include_attachment", False),
+                            template_data.get("variables_used", ""),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
+                    )
+                    imported_count += 1
+
+            except Exception as e:
+                errors.append(
+                    f"Template {template_data.get('id', 'unknown')}: {str(e)}"
+                )
 
         conn.commit()
         conn.close()
 
-        log_action("templates_imported", f"Imported {imported_count} templates")
-        return jsonify({"success": True, "count": imported_count})
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Import completed: {imported_count} new, {updated_count} updated",
+                "imported": imported_count,
+                "updated": updated_count,
+                "errors": errors[:10],  # Limit error list
+            }
+        )
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "message": str(e)})
+
+
+# ===================================
+# UPDATE EXISTING SENIOR TEMPLATES ROUTE
+# ===================================
+
+
+@app.route("/senior/templates")
+@login_required
+@senior_admin_required
+def senior_templates():
+    """Senior manager email templates page"""
+    try:
+        conn = get_db()
+
+        # Get all email templates
+        templates = conn.execute(
+            """
+            SELECT id, name, subject, body, type, active, auto_send, priority, 
+                   delay_minutes, include_attachment, variables_used, created_at, updated_at
+            FROM email_templates 
+            ORDER BY active DESC, type, name
+        """
+        ).fetchall()
+
+        conn.close()
+
+        # Convert to list of dicts for template
+        template_list = []
+        for template in templates:
+            template_dict = dict(template)
+
+            # Parse dates properly
+            for date_field in ["created_at", "updated_at"]:
+                if template_dict.get(date_field):
+                    try:
+                        template_dict[date_field] = datetime.strptime(
+                            template_dict[date_field], "%Y-%m-%d %H:%M:%S"
+                        )
+                    except (ValueError, TypeError):
+                        template_dict[date_field] = datetime.now()
+
+            template_list.append(template_dict)
+
+        return render_template("senior_templates.html", templates=template_list)
+
+    except Exception as e:
+        print(f"Error in senior_templates: {e}")
+        return render_template("senior_templates.html", templates=[], error=str(e))
 
 
 # Senior Manager API endpoints
@@ -5022,20 +5847,22 @@ def create_backup():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route("/senior/send-test-email", methods=["POST"])
-@login_required
-@senior_admin_required
-def send_test_email_route():
-    """Send test email"""
-    data = request.json
-    template_id = data.get("template_id")
-    test_email = data.get("test_email")
-
-    if not template_id or not test_email:
-        return jsonify({"success": False, "error": "Missing template_id or test_email"})
-
-    result = send_test_email(template_id, test_email)
-    return jsonify(result)
+@app.route("/test-email")
+def test_email_route():
+    result = test_email_configuration()
+    if result["success"]:
+        # Send a test email to yourself
+        test_result = send_email(
+            "stav@riversideequestrian.ca",
+            "Test Email from Riverside System",
+            "<h1>Success!</h1><p>Your email system is working correctly!</p>",
+            template_id="test",
+        )
+        return (
+            f"Email config: {result['message']}<br>Test email: {test_result['message']}"
+        )
+    else:
+        return f"Email config failed: {result['message']}"
 
 
 # ===================================
@@ -5501,27 +6328,66 @@ window.RiversideUtils = {
             )
 
 
-# ===================================
-# EMAIL CONFIGURATION
-# ===================================
 class EmailConfig:
-    """Email configuration class"""
+    """Enhanced Email configuration class with Office 365 support"""
 
     def __init__(self):
-        # Environment variables for production
-        self.smtp_server = os.getenv(
-            "SMTP_SERVER", "sandbox.smtp.mailtrap.io"
-        )  # Mailtrap for development
-        self.smtp_port = int(os.getenv("SMTP_PORT", "2525"))
-        self.smtp_user = os.getenv("SMTP_USER", "your_mailtrap_username")
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "your_mailtrap_password")
+        # Email server configuration
+        self.smtp_server = os.getenv("SMTP_SERVER", "smtp.office365.com")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.use_tls = os.getenv("USE_TLS", "True").lower() == "true"
+        self.use_ssl = os.getenv("USE_SSL", "False").lower() == "true"
+        self.timeout = int(os.getenv("EMAIL_TIMEOUT", "30"))
+
+        # Authentication
+        self.smtp_user = os.getenv("SMTP_USER", "")
+        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
+
+        # Email addresses
         self.from_email = os.getenv("FROM_EMAIL", "noreply@riversideequestrian.ca")
         self.from_name = os.getenv("FROM_NAME", "Riverside Equestrian")
-        self.use_tls = os.getenv("USE_TLS", "True").lower() == "true"
+        self.admin_email = os.getenv("ADMIN_EMAIL", "stav@riversideequestrian.ca")
+        self.manager_emails = [
+            email.strip()
+            for email in os.getenv(
+                "MANAGER_EMAIL", "managers@riversideequestrian.ca"
+            ).split(",")
+        ]
 
-        # For development/testing
-        self.debug_mode = os.getenv("EMAIL_DEBUG", "True").lower() == "true"
+        # Email behavior
+        self.send_emails = os.getenv("SEND_EMAILS", "True").lower() == "true"
+        self.debug_mode = os.getenv("EMAIL_DEBUG", "False").lower() == "true"
         self.log_emails = True
+
+        # Validate configuration
+        self.is_configured = bool(self.smtp_user and self.smtp_password)
+
+    def get_connection(self):
+        """Get SMTP connection"""
+        try:
+            if self.use_ssl:
+                # Use SSL connection
+                context = ssl.create_default_context()
+                server = smtplib.SMTP_SSL(
+                    self.smtp_server,
+                    self.smtp_port,
+                    context=context,
+                    timeout=self.timeout,
+                )
+            else:
+                # Use regular SMTP with STARTTLS (Office 365 default)
+                server = smtplib.SMTP(
+                    self.smtp_server, self.smtp_port, timeout=self.timeout
+                )
+                if self.use_tls:
+                    server.starttls()
+
+            if self.smtp_user and self.smtp_password:
+                server.login(self.smtp_user, self.smtp_password)
+
+            return server
+        except Exception as e:
+            raise Exception(f"Failed to connect to email server: {str(e)}")
 
 
 email_config = EmailConfig()
@@ -5544,10 +6410,16 @@ def send_email_async(func):
     return wrapper
 
 
-def log_email_attempt(to_email, subject, success, error=None):
-    """Log email sending attempts"""
+def log_email_attempt(to_email, subject, success, error=None, template_id=None):
+    """Enhanced email logging"""
     try:
         conn = get_db()
+        details = f"To: {to_email}, Subject: {subject}"
+        if template_id:
+            details += f", Template: {template_id}"
+        if error:
+            details += f", Error: {error}"
+
         conn.execute(
             """
             INSERT INTO system_logs (user_id, user_type, action, details, created_at)
@@ -5555,22 +6427,24 @@ def log_email_attempt(to_email, subject, success, error=None):
         """,
             (
                 session.get("user_id"),
-                "system",
+                "email_system",
                 "email_sent" if success else "email_failed",
-                f"To: {to_email}, Subject: {subject}"
-                + (f", Error: {error}" if error else ""),
+                details,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Failed to log email attempt: {e}")
+        if email_config.debug_mode:
+            print(f"Failed to log email attempt: {e}")
 
 
-def send_email(to_email, subject, body, template_type="client", attachments=None):
+def send_email(
+    to_email, subject, body, template_type="client", attachments=None, template_id=None
+):
     """
-    Send email using SMTP
+    Enhanced email sending with Office 365 support
 
     Args:
         to_email (str): Recipient email address
@@ -5578,10 +6452,22 @@ def send_email(to_email, subject, body, template_type="client", attachments=None
         body (str): HTML email body
         template_type (str): Type of email template
         attachments (list): List of file paths to attach
+        template_id (str): Template ID for logging
 
     Returns:
         dict: Result with success status and message
     """
+
+    if not email_config.send_emails:
+        if email_config.debug_mode:
+            print(f"Email sending disabled - would send to {to_email}: {subject}")
+        return {"success": True, "message": "Email sending disabled (debug mode)"}
+
+    if not email_config.is_configured:
+        error_msg = "Email not configured - missing SMTP credentials"
+        log_email_attempt(to_email, subject, False, error_msg, template_id)
+        return {"success": False, "message": error_msg}
+
     try:
         # Create message
         msg = MIMEMultipart("alternative")
@@ -5593,6 +6479,15 @@ def send_email(to_email, subject, body, template_type="client", attachments=None
         # Add HTML body
         html_part = MIMEText(body, "html", "utf-8")
         msg.attach(html_part)
+
+        # Add plain text version for better compatibility
+        from html import unescape
+        import re
+
+        plain_text = re.sub("<[^<]+?>", "", body)
+        plain_text = unescape(plain_text)
+        text_part = MIMEText(plain_text, "plain", "utf-8")
+        msg.attach(text_part)
 
         # Add attachments if provided
         if attachments:
@@ -5608,17 +6503,11 @@ def send_email(to_email, subject, body, template_type="client", attachments=None
                         )
                         msg.attach(part)
                 except Exception as e:
-                    print(f"Failed to attach file {file_path}: {e}")
+                    if email_config.debug_mode:
+                        print(f"Failed to attach file {file_path}: {e}")
 
-        # Send email
-        server = smtplib.SMTP(email_config.smtp_server, email_config.smtp_port)
-
-        if email_config.use_tls:
-            server.starttls()
-
-        if email_config.smtp_user and email_config.smtp_password:
-            server.login(email_config.smtp_user, email_config.smtp_password)
-
+        # Send email using connection
+        server = email_config.get_connection()
         server.send_message(msg)
         server.quit()
 
@@ -5627,7 +6516,7 @@ def send_email(to_email, subject, body, template_type="client", attachments=None
         if email_config.debug_mode:
             print(f"✓ Email sent to {to_email}: {subject}")
 
-        log_email_attempt(to_email, subject, True)
+        log_email_attempt(to_email, subject, True, template_id=template_id)
         return result
 
     except Exception as e:
@@ -5637,16 +6526,16 @@ def send_email(to_email, subject, body, template_type="client", attachments=None
         if email_config.debug_mode:
             print(f"✗ Email failed to {to_email}: {error_msg}")
 
-        log_email_attempt(to_email, subject, False, error_msg)
+        log_email_attempt(to_email, subject, False, error_msg, template_id)
         return result
 
 
 @send_email_async
 def send_email_async_wrapper(
-    to_email, subject, body, template_type="client", attachments=None
+    to_email, subject, body, template_type="client", attachments=None, template_id=None
 ):
     """Async wrapper for sending emails"""
-    return send_email(to_email, subject, body, template_type, attachments)
+    return send_email(to_email, subject, body, template_type, attachments, template_id)
 
 
 # ===================================
@@ -5655,7 +6544,7 @@ def send_email_async_wrapper(
 
 
 def get_email_template(template_id):
-    """Get email template from database"""
+    """Get email template from database with error handling"""
     try:
         conn = get_db()
         template = conn.execute(
@@ -5664,13 +6553,14 @@ def get_email_template(template_id):
         conn.close()
         return dict(template) if template else None
     except Exception as e:
-        print(f"Error getting template {template_id}: {e}")
+        if email_config.debug_mode:
+            print(f"Error getting template {template_id}: {e}")
         return None
 
 
 def process_template_variables(template_body, template_subject, variables):
     """
-    Replace template variables with actual values
+    Enhanced template variable processing with better error handling
 
     Args:
         template_body (str): Template HTML body
@@ -5689,6 +6579,827 @@ def process_template_variables(template_body, template_subject, variables):
         processed_subject = processed_subject.replace(placeholder, str(value))
 
     return processed_body, processed_subject
+
+
+# ===================================
+# TEMPLATE VARIABLE GENERATORS
+# ===================================
+
+
+def get_template_variables(student=None, cancellation=None, extra_vars=None):
+    """Generate template variables for your cancellation system - FIXED for sqlite3.Row"""
+    variables = {
+        "current_date": datetime.now().strftime("%B %d, %Y"),
+        "current_time": datetime.now().strftime("%I:%M %p"),
+        "company_name": "Riverside Equestrian",
+        "contact_email": email_config.admin_email,
+        "policy_url": "https://www.riversideequestrian.ca/cancellations",
+        "website_url": "https://www.riversideequestrian.ca",
+        "system_email": email_config.from_email,
+    }
+
+    if student:
+        # Convert sqlite3.Row to dict if needed
+        if hasattr(student, "keys"):
+            student_dict = dict(student)
+        else:
+            student_dict = student
+
+        variables.update(
+            {
+                "client_name": f"{student_dict['first_name']} {student_dict['last_name']}",
+                "client_first_name": student_dict["first_name"],
+                "client_last_name": student_dict["last_name"],
+                "client_email": student_dict["email"],
+                "client_phone": student_dict.get("phone", ""),
+                "membership_tier": student_dict["membership_level"],
+                "parent_name": f"{student_dict.get('parent_first', '')} {student_dict.get('parent_last', '')}".strip(),
+                "parent_first_name": student_dict.get("parent_first", ""),
+                "parent_last_name": student_dict.get("parent_last", ""),
+            }
+        )
+
+        # Get membership tier info
+        tier = get_membership_tier(student_dict["membership_level"])
+        if tier:
+            tier_dict = dict(tier) if hasattr(tier, "keys") else tier
+            variables.update(
+                {
+                    "allowed_cancellations": str(tier_dict["free_notices"]),
+                    "cancellation_deadline": tier_dict["deadline_display"],
+                }
+            )
+
+        # Get current usage
+        status = calculate_cancellation_status(student_dict)
+        variables.update(
+            {
+                "used_cancellations": str(status["used"]),
+                "remaining_cancellations": str(status["remaining"]),
+            }
+        )
+
+    if cancellation:
+        # Convert sqlite3.Row to dict if needed
+        if hasattr(cancellation, "keys"):
+            cancellation_dict = dict(cancellation)
+        else:
+            cancellation_dict = cancellation
+
+        # Format dates consistently
+        lesson_date_str = cancellation_dict.get("lesson_date")
+        if isinstance(lesson_date_str, str):
+            try:
+                lesson_date = datetime.strptime(lesson_date_str, "%Y-%m-%d")
+            except ValueError:
+                lesson_date = datetime.now()
+        else:
+            lesson_date = lesson_date_str or datetime.now()
+
+        lesson_time_str = cancellation_dict.get("lesson_time")
+        if isinstance(lesson_time_str, str):
+            try:
+                if len(lesson_time_str.split(":")) == 3:
+                    lesson_time = datetime.strptime(lesson_time_str, "%H:%M:%S").time()
+                else:
+                    lesson_time = datetime.strptime(lesson_time_str, "%H:%M").time()
+            except ValueError:
+                lesson_time = datetime.now().time()
+        else:
+            lesson_time = lesson_time_str or datetime.now().time()
+
+        variables.update(
+            {
+                "lesson_date": lesson_date.strftime("%B %d, %Y"),
+                "lesson_time": lesson_time.strftime("%I:%M %p"),
+                "cancellation_status": (
+                    "Free cancellation"
+                    if not cancellation_dict.get("charged")
+                    else "Charged cancellation"
+                ),
+                "will_be_charged": "Yes" if cancellation_dict.get("charged") else "No",
+                "charge_reason": get_charge_reason(cancellation_dict),
+                "submission_time": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+                "cancellation_id": str(cancellation_dict.get("id", "")),
+            }
+        )
+
+        # Sequential lessons
+        sequential_lessons = cancellation_dict.get("sequential_lessons")
+        if sequential_lessons:
+            variables["sequential_lessons"] = format_sequential_lessons(
+                sequential_lessons
+            )
+        else:
+            variables["sequential_lessons"] = "No additional lessons"
+
+        # Reschedule info
+        variables.update(
+            {
+                "reschedule_requested": (
+                    "Yes" if cancellation_dict.get("reschedule_requested") else "No"
+                ),
+                "reschedule_preferences": cancellation_dict.get(
+                    "reschedule_preferences", "None provided"
+                ),
+                "error_report": cancellation_dict.get("error_report", "None reported"),
+            }
+        )
+
+    # Add extra variables
+    if extra_vars:
+        variables.update(extra_vars)
+
+    return variables
+
+
+def get_charge_reason(cancellation):
+    """Get human-readable reason for cancellation charge - FIXED for sqlite3.Row"""
+    # Convert sqlite3.Row to dict if needed
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+
+    if not cancellation_dict.get("charged"):
+        return "Within policy - no charge applied"
+
+    if cancellation_dict.get("manager_notes"):
+        return cancellation_dict["manager_notes"]
+
+    # Default reasons based on common scenarios
+    return "Late cancellation or monthly limit exceeded"
+
+
+def format_sequential_lessons(sequential_data):
+    """Format sequential lessons for email - FIXED"""
+    if not sequential_data:
+        return "No additional lessons"
+
+    try:
+        if isinstance(sequential_data, str):
+            sequential_lessons = eval(sequential_data)
+        else:
+            sequential_lessons = sequential_data
+
+        if not sequential_lessons:
+            return "No additional lessons"
+
+        formatted_lessons = []
+        for lesson in sequential_lessons:
+            if isinstance(lesson, dict):
+                date_str = lesson.get("date", "")
+                time_str = lesson.get("time", "")
+            else:
+                # Handle other formats
+                continue
+
+            if date_str and time_str:
+                try:
+                    lesson_date = datetime.strptime(str(date_str), "%Y-%m-%d").strftime(
+                        "%B %d, %Y"
+                    )
+                    lesson_time = datetime.strptime(str(time_str), "%H:%M").strftime(
+                        "%I:%M %p"
+                    )
+                    formatted_lessons.append(f"{lesson_date} at {lesson_time}")
+                except:
+                    formatted_lessons.append(f"{date_str} at {time_str}")
+
+        return (
+            f"Additional lessons: {', '.join(formatted_lessons)}"
+            if formatted_lessons
+            else "No additional lessons"
+        )
+
+    except Exception as e:
+        if email_config.debug_mode:
+            print(f"Error formatting sequential lessons: {e}")
+        return "No additional lessons"
+
+
+def safe_dict_convert(row_or_dict):
+    """Safely convert sqlite3.Row to dict, or return dict as-is"""
+    if row_or_dict is None:
+        return {}
+    if hasattr(row_or_dict, "keys"):
+        return dict(row_or_dict)
+    return row_or_dict
+
+
+# ===================================
+# EMAIL SENDING WRAPPER FUNCTIONS (FOR YOUR CANCELLATION SYSTEM)
+# ===================================
+
+
+def debug_email_templates():
+    """Debug function to check email template status"""
+    print("=" * 60)
+    print("DEBUGGING EMAIL TEMPLATES")
+    print("=" * 60)
+
+    # Check what templates exist in database
+    conn = get_db()
+    templates = conn.execute(
+        "SELECT id, name, active FROM email_templates ORDER BY id"
+    ).fetchall()
+    conn.close()
+
+    print(f"Templates in database ({len(templates)} found):")
+    for template in templates:
+        print(
+            f"  - {template['id']}: {template['name']} (Active: {template['active']})"
+        )
+
+    print()
+
+    # Test template retrieval
+    required_templates = [
+        "client_confirmation",
+        "cancellation_charged",
+        "free_cancellation",
+        "manager_notification",
+    ]
+
+    for template_id in required_templates:
+        template = get_email_template(template_id)
+        if template:
+            print(f"✅ {template_id}: Found and active")
+        else:
+            print(f"❌ {template_id}: NOT FOUND or INACTIVE")
+
+    print("\n" + "=" * 60)
+
+    # Test cancellation logic
+    print("TESTING CANCELLATION LOGIC")
+    print("=" * 60)
+
+    # Mock Bronze student data (like you)
+    mock_student = {
+        "id": 1,
+        "first_name": "Test",
+        "last_name": "Student",
+        "email": "test@example.com",
+        "membership_level": "Bronze",
+    }
+
+    # Mock 4th cancellation (should be charged)
+    mock_charged_cancellation = {
+        "id": 999,
+        "lesson_date": "2024-12-15",
+        "lesson_time": "14:00:00",
+        "charged": True,  # This should trigger charged email
+        "manager_notes": "Monthly limit exceeded",
+        "cancellation_note": "Family emergency",
+    }
+
+    # Mock 1st cancellation (should be free)
+    mock_free_cancellation = {
+        "id": 998,
+        "lesson_date": "2024-12-20",
+        "lesson_time": "15:00:00",
+        "charged": False,  # This should trigger free email
+        "manager_notes": "Within policy",
+        "cancellation_note": None,
+    }
+
+    print("Test 1: Charged cancellation (Bronze member, 4th cancellation)")
+    print(
+        f"  - Student: {mock_student['first_name']} {mock_student['last_name']} ({mock_student['membership_level']})"
+    )
+    print(f"  - Charged status: {mock_charged_cancellation['charged']}")
+    print(f"  - Expected template: cancellation_charged")
+
+    # Test the logic
+    if mock_charged_cancellation.get("charged"):
+        expected_template = "cancellation_charged"
+        template = get_email_template("cancellation_charged")
+        if template:
+            print(f"  ✅ Would use: {expected_template}")
+        else:
+            print(
+                f"  ⚠️  Template '{expected_template}' not found, would fall back to client_confirmation"
+            )
+    else:
+        print(f"  ❌ Logic error: charged=True but treated as free")
+
+    print()
+    print("Test 2: Free cancellation (Bronze member, 1st cancellation)")
+    print(
+        f"  - Student: {mock_student['first_name']} {mock_student['last_name']} ({mock_student['membership_level']})"
+    )
+    print(f"  - Charged status: {mock_free_cancellation['charged']}")
+    print(f"  - Expected template: free_cancellation")
+
+    if not mock_free_cancellation.get("charged"):
+        expected_template = "free_cancellation"
+        template = get_email_template("free_cancellation")
+        if template:
+            print(f"  ✅ Would use: {expected_template}")
+        else:
+            print(
+                f"  ⚠️  Template '{expected_template}' not found, would fall back to client_confirmation"
+            )
+    else:
+        print(f"  ❌ Logic error: charged=False but treated as charged")
+
+    print("\n" + "=" * 60)
+    return templates
+
+
+# Add this route to your app.py to run the debug:
+@app.route("/debug-email-templates")
+@login_required
+@senior_admin_required
+def debug_email_route():
+    """Debug route to check email template status"""
+    templates = debug_email_templates()
+
+    output = "<h1>Email Template Debug</h1><pre>"
+
+    # Capture the debug output
+    import io
+    import sys
+    from contextlib import redirect_stdout
+
+    f = io.StringIO()
+    with redirect_stdout(f):
+        debug_email_templates()
+    output += f.getvalue()
+    output += "</pre>"
+
+    return output
+
+
+# MANUAL TEST FUNCTION - Add this too:
+def test_email_sending_logic():
+    """Test the actual email sending with your current logic"""
+    print("\n" + "=" * 60)
+    print("TESTING ACTUAL EMAIL SENDING LOGIC")
+    print("=" * 60)
+
+    # Your actual student data (Bronze member)
+    conn = get_db()
+    bronze_student = conn.execute(
+        "SELECT * FROM students WHERE membership_level = 'Bronze' LIMIT 1"
+    ).fetchone()
+
+    if not bronze_student:
+        print("❌ No Bronze student found in database")
+        conn.close()
+        return
+
+    print(
+        f"Testing with: {bronze_student['first_name']} {bronze_student['last_name']} ({bronze_student['membership_level']})"
+    )
+
+    # Test charged cancellation
+    charged_cancellation = {
+        "id": 9999,
+        "lesson_date": "2024-12-15",
+        "lesson_time": "14:00:00",
+        "charged": True,  # Should use cancellation_charged template
+        "manager_notes": "Test charged cancellation",
+    }
+
+    print("\n1. Testing CHARGED cancellation:")
+    print(f"   charged = {charged_cancellation['charged']}")
+
+    # Run your actual function
+    try:
+        result = send_cancellation_confirmation(bronze_student, charged_cancellation)
+        print(f"   Result: {result}")
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+
+    # Test free cancellation
+    free_cancellation = {
+        "id": 9998,
+        "lesson_date": "2024-12-20",
+        "lesson_time": "15:00:00",
+        "charged": False,  # Should use free_cancellation template
+        "manager_notes": "Test free cancellation",
+    }
+
+    print("\n2. Testing FREE cancellation:")
+    print(f"   charged = {free_cancellation['charged']}")
+
+    try:
+        result = send_cancellation_confirmation(bronze_student, free_cancellation)
+        print(f"   Result: {result}")
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+
+    conn.close()
+
+
+# FIXED EMAIL SENDING FUNCTIONS FOR RIVERSIDE EQUESTRIAN
+# Replace your existing functions in app.py with these:
+
+
+def send_cancellation_confirmation(student, cancellation):
+    """Send appropriate cancellation email to client based on charge status - FIXED"""
+
+    # Convert sqlite3.Row to dict if needed
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+
+    # CHOOSE THE RIGHT TEMPLATE BASED ON CHARGE STATUS
+    if cancellation_dict.get("charged"):
+        # Use charged template for paid cancellations
+        template_id = "cancellation_charged"
+        template = get_email_template("cancellation_charged")
+        if not template:
+            if email_config.debug_mode:
+                print(
+                    "Warning: No cancellation_charged template found, falling back to client_confirmation"
+                )
+            template_id = "client_confirmation"
+            template = get_email_template("client_confirmation")
+    else:
+        # Use free cancellation template for free cancellations
+        template_id = "free_cancellation"
+        template = get_email_template("free_cancellation")
+        if not template:
+            if email_config.debug_mode:
+                print(
+                    "Warning: No free_cancellation template found, falling back to client_confirmation"
+                )
+            template_id = "client_confirmation"
+            template = get_email_template("client_confirmation")
+
+    if not template:
+        if email_config.debug_mode:
+            print("Error: No email template found at all!")
+        return {"success": False, "message": "Template not found"}
+
+    # Generate variables
+    variables = get_template_variables(student_dict, cancellation_dict)
+
+    # Add status message based on charge status
+    if cancellation_dict.get("charged"):
+        variables["status_message"] = (
+            f"A charge will be applied to your account. Reason: {get_charge_reason(cancellation_dict)}"
+        )
+        variables["charge_reason"] = get_charge_reason(cancellation_dict)
+    else:
+        variables["status_message"] = (
+            "This cancellation has been processed at no charge."
+        )
+
+    # Process template
+    body, subject = process_template_variables(
+        template["body"], template["subject"], variables
+    )
+
+    # Send email with correct template ID
+    result = send_email(
+        student_dict["email"],
+        subject,
+        body,
+        "client",
+        template_id=template_id,  # This will now be the correct template
+    )
+
+    if email_config.debug_mode:
+        print(
+            f"Sent {template_id} template to {student_dict['email']}, charged={cancellation_dict.get('charged', False)}"
+        )
+
+    return result
+
+
+def send_appropriate_cancellation_email(student, cancellation):
+    """
+    IMPROVED VERSION: Send the right email based on cancellation status
+    This replaces send_cancellation_confirmation with better logic
+    """
+
+    # Convert sqlite3.Row to dict if needed
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+
+    # Debug info
+    is_charged = bool(cancellation_dict.get("charged", False))
+    student_name = (
+        f"{student_dict.get('first_name', '')} {student_dict.get('last_name', '')}"
+    )
+
+    if email_config.debug_mode:
+        print(f"DEBUG: Sending email for {student_name}")
+        print(f"DEBUG: Cancellation charged status: {is_charged}")
+        print(
+            f"DEBUG: Will use template: {'cancellation_charged' if is_charged else 'free_cancellation'}"
+        )
+
+    # STEP 1: Choose the right template
+    if is_charged:
+        # This is a charged cancellation - use charged template
+        template_id = "cancellation_charged"
+        fallback_template_id = "client_confirmation"
+        print(
+            f"✅ Using CHARGED template for {student_name} (Bronze member, 4th cancellation)"
+        )
+    else:
+        # This is a free cancellation - use free template
+        template_id = "free_cancellation"
+        fallback_template_id = "client_confirmation"
+        print(f"✅ Using FREE template for {student_name}")
+
+    # STEP 2: Get the template
+    template = get_email_template(template_id)
+    if not template:
+        print(f"⚠️  Primary template '{template_id}' not found, using fallback")
+        template_id = fallback_template_id
+        template = get_email_template(fallback_template_id)
+
+    if not template:
+        error_msg = f"❌ No email template found (tried {template_id} and {fallback_template_id})"
+        print(error_msg)
+        return {"success": False, "message": error_msg}
+
+    # STEP 3: Generate variables for the template
+    variables = get_template_variables(student_dict, cancellation_dict)
+
+    # Add charge-specific variables
+    if is_charged:
+        variables["charge_reason"] = get_charge_reason(cancellation_dict)
+        variables["status_message"] = (
+            f"A charge will be applied to your account. Reason: {variables['charge_reason']}"
+        )
+    else:
+        variables["status_message"] = (
+            "This cancellation has been processed at no charge."
+        )
+
+    # STEP 4: Process the template
+    try:
+        body, subject = process_template_variables(
+            template["body"], template["subject"], variables
+        )
+    except Exception as e:
+        error_msg = f"❌ Template processing failed: {str(e)}"
+        print(error_msg)
+        return {"success": False, "message": error_msg}
+
+    # STEP 5: Send the email
+    result = send_email(
+        student_dict["email"],
+        subject,
+        body,
+        "client",
+        template_id=template_id,
+    )
+
+    # Log the result
+    if result.get("success"):
+        print(f"✅ SUCCESS: Sent '{template_id}' email to {student_dict['email']}")
+    else:
+        print(
+            f"❌ FAILED: Could not send '{template_id}' email to {student_dict['email']}: {result.get('message', 'Unknown error')}"
+        )
+
+    return result
+
+
+def send_manager_notification(student, cancellation):
+    """Send new cancellation notification to managers - FIXED for sqlite3.Row"""
+    template = get_email_template("manager_notification")
+    if not template:
+        return {"success": False, "message": "Template not found"}
+
+    # Convert sqlite3.Row to dict if needed
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+
+    variables = get_template_variables(
+        student_dict,
+        cancellation_dict,
+        {
+            "action_required": "Review cancellation and approve/charge as needed",
+            "dashboard_url": f"{request.url_root if 'request' in globals() else 'http://localhost:5000/'}manager/cancellations?student={student_dict['id']}",
+        },
+    )
+
+    body, subject = process_template_variables(
+        template["body"], template["subject"], variables
+    )
+
+    # Send to all manager emails
+    results = []
+    for manager_email in email_config.manager_emails:
+        result = send_email(
+            manager_email, subject, body, "manager", template_id="manager_notification"
+        )
+        results.append(result)
+
+    # Return success if any email was sent successfully
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "success": success_count > 0,
+        "message": f"Sent to {success_count}/{len(results)} managers",
+    }
+
+
+def send_override_notification_emails(
+    student, cancellation, override_action, override_reason, manager_email
+):
+    """Send emails after manager override - both to client and managers"""
+
+    # Convert data to dicts for consistency
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+
+    results = {
+        "client_email": {"success": False},
+        "manager_notification": {"success": False},
+    }
+
+    # Add override-specific information
+    override_info = {
+        "override_action": override_action,
+        "override_reason": override_reason,
+        "override_by": manager_email,
+        "override_date": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+    }
+
+    # STEP 1: Send updated confirmation to CLIENT
+    try:
+        print(f"📧 Sending override notification to client: {student_dict['email']}")
+        print(
+            f"   Action: {override_action}, Charged: {cancellation_dict.get('charged', False)}"
+        )
+
+        # Use the standard cancellation confirmation logic (it will pick the right template)
+        client_result = send_cancellation_confirmation(student_dict, cancellation_dict)
+        results["client_email"] = client_result
+
+        if client_result.get("success"):
+            print(f"✅ Client override email sent successfully")
+        else:
+            print(
+                f"❌ Client override email failed: {client_result.get('message', 'Unknown error')}"
+            )
+
+    except Exception as e:
+        print(f"❌ Client override email error: {str(e)}")
+        results["client_email"] = {"success": False, "message": str(e)}
+
+    # STEP 2: Send notification to MANAGERS about the override
+    try:
+        # Create override notification for managers
+        manager_template = get_email_template("manager_override_notification")
+
+        # If no specific override template, use regular manager notification
+        if not manager_template:
+            manager_template = get_email_template("manager_notification")
+
+        if manager_template:
+            # Generate template variables with override info
+            variables = get_template_variables(
+                student_dict, cancellation_dict, override_info
+            )
+
+            # Add manager-specific variables
+            variables.update(
+                {
+                    "manager_action": f"Override: {override_action}",
+                    "action_taken": f"{manager_email} {override_action}d this cancellation",
+                    "override_summary": f"This cancellation was {override_action}d by {manager_email}",
+                    "new_status": (
+                        "Free cancellation"
+                        if not cancellation_dict.get("charged")
+                        else "Charged cancellation"
+                    ),
+                    "dashboard_url": f"{request.url_root if 'request' in globals() else 'http://localhost:5000/'}manager/cancellations?student={student_dict['id']}",
+                }
+            )
+
+            # Process template
+            body, subject = process_template_variables(
+                manager_template["body"],
+                f"🔄 Override: {override_action.title()} - {variables['client_name']} - {variables['lesson_date']}",
+                variables,
+            )
+
+            # Send to all manager emails EXCEPT the one who made the override
+            manager_emails = [
+                email for email in email_config.manager_emails if email != manager_email
+            ]
+
+            if manager_emails:
+                manager_results = []
+                for mgr_email in manager_emails:
+                    result = send_email(
+                        mgr_email,
+                        subject,
+                        body,
+                        "manager",
+                        template_id="manager_override_notification",
+                    )
+                    manager_results.append(result)
+
+                success_count = sum(1 for r in manager_results if r.get("success"))
+                results["manager_notification"] = {
+                    "success": success_count > 0,
+                    "message": f"Sent override notification to {success_count}/{len(manager_results)} managers",
+                }
+
+                print(
+                    f"📧 Manager override notifications sent to {success_count}/{len(manager_results)} managers"
+                )
+            else:
+                results["manager_notification"] = {
+                    "success": True,
+                    "message": "No other managers to notify (override made by only manager)",
+                }
+        else:
+            print(f"⚠️  No manager template found for override notifications")
+            results["manager_notification"] = {
+                "success": False,
+                "message": "Manager notification template not found",
+            }
+
+    except Exception as e:
+        print(f"❌ Manager override notification error: {str(e)}")
+        results["manager_notification"] = {"success": False, "message": str(e)}
+
+    return results
+
+
+# ===================================
+# EMAIL TESTING FUNCTION
+# ===================================
+
+
+def test_email_configuration():
+    """Test email configuration and connectivity"""
+    try:
+        if not email_config.is_configured:
+            return {
+                "success": False,
+                "message": "Email not configured - missing SMTP credentials",
+                "details": {
+                    "server": email_config.smtp_server,
+                    "port": email_config.smtp_port,
+                    "user_set": bool(email_config.smtp_user),
+                    "password_set": bool(email_config.smtp_password),
+                },
+            }
+
+        # Test connection
+        server = email_config.get_connection()
+        server.quit()
+
+        return {
+            "success": True,
+            "message": "Email configuration is working correctly",
+            "details": {
+                "server": email_config.smtp_server,
+                "port": email_config.smtp_port,
+                "from_email": email_config.from_email,
+                "manager_emails": email_config.manager_emails,
+            },
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Email configuration test failed: {str(e)}",
+            "details": {
+                "server": email_config.smtp_server,
+                "port": email_config.smtp_port,
+                "error": str(e),
+            },
+        }
 
 
 # Add these functions to your app.py file to standardize date formatting
@@ -5761,336 +7472,6 @@ def format_time_filter(time_value):
         return time_value.strftime("%I:%M %p")
 
     return str(time_value)
-
-
-# Update the get_template_variables function to use consistent formatting
-def get_template_variables(student=None, cancellation=None, extra_vars=None):
-    """Generate template variables with consistent date formatting"""
-    variables = {
-        "current_date": datetime.now().strftime("%B %d, %Y"),
-        "current_time": datetime.now().strftime("%I:%M %p"),
-        "company_name": "Riverside Equestrian",
-        "contact_email": "managers@riversideequestrian.ca",
-        "policy_url": "https://www.riversideequestrian.ca/cancellations",
-        "website_url": "https://www.riversideequestrian.ca",
-    }
-
-    if student:
-        variables.update(
-            {
-                "client_name": f"{student['first_name']} {student['last_name']}",
-                "client_first_name": student["first_name"],
-                "client_last_name": student["last_name"],
-                "client_email": student["email"],
-                "client_phone": student.get("phone", ""),
-                "membership_tier": student["membership_level"],
-                "parent_name": f"{student.get('parent_first', '')} {student.get('parent_last', '')}".strip(),
-                "parent_first_name": student.get("parent_first", ""),
-                "parent_last_name": student.get("parent_last", ""),
-            }
-        )
-
-        # Get membership tier info
-        tier = get_membership_tier(student["membership_level"])
-        if tier:
-            variables.update(
-                {
-                    "allowed_cancellations": str(tier["free_notices"]),
-                    "cancellation_deadline": tier["deadline_display"],
-                }
-            )
-
-        # Get current usage
-        status = calculate_cancellation_status(student)
-        variables.update(
-            {
-                "used_cancellations": str(status["used"]),
-                "remaining_cancellations": str(status["remaining"]),
-            }
-        )
-
-    if cancellation:
-        # Format dates consistently
-        if isinstance(cancellation["lesson_date"], str):
-            lesson_date = datetime.strptime(cancellation["lesson_date"], "%Y-%m-%d")
-        else:
-            lesson_date = cancellation["lesson_date"]
-
-        if isinstance(cancellation["lesson_time"], str):
-            try:
-                lesson_time = datetime.strptime(
-                    cancellation["lesson_time"], "%H:%M:%S"
-                ).time()
-            except ValueError:
-                lesson_time = datetime.strptime(
-                    cancellation["lesson_time"], "%H:%M"
-                ).time()
-        else:
-            lesson_time = cancellation["lesson_time"]
-
-        variables.update(
-            {
-                "lesson_date": lesson_date.strftime("%B %d, %Y"),
-                "lesson_date_short": lesson_date.strftime(
-                    "%B %d, %Y"
-                ),  # Also use full format
-                "lesson_time": lesson_time.strftime("%I:%M %p"),
-                "lesson_time_24h": lesson_time.strftime("%H:%M"),
-                "cancellation_status": (
-                    "Free cancellation"
-                    if not cancellation.get("charged")
-                    else "Charged cancellation"
-                ),
-                "will_be_charged": "Yes" if cancellation.get("charged") else "No",
-                "charge_reason": get_charge_reason(cancellation),
-                "submission_time": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
-            }
-        )
-
-        # Sequential lessons with consistent formatting
-        if cancellation.get("sequential_lessons"):
-            try:
-                sequential = (
-                    eval(cancellation["sequential_lessons"])
-                    if isinstance(cancellation["sequential_lessons"], str)
-                    else cancellation["sequential_lessons"]
-                )
-                if sequential:
-                    formatted_lessons = []
-                    for lesson in sequential:
-                        lesson_date_str = lesson["date"]
-                        lesson_time_str = lesson["time"]
-
-                        # Parse and format date
-                        if isinstance(lesson_date_str, str):
-                            lesson_date_obj = datetime.strptime(
-                                lesson_date_str, "%Y-%m-%d"
-                            )
-                        else:
-                            lesson_date_obj = lesson_date_str
-
-                        # Parse and format time
-                        if isinstance(lesson_time_str, str):
-                            try:
-                                lesson_time_obj = datetime.strptime(
-                                    lesson_time_str, "%H:%M:%S"
-                                ).time()
-                            except ValueError:
-                                lesson_time_obj = datetime.strptime(
-                                    lesson_time_str, "%H:%M"
-                                ).time()
-                        else:
-                            lesson_time_obj = lesson_time_str
-
-                        formatted_lessons.append(
-                            f"{lesson_date_obj.strftime('%B %d, %Y')} at {lesson_time_obj.strftime('%I:%M %p')}"
-                        )
-
-                    variables["sequential_lessons"] = (
-                        f"Additional lessons: {', '.join(formatted_lessons)}"
-                    )
-                else:
-                    variables["sequential_lessons"] = "No additional lessons"
-            except:
-                variables["sequential_lessons"] = "No additional lessons"
-        else:
-            variables["sequential_lessons"] = "No additional lessons"
-
-        # Reschedule info
-        variables.update(
-            {
-                "reschedule_requested": (
-                    "Yes" if cancellation.get("reschedule_requested") else "No"
-                ),
-                "reschedule_preferences": cancellation.get(
-                    "reschedule_preferences", "None provided"
-                ),
-                "error_report": cancellation.get("error_report", "None reported"),
-            }
-        )
-
-    # Add extra variables
-    if extra_vars:
-        variables.update(extra_vars)
-
-    return variables
-
-
-def get_charge_reason(cancellation):
-    """Get human-readable reason for cancellation charge"""
-    if not cancellation.get("charged"):
-        return "Within policy - no charge applied"
-
-    if cancellation.get("manager_notes"):
-        return cancellation["manager_notes"]
-
-    # Default reasons based on common scenarios
-    return "Late cancellation or monthly limit exceeded"
-
-
-# ===================================
-# EMAIL SENDING WRAPPER FUNCTIONS
-# ===================================
-
-
-def send_cancellation_confirmation(student, cancellation):
-    """Send cancellation confirmation email to client"""
-    template = get_email_template("client_confirmation")
-    if not template:
-        print("Warning: No client_confirmation template found")
-        return {"success": False, "message": "Template not found"}
-
-    variables = get_template_variables(student, cancellation)
-
-    # Add status message
-    if cancellation.get("charged"):
-        variables["status_message"] = (
-            f"A charge will be applied to your account. Reason: {get_charge_reason(cancellation)}"
-        )
-    else:
-        variables["status_message"] = (
-            "This cancellation has been processed at no charge."
-        )
-
-    body, subject = process_template_variables(
-        template["body"], template["subject"], variables
-    )
-
-    # Send to client
-    result = send_email(student["email"], subject, body, "client")
-
-    # Also send to managers if auto-send is enabled for manager notifications
-    manager_template = get_email_template("manager_notification")
-    if manager_template and manager_template.get("auto_send"):
-        send_manager_notification(student, cancellation)
-
-    return result
-
-
-def send_manager_notification(student, cancellation):
-    """Send new cancellation notification to managers"""
-    template = get_email_template("manager_notification")
-    if not template:
-        return {"success": False, "message": "Template not found"}
-
-    variables = get_template_variables(
-        student,
-        cancellation,
-        {
-            "action_required": "Review cancellation and approve/charge as needed",
-            "dashboard_url": f"{request.url_root}manager/cancellations?student={student['id']}",
-        },
-    )
-
-    body, subject = process_template_variables(
-        template["body"], template["subject"], variables
-    )
-
-    # Get manager email from settings
-    manager_email = get_system_setting(
-        "company_email", "managers@riversideequestrian.ca"
-    )
-
-    return send_email(manager_email, subject, body, "manager")
-
-
-def send_status_update_email(student, cancellation, status_type="charged"):
-    """Send status update email when cancellation status changes"""
-    template_mapping = {
-        "charged": "cancellation_charged",
-        "free": "free_cancellation",
-        "excluded": "illness_exclusion",
-        "late": "late_cancellation",
-        "limit_exceeded": "limit_exceeded",
-    }
-
-    template_id = template_mapping.get(status_type, "client_confirmation")
-    template = get_email_template(template_id)
-
-    if not template:
-        return {"success": False, "message": f"Template {template_id} not found"}
-
-    variables = get_template_variables(student, cancellation)
-
-    # Add specific variables based on status type
-    if status_type == "charged":
-        variables["charge_amount"] = "As per your membership agreement"
-    elif status_type == "excluded":
-        variables["documentation_date"] = datetime.now().strftime("%B %d, %Y")
-
-    body, subject = process_template_variables(
-        template["body"], template["subject"], variables
-    )
-
-    return send_email(student["email"], subject, body, "client")
-
-
-def send_test_email(template_id, test_email_address):
-    """Send test email with sample data"""
-    template = get_email_template(template_id)
-    if not template:
-        return {"success": False, "message": "Template not found"}
-
-    # Sample data for testing
-    sample_student = {
-        "first_name": "Sarah",
-        "last_name": "Johnson",
-        "parent_first": "Michael",
-        "parent_last": "Johnson",
-        "email": test_email_address,
-        "phone": "604-123-4567",
-        "membership_level": "Silver",
-        "id": 999,
-    }
-
-    sample_cancellation = {
-        "lesson_date": "2024-03-15",
-        "lesson_time": "15:00:00",
-        "charged": False,
-        "sequential_lessons": None,
-        "reschedule_requested": False,
-        "reschedule_preferences": "",
-        "error_report": "",
-        "manager_notes": "",
-        "id": 999,
-    }
-
-    variables = get_template_variables(
-        sample_student,
-        sample_cancellation,
-        {
-            "status_message": "This is a test email with sample data.",
-        },
-    )
-
-    body, subject = process_template_variables(
-        template["body"], template["subject"], variables
-    )
-
-    # Add test disclaimer
-    test_subject = f"[TEST] {subject}"
-    test_body = f"""
-    <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin-bottom: 20px; border-radius: 5px;">
-        <strong>⚠️ TEST EMAIL</strong><br>
-        This is a test email with sample data. This would be sent to actual clients in production.
-    </div>
-    {body}
-    """
-
-    return send_email(test_email_address, test_subject, test_body, "test")
-
-
-def get_system_setting(key, default=None):
-    """Get system setting from database"""
-    try:
-        conn = get_db()
-        setting = conn.execute(
-            "SELECT value FROM system_settings WHERE key = ?", (key,)
-        ).fetchone()
-        conn.close()
-        return setting["value"] if setting else default
-    except:
-        return default
 
 
 # ===================================

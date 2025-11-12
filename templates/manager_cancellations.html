@@ -295,17 +295,13 @@
             </div>
             <div class="d-flex gap-2">
                 <div class="view-toggle">
-                    <button type="button" class="active" onclick="switchView('card')" id="cardViewBtn">
+                    <button type="button" onclick="switchView('card')" id="cardViewBtn">
                         <i class="fas fa-th-large me-1"></i>Cards
                     </button>
-                    <button type="button" onclick="switchView('list')" id="listViewBtn">
+                    <button type="button" class="active" onclick="switchView('list')" id="listViewBtn">
                         <i class="fas fa-list me-1"></i>List
                     </button>
                 </div>
-                <button class="btn btn-outline-info" onclick="refreshData()">
-                    <i class="fas fa-sync me-1"></i>
-                    Refresh
-                </button>
                 <button class="btn btn-success" onclick="exportCancellations()">
                     <i class="fas fa-download me-1"></i>
                     Export
@@ -360,7 +356,7 @@
 </div>
 {% endif %}
 
-<!-- Updated Stats - 5 boxes as requested -->
+<!-- Updated Stats - 5 boxes (added yesterday, kept all original boxes) -->
 <div class="row mb-4">
     <div class="col-lg mb-3">
         <div class="stats-card">
@@ -369,6 +365,16 @@
             </div>
             <div class="number text-info">{{ stats.today_cancellations }}</div>
             <div class="label">Today</div>
+        </div>
+    </div>
+    
+    <div class="col-lg mb-3">
+        <div class="stats-card">
+            <div class="icon text-secondary">
+                <i class="fas fa-calendar-alt"></i>
+            </div>
+            <div class="number text-secondary">{{ stats.yesterday_cancellations|default(0) }}</div>
+            <div class="label">Yesterday</div>
         </div>
     </div>
     
@@ -391,7 +397,7 @@
             <div class="label">Charged This Month</div>
         </div>
     </div>
-    
+
     <div class="col-lg mb-3">
         <div class="stats-card">
             <div class="icon text-primary">
@@ -399,16 +405,6 @@
             </div>
             <div class="number text-primary">{{ stats.excluded_cancellations }}</div>
             <div class="label">Excluded This Month</div>
-        </div>
-    </div>
-
-    <div class="col-lg mb-3">
-        <div class="stats-card">
-            <div class="icon text-secondary">
-                <i class="fas fa-user-shield"></i>
-            </div>
-            <div class="number text-secondary">{{ stats.override_this_month|default(0) }}</div>
-            <div class="label">Override This Month</div>
         </div>
     </div>
 </div>
@@ -433,6 +429,10 @@
                 <button class="btn btn-sm btn-purple" onclick="viewNotesSubmissions()">
                     <i class="fas fa-sticky-note me-1"></i>
                     Notes
+                </button>
+                <button class="btn btn-sm btn-info" onclick="viewTodaysCancellations()">
+                    <i class="fas fa-calendar-day me-1"></i>
+                    Today's Cancellations
                 </button>
             </div>
         </div>
@@ -474,7 +474,7 @@
     </div>
 </div>
 
-<!-- Updated Search and Filters -->
+<!-- Updated Search and Filters (Added refresh button here) -->
 <div class="search-section">
     <div class="row align-items-end">
         <div class="col-md-2 mb-3">
@@ -537,7 +537,7 @@
             </select>
         </div>
         
-        <div class="col-md-2 mb-3">
+        <div class="col-md-1 mb-3">
             <label class="form-label">Sort By</label>
             <select class="form-select" id="sortFilter" onchange="applyFilters()">
                 <option value="submit_date" {{ 'selected' if request.args.get('sort') == 'submit_date' else '' }}>Submit Date</option>
@@ -548,9 +548,15 @@
         </div>
         
         <div class="col-md-1 mb-3">
-            <button type="button" class="btn btn-outline-secondary w-100" onclick="clearFilters()">
-                <i class="fas fa-times"></i>
-            </button>
+            <label class="form-label">&nbsp;</label>
+            <div class="d-flex gap-1">
+                <button type="button" class="btn btn-outline-info" onclick="refreshData()">
+                    <i class="fas fa-sync"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary" onclick="clearFilters()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -575,8 +581,8 @@
     </button>
 </div>
 
-<!-- Card View (Default) -->
-<div class="row" id="cancellationsList">
+<!-- Card View (Hidden by default) -->
+<div class="row" id="cancellationsList" style="display: none;">
     {% for cancellation in cancellations %}
     <div class="col-lg-6 mb-4 cancellation-item-wrapper">
         <div class="cancellation-card {{ cancellation.status_class }}" data-id="{{ cancellation.id }}">
@@ -800,8 +806,8 @@
     {% endfor %}
 </div>
 
-<!-- List View (Hidden by default) -->
-<div id="listView" style="display: none;">
+<!-- List View (Default) -->
+<div id="listView" style="display: block;">
     <div class="card">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
@@ -993,7 +999,7 @@
 let batchMode = false;
 let autoRefresh = false;
 let refreshInterval;
-let currentView = 'card';
+let currentView = 'list';
 let currentFilters = {
     search: '{{ request.args.get("search", "") }}',
     status: '{{ request.args.get("status", "") }}',
@@ -1093,7 +1099,7 @@ function applyFilters() {
     };
     
     // Preserve student filter if it exists
-    const currentStudentId = {{ current_student_id|default('null') }};
+    const currentStudentId = {% if current_student_id %}{{ current_student_id }}{% else %}null{% endif %};
     if (currentStudentId) {
         currentFilters.student = currentStudentId;
     }
@@ -1143,7 +1149,7 @@ function filterByStatus(status) {
 }
 
 function updateStudentContext() {
-    const currentStudentId = {{ current_student_id|default('null') }};
+    const currentStudentId = {% if current_student_id %}{{ current_student_id }}{% else %}null{% endif %};
     const filteredStudentName = "{{ filtered_student_name|default('') }}";
     
     if (currentStudentId && filteredStudentName) {
@@ -1301,13 +1307,17 @@ function excludeFromPolicy(id) {
     }
 }
 
-// Quick action functions
+// Quick action functions - Fixed implementations
 function reviewPassedDeadline() {
     filterByStatus('deadline_passed');
 }
 
 function viewNotesSubmissions() {
     filterByStatus('notes');
+}
+
+function viewTodaysCancellations() {
+    filterByStatus('today');
 }
 
 function processAllPending() {
@@ -1326,6 +1336,10 @@ function processAllPending() {
             } else {
                 showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
             }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Network error occurred', 'error');
         });
     }
 }
@@ -1347,7 +1361,7 @@ function clearFilters() {
     };
     
     // Preserve student filter if it exists (only clear other filters)
-    const currentStudentId = {{ current_student_id|default('null') }};
+    const currentStudentId = {% if current_student_id %}{{ current_student_id }}{% else %}null{% endif %};
     if (currentStudentId) {
         currentFilters.student = currentStudentId;
     }
@@ -1521,6 +1535,7 @@ function batchExclude() {
 
 // Utility functions
 function refreshData() {
+    showAlert('Refreshing data...', 'info');
     loadCancellations();
 }
 
@@ -1534,10 +1549,12 @@ function toggleAutoRefresh() {
         refreshInterval = setInterval(() => {
             loadCancellations();
         }, 30000);
+        showAlert('Auto-refresh enabled (every 30 seconds)', 'info');
     } else {
         btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Auto Refresh';
         btn.classList.remove('active');
         clearInterval(refreshInterval);
+        showAlert('Auto-refresh disabled', 'info');
     }
 }
 
@@ -1547,6 +1564,28 @@ function exportCancellations() {
     window.location.href = `{{ url_for('manager_cancellations') }}?${params.toString()}`;
 }
 
+// Note functionality - placeholder for now
+function addNote(id) {
+    const noteText = prompt('Add a note for this cancellation:');
+    if (noteText) {
+        // This would need to be implemented in the backend
+        showAlert('Note functionality needs backend implementation', 'warning');
+    }
+}
+
+// Revert processing functionality - placeholder
+function revertProcessing(id) {
+    if (confirm('Are you sure you want to revert the processing of this cancellation?')) {
+        // This would need to be implemented in the backend
+        showAlert('Revert functionality needs backend implementation', 'warning');
+    }
+}
+
+// Email functionality - placeholder
+function emailStudent(id) {
+    // This would need to be implemented in the backend
+    showAlert('Email functionality needs backend implementation', 'warning');
+}
 
 function formatDate(dateString) {
     if (!dateString) return 'Unknown';
@@ -1981,8 +2020,14 @@ function viewAllStudentCancellations() {
     }
 }
 
+// Print and email functions for modal
+function printCancellationDetails() {
+    window.print();
+}
 
-
+function emailCancellationDetails() {
+    showAlert('Email details functionality needs backend implementation', 'warning');
+}
 
 // Animation function
 function animateCards() {
@@ -2013,6 +2058,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Animate cards on load
     animateCards();
+    
+    // Set default view
+    switchView('list');
     
     // Set up date range filter listener
     const dateRangeFilter = document.getElementById('dateRangeFilter');
@@ -2045,6 +2093,9 @@ document.addEventListener('DOMContentLoaded', function() {
             customPicker.classList.add('show');
         }
     }
+    
+    // Show cancellations list initially in list view
+    document.getElementById('listView').style.display = 'block';
 });
 </script>
 {% endblock %}

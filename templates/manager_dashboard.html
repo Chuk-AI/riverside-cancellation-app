@@ -381,105 +381,6 @@ Equestrian{% endblock %} {% block extra_css %}
 
 <!-- Two Tables: By Lesson Date & By Submission Date -->
 <div class="row">
-  <!-- Cancellations by Lesson Date -->
-  <div class="col-lg-6 mb-4">
-    <div class="card">
-      <div
-        class="card-header d-flex justify-content-between align-items-center"
-      >
-        <h5 class="mb-0">
-          <i class="fas fa-calendar-day me-2"></i>
-          Cancellations by Lesson Date
-        </h5>
-        <small class="text-muted">Upcoming lessons</small>
-      </div>
-      <div class="card-body p-0">
-        {% if recent_cancellations %}
-        <div class="table-responsive">
-          <table class="table table-hover mb-0">
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Lesson Date/Time</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for cancellation in recent_cancellations[:10] %}
-              <tr>
-                <td>
-                  <div>
-                    <strong>{{ cancellation.student_name }}</strong>
-                    <br />
-                    <span
-                      class="membership-badge membership-{{ cancellation.membership_level|lower|replace(' ', '') }}"
-                    >
-                      {{ cancellation.membership_level }}
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  <div>
-                    <strong
-                      >{{ cancellation.lesson_date.strftime('%m/%d/%Y')
-                      }}</strong
-                    >
-                    <br />
-                    <small class="text-muted"
-                      >{{ cancellation.lesson_time.strftime('%I:%M %p')
-                      }}</small
-                    >
-                  </div>
-                </td>
-                <td>
-                  {% if cancellation.excluded %}
-                  <span class="badge bg-info">Excluded</span>
-                  {% elif cancellation.charged %}
-                  <span class="badge bg-warning">Charged</span>
-                  {% else %}
-                  <span class="badge bg-success">Free</span>
-                  {% endif %}
-                </td>
-                <td>
-                  <div class="btn-group btn-group-sm">
-                    <button
-                      class="btn btn-outline-primary btn-sm"
-                      onclick="viewCancellation({{ cancellation.id }})"
-                    >
-                      <i class="fas fa-eye"></i>
-                    </button>
-                    <button
-                      class="btn btn-outline-secondary btn-sm"
-                      onclick="editCancellation({{ cancellation.id }})"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="text-center text-muted py-4">
-          <i class="fas fa-calendar fa-2x mb-2"></i>
-          <p class="mb-0">No upcoming lesson cancellations</p>
-        </div>
-        {% endif %}
-      </div>
-      <div class="card-footer">
-        <a
-          href="{{ url_for('manager_cancellations') }}?sort=lesson_date"
-          class="btn btn-sm btn-outline-primary"
-        >
-          View All by Lesson Date
-        </a>
-      </div>
-    </div>
-  </div>
-
   <!-- Cancellations by Submission Date -->
   <div class="col-lg-6 mb-4">
     <div class="card">
@@ -575,6 +476,105 @@ Equestrian{% endblock %} {% block extra_css %}
           class="btn btn-sm btn-outline-primary"
         >
           View All by Submission Date
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancellations by Lesson Date -->
+  <div class="col-lg-6 mb-4">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">
+          <i class="fas fa-calendar-day me-2"></i>
+          Cancellations by Lesson Date
+        </h5>
+        <small class="text-muted">Upcoming lessons</small>
+      </div>
+      <div class="card-body p-0">
+        {% if recent_cancellations %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Lesson Date/Time</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for cancellation in recent_cancellations[:10] %}
+              <tr>
+                <td>
+                  <div>
+                    <strong>{{ cancellation.student_name }}</strong>
+                    <br />
+                    <span
+                      class="membership-badge membership-{{ cancellation.membership_level|lower|replace(' ', '') }}"
+                    >
+                      {{ cancellation.membership_level }}
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <div>
+                    <strong
+                      >{{ cancellation.lesson_date.strftime('%m/%d/%Y')
+                      }}</strong
+                    >
+                    <br />
+                    <small class="text-muted"
+                      >{{ cancellation.lesson_time.strftime('%I:%M %p')
+                      }}</small
+                    >
+                  </div>
+                </td>
+                <td>
+                  {% if cancellation.excluded %}
+                  <span class="badge bg-info">Excluded</span>
+                  {% elif cancellation.charged %}
+                  <span class="badge bg-warning">Charged</span>
+                  {% else %}
+                  <span class="badge bg-success">Free</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="btn-group btn-group-sm">
+                    <button
+                      class="btn btn-outline-primary btn-sm"
+                      onclick="viewCancellation({{ cancellation.id }})"
+                    >
+                      <i class="fas fa-eye"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-secondary btn-sm"
+                      onclick="editCancellation({{ cancellation.id }})"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="fas fa-calendar fa-2x mb-2"></i>
+          <p class="mb-0">No upcoming lesson cancellations</p>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer">
+        <a
+          href="{{ url_for('manager_cancellations') }}?sort=lesson_date"
+          class="btn btn-sm btn-outline-primary"
+        >
+          View All by Lesson Date
         </a>
       </div>
     </div>
