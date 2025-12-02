@@ -278,6 +278,107 @@
     .border-purple { 
         border-color: #8b5cf6 !important; 
     }
+    
+    /* Floating navigation buttons */
+    .floating-nav {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .floating-btn {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    
+    .floating-btn:hover {
+        background: #2e59d9;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        color: white;
+    }
+    
+    .floating-btn.secondary {
+        background: #6c757d;
+    }
+    
+    .floating-btn.secondary:hover {
+        background: #545b62;
+    }
+    
+    /* Enhanced clickable styling */
+    .clickable-student:hover {
+        background: rgba(59, 130, 246, 0.1);
+        border-radius: 4px;
+        padding: 2px 4px;
+        margin: -2px -4px;
+    }
+    
+    .clickable-cancellation:hover {
+        background: rgba(139, 92, 246, 0.1);
+        border-radius: 4px;
+        padding: 2px 4px;
+        margin: -2px -4px;
+    }
+    
+    .cancellation-row:hover .clickable-student,
+    .cancellation-row:hover .clickable-cancellation {
+        position: relative;
+    }
+    
+    .cancellation-row:hover .clickable-student::after {
+        content: "👤 Student Details";
+        position: absolute;
+        top: -25px;
+        left: 0;
+        background: rgba(59, 130, 246, 0.9);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+        z-index: 10;
+    }
+    
+    .cancellation-row:hover .clickable-cancellation::after {
+        content: "📝 Edit Cancellation";
+        position: absolute;
+        top: -25px;
+        left: 0;
+        background: rgba(139, 92, 246, 0.9);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+        z-index: 10;
+    }
+    
+    .clickable-student:hover::after,
+    .clickable-cancellation:hover::after {
+        opacity: 1;
+    }
 </style>
 {% endblock %}
 
@@ -495,6 +596,7 @@
             <label class="form-label">Status</label>
             <select class="form-select" id="statusFilter" onchange="applyFilters()">
                 <option value="">All Status</option>
+                <option value="pending" {{ 'selected' if request.args.get('status') == 'pending' else '' }}>Pending</option>
                 <option value="free" {{ 'selected' if request.args.get('status') == 'free' else '' }}>Free</option>
                 <option value="charged" {{ 'selected' if request.args.get('status') == 'charged' else '' }}>Charged</option>
                 <option value="excluded" {{ 'selected' if request.args.get('status') == 'excluded' else '' }}>Excluded</option>
@@ -627,14 +729,14 @@
                 <!-- Lesson Details with consistent date formatting -->
                 <div class="row mb-3">
                     <div class="col-6">
-                        <small class="text-muted">Lesson Date</small>
-                        <p class="mb-0"><strong>{{ cancellation.lesson_date|format_date }}</strong></p>
-                        <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
-                    </div>
-                    <div class="col-6">
                         <small class="text-muted">Submitted</small>
                         <p class="mb-0"><strong>{{ cancellation.submitted_date|format_date }}</strong></p>
                         <small class="text-muted">{{ cancellation.submitted_time }} ({{ cancellation.time_ago }})</small>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Lesson Date</small>
+                        <p class="mb-0"><strong>{{ cancellation.lesson_date|format_date }}</strong></p>
+                        <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
                     </div>
                 </div>
                 
@@ -814,8 +916,8 @@
                 <thead class="table-light">
                     <tr>
                         <th>Student</th>
-                        <th>Lesson Date</th>
                         <th>Submit Date</th>
+                        <th>Lesson Date</th>
                         <th>Status</th>
                         <th>Note</th>
                         <th>Actions</th>
@@ -825,24 +927,24 @@
                     {% for cancellation in cancellations %}
                     <tr class="cancellation-row" data-id="{{ cancellation.id }}">
                         <td>
-                            <div>
+                            <div class="clickable-student" onclick="viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')" style="cursor: pointer;">
                                 <strong>{{ cancellation.student_name }}</strong><br>
                                 <small class="text-muted">{{ cancellation.membership_level }}</small>
                             </div>
                         </td>
-                        <td>
-                            <div>
-                                <strong>{{ cancellation.lesson_date|format_date }}</strong><br>
-                                <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
-                            </div>
-                        </td>
-                        <td>
+                        <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
                             <div>
                                 <strong>{{ cancellation.submitted_date|format_date }}</strong><br>
                                 <small class="text-muted">{{ cancellation.time_ago }}</small>
                             </div>
                         </td>
-                        <td>
+                        <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
+                            <div>
+                                <strong>{{ cancellation.lesson_date|format_date }}</strong><br>
+                                <small class="text-muted">{{ cancellation.lesson_time|format_time }}</small>
+                            </div>
+                        </td>
+                        <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
                             {% if cancellation.excluded %}
                                 <span class="badge bg-info">Excluded</span>
                             {% elif cancellation.charged %}
@@ -857,7 +959,7 @@
                                 <span class="badge bg-secondary">Pending</span>
                             {% endif %}
                         </td>
-                        <td>
+                        <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
                             {% if cancellation.cancellation_note %}
                                 <small class="text-truncate" style="max-width: 150px; display: block;">
                                     {{ cancellation.cancellation_note }}
@@ -869,12 +971,18 @@
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <button class="btn btn-outline-primary btn-sm" 
-                                        onclick="viewCancellationDetails({{ cancellation.id }})">
+                                        onclick="viewCancellationDetails({{ cancellation.id }})"
+                                        title="View full details">
                                     <i class="fas fa-eye"></i>
                                 </button>
                                 <button class="btn btn-outline-secondary btn-sm" 
                                         onclick="viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')">
                                     <i class="fas fa-user"></i>
+                                </button>
+                                <button class="btn btn-outline-info btn-sm" 
+                                        onclick="switchToCardView({{ cancellation.id }})"
+                                        title="View cancellation card">
+                                    <i class="fas fa-edit"></i>
                                 </button>
                             </div>
                         </td>
@@ -991,6 +1099,17 @@
         </div>
     </div>
 </div>
+
+<!-- Floating Navigation Buttons -->
+<div class="floating-nav">
+    <button class="floating-btn secondary" onclick="scrollToTop()" title="Back to Top">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+    <button class="floating-btn" onclick="goBackToList()" id="backToListBtn" title="Back to List View" style="display: none;">
+        <i class="fas fa-list"></i>
+    </button>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -1022,13 +1141,59 @@ function switchView(view) {
         listView.style.display = 'none';
         cardBtn.classList.add('active');
         listBtn.classList.remove('active');
+        
+        // Show back to list button when in card view
+        document.getElementById('backToListBtn').style.display = 'flex';
     } else {
         cardView.style.display = 'none';
         listView.style.display = 'block';
         cardBtn.classList.remove('active');
         listBtn.classList.add('active');
+        
+        // Hide back to list button when in list view
+        document.getElementById('backToListBtn').style.display = 'none';
     }
 }
+
+// New navigation functions
+function switchToCardView(cancellationId) {
+    // Switch to card view
+    switchView('card');
+    
+    // Scroll to the specific cancellation card
+    setTimeout(() => {
+        const targetCard = document.querySelector(`[data-id="${cancellationId}"]`);
+        if (targetCard) {
+            targetCard.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center' 
+            });
+            
+            // Highlight the card briefly
+            targetCard.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.6)';
+            targetCard.style.transform = 'scale(1.02)';
+            targetCard.style.transition = 'all 0.3s ease';
+            
+            setTimeout(() => {
+                targetCard.style.boxShadow = '';
+                targetCard.style.transform = '';
+            }, 2000);
+        }
+    }, 100);
+}
+
+function scrollToTop() {
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
+}
+
+function goBackToList() {
+    switchView('list');
+    scrollToTop();
+}
+
 
 // SINGLE loadCancellations function (removed duplicate)
 function loadCancellations() {

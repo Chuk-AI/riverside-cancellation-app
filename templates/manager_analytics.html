@@ -185,6 +185,51 @@ endblock %} {% block extra_css %}
       <label class="btn btn-outline-primary btn-filter" for="date_all"
         >All Time</label
       >
+
+      <input
+        type="radio"
+        class="btn-check"
+        name="date_range"
+        id="date_custom"
+        value="custom"
+      />
+      <label class="btn btn-outline-primary btn-filter" for="date_custom"
+        >Custom</label
+      >
+    </div>
+
+    <!-- Custom Date Range Selection (hidden by default) -->
+    <div
+      id="custom-date-range"
+      style="
+        display: none;
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #fff;
+        border-radius: 0.5rem;
+        border: 1px solid #e2e8f0;
+      "
+    >
+      <div class="row">
+        <div class="col-md-6">
+          <label for="start_date" class="form-label">Start Date:</label>
+          <input
+            type="date"
+            class="form-control"
+            id="start_date"
+            name="start_date"
+          />
+        </div>
+        <div class="col-md-6">
+          <label for="end_date" class="form-label">End Date:</label>
+          <input
+            type="date"
+            class="form-control"
+            id="end_date"
+            name="end_date"
+          />
+        </div>
+      </div>
     </div>
   </div>
 
@@ -428,11 +473,20 @@ endblock %} {% block extra_css %}
 
   <div class="col-lg-4 mb-4">
     <div class="analytics-card">
-      <div class="card-header">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
         <h5 class="mb-0">
           <i class="fas fa-trophy me-2"></i>
           Most Active Students
         </h5>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-success"
+          onclick="exportMostActiveStudents()"
+        >
+          <i class="fas fa-file-excel me-1"></i>Export to Excel
+        </button>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -478,11 +532,20 @@ endblock %} {% block extra_css %}
 <div class="row">
   <div class="col-12">
     <div class="analytics-card">
-      <div class="card-header">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
         <h5 class="mb-0">
           <i class="fas fa-users me-2"></i>
           Membership Level Analysis
         </h5>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-success"
+          onclick="exportMembershipAnalysis()"
+        >
+          <i class="fas fa-file-excel me-1"></i>Export to Excel
+        </button>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -537,11 +600,18 @@ endblock %} {% block extra_css %}
 </div>
 {% endblock %} {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- COMPLETE JavaScript section replacement for manager_analytics.html -->
 
 <script>
   console.log('=== ZERO-DATA COMPATIBLE CHART SYSTEM ===');
+
+  // Register Chart.js plugins
+  if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+      Chart.register(ChartDataLabels);
+  }
 
   // Chart configuration and global variables
   const chartColors = {
@@ -677,8 +747,7 @@ endblock %} {% block extra_css %}
                   maintainAspectRatio: false,
                   plugins: {
                       legend: {
-                          position: 'bottom',
-                          display: true
+                          display: false  // Remove bottom legend
                       },
                       tooltip: {
                           callbacks: {
@@ -687,6 +756,24 @@ endblock %} {% block extra_css %}
                                   const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                                   return `${context.label}: ${value} (${percentage}%)`;
                               }
+                          }
+                      },
+                      datalabels: {
+                          color: 'white',
+                          font: {
+                              weight: 'bold',
+                              size: 12
+                          },
+                          formatter: function(value, context) {
+                              const data = context.dataset.data;
+                              const total = data.reduce((sum, val) => sum + val, 0);
+                              const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                              const label = context.chart.data.labels[context.dataIndex];
+                              return value > 0 ? `${label}\n${value} (${percentage}%)` : '';
+                          },
+                          display: function(context) {
+                              const value = context.dataset.data[context.dataIndex];
+                              return value > 0; // Only show labels for non-zero values
                           }
                       }
                   }
@@ -1019,6 +1106,14 @@ endblock %} {% block extra_css %}
           format: 'json'
       });
 
+      // Add custom date range if selected
+      if (dateRange === 'custom') {
+          const startDate = document.getElementById('start_date')?.value;
+          const endDate = document.getElementById('end_date')?.value;
+          if (startDate) params.append('start_date', startDate);
+          if (endDate) params.append('end_date', endDate);
+      }
+
       const metricsRow = document.getElementById('metrics-row');
       if (metricsRow) metricsRow.style.opacity = '0.6';
 
@@ -1046,6 +1141,92 @@ endblock %} {% block extra_css %}
               if (metricsRow) metricsRow.style.opacity = '1';
               alert('Network error. Please try again.');
           });
+  }
+
+  // Toggle custom date range visibility
+  function toggleCustomDateRange() {
+      const customDateRange = document.getElementById('custom-date-range');
+      const customRadio = document.getElementById('date_custom');
+
+      if (customRadio && customRadio.checked) {
+          customDateRange.style.display = 'block';
+      } else {
+          customDateRange.style.display = 'none';
+      }
+  }
+
+  // Export Most Active Students to Excel
+  function exportMostActiveStudents() {
+      const data = [];
+      const table = document.querySelector('.analytics-card:has(.fa-trophy) table');
+
+      if (!table) {
+          alert('No data available to export');
+          return;
+      }
+
+      // Get table headers
+      const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      data.push(headers);
+
+      // Get table data
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+          const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim());
+          if (cells.length > 0 && !cells[0].includes('No data available')) {
+              data.push(cells);
+          }
+      });
+
+      if (data.length <= 1) {
+          alert('No data available to export');
+          return;
+      }
+
+      // Create workbook and export
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Most Active Students');
+
+      const fileName = `most_active_students_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+  }
+
+  // Export Membership Analysis to Excel
+  function exportMembershipAnalysis() {
+      const data = [];
+      const table = document.querySelector('.analytics-card:has(.fa-users) table');
+
+      if (!table) {
+          alert('No data available to export');
+          return;
+      }
+
+      // Get table headers
+      const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      data.push(headers);
+
+      // Get table data
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+          const cells = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim());
+          if (cells.length > 0 && !cells[0].includes('No membership data available')) {
+              data.push(cells);
+          }
+      });
+
+      if (data.length <= 1) {
+          alert('No data available to export');
+          return;
+      }
+
+      // Create workbook and export
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Membership Analysis');
+
+      const fileName = `membership_analysis_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
   }
 
   // Export table
@@ -1085,6 +1266,14 @@ endblock %} {% block extra_css %}
           alert('Chart.js not loaded. Please refresh the page.');
           return;
       }
+
+      // Add event listeners for date range radio buttons
+      document.querySelectorAll('input[name="date_range"]').forEach(radio => {
+          radio.addEventListener('change', toggleCustomDateRange);
+      });
+
+      // Initialize custom date range visibility
+      toggleCustomDateRange();
 
       setTimeout(() => {
           const success = initializeCharts();

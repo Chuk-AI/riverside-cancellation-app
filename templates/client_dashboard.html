@@ -49,6 +49,8 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     border: 2px dashed #d1d5db;
     transition: all 0.3s ease;
     cursor: pointer;
+    max-width: 280px;
+    margin: 0 auto;
   }
   .quick-action-card:hover {
     border-color: #3b82f6;
@@ -233,9 +235,9 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
   </div>
 </div>
 
-<!-- Quick Actions -->
-<div class="row mb-4">
-  <div class="col-md-4 mb-3">
+<!-- Quick Actions - Updated with centered layout -->
+<div class="row mb-4 justify-content-center">
+  <div class="col-md-4 col-lg-3 mb-3 d-flex justify-content-center">
     <div
       class="card quick-action-card cancel-action h-100"
       onclick="window.location.href='{{ url_for('client_cancel') }}'"
@@ -250,7 +252,10 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     </div>
   </div>
 
-  <div class="col-md-4 mb-3">
+  <div class="w-100"></div>
+  <!-- Force line break -->
+
+  <div class="col-md-4 col-lg-3 mb-3 d-flex justify-content-center">
     <div
       class="card quick-action-card h-100"
       onclick="window.location.href='{{ url_for('client_history') }}'"
@@ -326,13 +331,9 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
   <div class="col-12">
     <div class="card bg-light">
       <div class="card-body text-center">
-        <h6>
-          <i class="fas fa-question-circle me-2"></i>
-          Need Help?
-        </h6>
         <p class="mb-3">
           If you notice any errors in your records or have questions about the
-          cancellation policy, please don't hesitate to contact us at
+          cancellation policy, please contact us at
           <a
             href="mailto:managers@riversideequestrian.ca"
             class="text-decoration-none"

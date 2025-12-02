@@ -1260,18 +1260,28 @@ def calculate_cancellation_status(student):
 
 
 def will_be_charged(student, lesson_datetime):
-    """Check if a cancellation will be charged"""
+    """Check if a cancellation will be charged based on submission time vs deadline"""
     tier = get_membership_tier(student["membership_level"])
     status = calculate_cancellation_status(student)
 
-    # Check if within deadline
-    now = datetime.now()
-    time_diff = lesson_datetime - now
-    hours_diff = time_diff.total_seconds() / 3600
+    # Calculate deadline based on lesson date/time and membership tier
+    submission_time = datetime.now()
 
-    if hours_diff < tier["deadline_hours"]:
-        return True, "Notice will be received after the cancellation cutoff"
+    # For Gold members: 2 hours before lesson
+    if tier["level"] == "Gold":
+        deadline = lesson_datetime - timedelta(hours=2)
+        if submission_time > deadline:
+            return True, "Notice submitted less than 2 hours before lesson time"
+    else:
+        # For all other tiers: 6pm the day before
+        lesson_date = lesson_datetime.date()
+        previous_day = lesson_date - timedelta(days=1)
+        deadline = datetime.combine(previous_day, time(18, 0))  # 6pm previous day
 
+        if submission_time > deadline:
+            return True, "Notice submitted after 6pm the previous day"
+
+    # Check monthly limit
     if status["remaining"] <= 0:
         return True, "No more available free cancellation notices this month"
 
@@ -1465,7 +1475,6 @@ def get_dashboard_stats():
         stats = {
             # 5-Box Layout Metrics (Primary)
             "today_cancellations": int(today_cancellations),
-            "yesterday_cancellations": int(yesterday_cancellations),
             "free_cancellations": int(free_cancellations),
             "charged_cancellations": int(charged_cancellations),
             "excluded_cancellations": int(excluded_cancellations),
@@ -1503,7 +1512,6 @@ def get_dashboard_stats():
         return {
             # 5-Box Layout Metrics
             "today_cancellations": 0,
-            "yesterday_cancellations": 0,
             "free_cancellations": 0,
             "charged_cancellations": 0,
             "excluded_cancellations": 0,
@@ -3415,7 +3423,6 @@ def manager_cancellations():
         SELECT
             COUNT(*) as total_cancellations,
             SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
-            SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday_cancellations,
             SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free_cancellations,
             SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_cancellations,
             SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations,
@@ -3434,7 +3441,6 @@ def manager_cancellations():
         else {
             "total_cancellations": 0,
             "today_cancellations": 0,
-            "yesterday_cancellations": 0,
             "free_cancellations": 0,
             "charged_cancellations": 0,
             "excluded_cancellations": 0,
@@ -3557,7 +3563,13 @@ def make_json_serializable(obj):
         return obj
 
 
-def get_analytics_summary(date_range="month", status_filter="", membership_filter=""):
+def get_analytics_summary(
+    date_range="month",
+    status_filter="",
+    membership_filter="",
+    start_date="",
+    end_date="",
+):
     """
     Get analytics summary for dashboard widgets
     """
@@ -3572,9 +3584,18 @@ def get_analytics_summary(date_range="month", status_filter="", membership_filte
             "all": "1=1",
         }
 
-        date_clause = date_conditions.get(date_range, date_conditions["month"])
+        # Handle custom date range
+        if date_range == "custom" and start_date and end_date:
+            date_clause = "DATE(c.created_at) BETWEEN ? AND ?"
+        else:
+            date_clause = date_conditions.get(date_range, date_conditions["month"])
+
         where_clause = f"WHERE {date_clause}"
         params = []
+
+        # Add custom date parameters if needed
+        if date_range == "custom" and start_date and end_date:
+            params.extend([start_date, end_date])
 
         if status_filter:
             status_conditions = {
@@ -3635,6 +3656,8 @@ def manager_analytics():
     date_range = request.args.get("date_range", "month")
     status_filter = request.args.get("status", "")
     membership_filter = request.args.get("membership", "")
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
     format_type = request.args.get("format", "html")
 
     conn = get_db()
@@ -3674,7 +3697,12 @@ def manager_analytics():
             "month": "c.created_at >= DATE('now', '-30 days')",
             "all": "1=1",  # No date filter - this is what finds all 14!
         }
-        date_clause = date_conditions.get(date_range, date_conditions["month"])
+
+        # Handle custom date range
+        if date_range == "custom" and start_date and end_date:
+            date_clause = "DATE(c.created_at) BETWEEN ? AND ?"
+        else:
+            date_clause = date_conditions.get(date_range, date_conditions["month"])
 
         # Build status filter
         status_conditions = {
@@ -3690,6 +3718,10 @@ def manager_analytics():
         # Build membership filter
         where_clause = f"WHERE {date_clause} AND {status_clause}"
         params = []
+
+        # Add custom date parameters if needed
+        if date_range == "custom" and start_date and end_date:
+            params.extend([start_date, end_date])
 
         if membership_filter:
             where_clause += " AND s.membership_level = ?"

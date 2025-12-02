@@ -158,6 +158,19 @@ Equestrian{% endblock %} {% block extra_css %}
     background: #fce7f3;
     color: #be185d;
   }
+
+  /* Clickable row styles */
+  .table tbody tr[onclick] {
+    transition: background-color 0.2s ease;
+  }
+
+  .table tbody tr[onclick]:hover {
+    background-color: #f8fafc !important;
+  }
+
+  .table tbody tr[onclick]:hover td {
+    color: var(--primary-color);
+  }
 </style>
 {% endblock %} {% block content %}
 <!-- Welcome Header -->
@@ -346,20 +359,20 @@ Equestrian{% endblock %} {% block extra_css %}
 
 <!-- Quick Actions -->
 <div class="quick-actions">
-  <a href="{{ url_for('manager_students') }}" class="quick-action-btn">
-    <div class="text-primary mb-2">
-      <i class="fas fa-user-plus fa-2x"></i>
-    </div>
-    <h6 class="mb-1">Add Student</h6>
-    <small class="text-muted">Register new student</small>
-  </a>
-
   <a href="{{ url_for('manager_cancellations') }}" class="quick-action-btn">
     <div class="text-warning mb-2">
       <i class="fas fa-list-alt fa-2x"></i>
     </div>
     <h6 class="mb-1">Review Cancellations</h6>
     <small class="text-muted">Process requests</small>
+  </a>
+
+  <a href="{{ url_for('manager_students') }}" class="quick-action-btn">
+    <div class="text-primary mb-2">
+      <i class="fas fa-user-plus fa-2x"></i>
+    </div>
+    <h6 class="mb-1">Add Student</h6>
+    <small class="text-muted">Register new student</small>
   </a>
 
   <a href="{{ url_for('manager_analytics') }}" class="quick-action-btn">
@@ -407,10 +420,21 @@ Equestrian{% endblock %} {% block extra_css %}
             </thead>
             <tbody>
               {% for cancellation in recent_cancellations[:10] %}
-              <tr>
+              <tr
+                onclick="viewCancellationDetails({{ cancellation.id }})"
+                style="cursor: pointer"
+                title="Click to view cancellation details"
+              >
                 <td>
                   <div>
-                    <strong>{{ cancellation.student_name }}</strong>
+                    <strong
+                      ><a
+                        href="#"
+                        onclick="event.stopPropagation(); viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')"
+                        class="text-decoration-none"
+                        >{{ cancellation.student_name }}</a
+                      ></strong
+                    >
                     <br />
                     <span
                       class="membership-badge membership-{{ cancellation.membership_level|lower|replace(' ', '') }}"
@@ -507,10 +531,21 @@ Equestrian{% endblock %} {% block extra_css %}
             </thead>
             <tbody>
               {% for cancellation in recent_cancellations[:10] %}
-              <tr>
+              <tr
+                onclick="viewCancellationDetails({{ cancellation.id }})"
+                style="cursor: pointer"
+                title="Click to view cancellation details"
+              >
                 <td>
                   <div>
-                    <strong>{{ cancellation.student_name }}</strong>
+                    <strong
+                      ><a
+                        href="#"
+                        onclick="event.stopPropagation(); viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')"
+                        class="text-decoration-none"
+                        >{{ cancellation.student_name }}</a
+                      ></strong
+                    >
                     <br />
                     <span
                       class="membership-badge membership-{{ cancellation.membership_level|lower|replace(' ', '') }}"
@@ -545,15 +580,15 @@ Equestrian{% endblock %} {% block extra_css %}
                   <div class="btn-group btn-group-sm">
                     <button
                       class="btn btn-outline-primary btn-sm"
-                      onclick="viewCancellation({{ cancellation.id }})"
+                      onclick="event.stopPropagation(); viewCancellationDetails({{ cancellation.id }})"
                     >
                       <i class="fas fa-eye"></i>
                     </button>
                     <button
                       class="btn btn-outline-secondary btn-sm"
-                      onclick="editCancellation({{ cancellation.id }})"
+                      onclick="event.stopPropagation(); viewStudentDetails({{ cancellation.student_id }}, '{{ cancellation.student_name }}', '{{ cancellation.membership_level }}')"
                     >
-                      <i class="fas fa-edit"></i>
+                      <i class="fas fa-user"></i>
                     </button>
                   </div>
                 </td>
@@ -593,6 +628,93 @@ Equestrian{% endblock %} {% block extra_css %}
       </div>
       <div class="card-body">
         <canvas id="monthlyChart" height="100"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Student Details Modal -->
+<div
+  class="modal fade"
+  id="studentDetailsModal"
+  tabindex="-1"
+  aria-labelledby="studentDetailsModalLabel"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="studentDetailsModalLabel">
+          <i class="fas fa-user me-2"></i>
+          Student Information
+        </h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body" id="studentDetailsContent">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+        <a href="{{ url_for('manager_students') }}" class="btn btn-primary">
+          <i class="fas fa-users me-1"></i>
+          Manage Students
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cancellation Details Modal -->
+<div
+  class="modal fade"
+  id="cancellationDetailsModal"
+  tabindex="-1"
+  aria-labelledby="cancellationDetailsModalLabel"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cancellationDetailsModalLabel">
+          <i class="fas fa-file-alt me-2"></i>
+          Cancellation Details
+        </h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body" id="cancellationDetailsContent">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+        <a
+          href="{{ url_for('manager_cancellations') }}"
+          class="btn btn-primary"
+        >
+          <i class="fas fa-list-alt me-1"></i>
+          Manage Cancellations
+        </a>
       </div>
     </div>
   </div>
@@ -696,5 +818,165 @@ Equestrian{% endblock %} {% block extra_css %}
           }, 50);
       });
   });
+
+  // Add modal functions for viewing details
+  function viewCancellationDetails(cancellationId) {
+      const modal = new bootstrap.Modal(document.getElementById('cancellationDetailsModal'));
+      modal.show();
+
+      document.getElementById('cancellationDetailsModalLabel').innerHTML =
+          `<i class="fas fa-file-alt me-2"></i>Cancellation Details - ID: ${cancellationId}`;
+
+      fetch(`/manager/api/cancellation/${cancellationId}/details`)
+          .then(response => response.json())
+          .then(data => {
+              if (data.success) {
+                  const cancellation = data.cancellation;
+                  const student = data.student;
+                  const policy = data.policy;
+
+                  const content = `
+                      <div class="row">
+                          <!-- Student Information -->
+                          <div class="col-md-6 mb-3">
+                              <div class="card h-100">
+                                  <div class="card-header bg-primary text-white">
+                                      <h6 class="mb-0"><i class="fas fa-user me-1"></i>Student Information</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <p><strong>Name:</strong> ${student.first_name} ${student.last_name}</p>
+                                      <p><strong>Parent:</strong> ${student.parent_first || ''} ${student.parent_last || ''}</p>
+                                      <p><strong>Email:</strong> <a href="mailto:${student.email}">${student.email}</a></p>
+                                      <p><strong>Phone:</strong> ${student.phone || 'Not provided'}</p>
+                                      <p class="mb-0"><strong>Membership:</strong> <span class="badge bg-secondary">${student.membership_level}</span></p>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <!-- Cancellation Details -->
+                          <div class="col-md-6 mb-3">
+                              <div class="card h-100">
+                                  <div class="card-header bg-info text-white">
+                                      <h6 class="mb-0"><i class="fas fa-calendar-times me-1"></i>Cancellation Details</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <p><strong>Lesson Date:</strong> ${new Date(cancellation.lesson_date).toLocaleDateString()}</p>
+                                      <p><strong>Lesson Time:</strong> ${cancellation.lesson_time}</p>
+                                      <p><strong>Submitted:</strong> ${new Date(cancellation.created_at).toLocaleString()}</p>
+                                      <p><strong>Status:</strong>
+                                          ${cancellation.excluded ? '<span class="badge bg-info">Excluded</span>' :
+                                            cancellation.charged ? '<span class="badge bg-warning">Charged</span>' :
+                                            '<span class="badge bg-success">Free</span>'}
+                                      </p>
+                                      <p class="mb-0"><strong>Policy Result:</strong> ${policy.policy_result}</p>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <!-- Cancellation Note (if exists) -->
+                          ${cancellation.cancellation_note ? `
+                          <div class="col-12 mb-3">
+                              <div class="card">
+                                  <div class="card-header bg-warning text-white">
+                                      <h6 class="mb-0"><i class="fas fa-sticky-note me-1"></i>Cancellation Note</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <p class="mb-0">${cancellation.cancellation_note}</p>
+                                  </div>
+                              </div>
+                          </div>
+                          ` : ''}
+
+                          <!-- Manager Notes (if exists) -->
+                          ${cancellation.manager_notes ? `
+                          <div class="col-12 mb-3">
+                              <div class="card">
+                                  <div class="card-header bg-dark text-white">
+                                      <h6 class="mb-0"><i class="fas fa-clipboard me-1"></i>Manager Notes</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <pre class="mb-0" style="white-space: pre-wrap;">${cancellation.manager_notes}</pre>
+                                  </div>
+                              </div>
+                          </div>
+                          ` : ''}
+                      </div>
+                  `;
+
+                  document.getElementById('cancellationDetailsContent').innerHTML = content;
+              } else {
+                  document.getElementById('cancellationDetailsContent').innerHTML =
+                      '<div class="alert alert-danger">Error loading cancellation details: ' + (data.message || 'Unknown error') + '</div>';
+              }
+          })
+          .catch(error => {
+              document.getElementById('cancellationDetailsContent').innerHTML =
+                  '<div class="alert alert-danger">Network error loading cancellation details</div>';
+              console.error('Error:', error);
+          });
+  }
+
+  function viewStudentDetails(studentId, studentName, membershipLevel) {
+      const modal = new bootstrap.Modal(document.getElementById('studentDetailsModal'));
+      modal.show();
+
+      document.getElementById('studentDetailsModalLabel').innerHTML =
+          `<i class="fas fa-user me-2"></i>Student Information - ${studentName}`;
+
+      fetch(`/manager/api/student/${studentId}/details`)
+          .then(response => response.json())
+          .then(data => {
+              if (data.success) {
+                  const student = data.student;
+                  const stats = data.stats;
+
+                  const content = `
+                      <div class="row">
+                          <div class="col-md-6">
+                              <div class="card h-100">
+                                  <div class="card-header bg-primary text-white">
+                                      <h6 class="mb-0"><i class="fas fa-user me-1"></i>Personal Information</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <p><strong>Name:</strong> ${student.first_name} ${student.last_name}</p>
+                                      <p><strong>Parent:</strong> ${student.parent_first || ''} ${student.parent_last || ''}</p>
+                                      <p><strong>Email:</strong> <a href="mailto:${student.email}">${student.email}</a></p>
+                                      <p><strong>Phone:</strong> ${student.phone || 'Not provided'}</p>
+                                      <p><strong>Membership:</strong> <span class="badge bg-secondary">${student.membership_level}</span></p>
+                                      <p class="mb-0"><strong>Joined:</strong> ${new Date(student.created_at).toLocaleDateString()}</p>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div class="col-md-6">
+                              <div class="card h-100">
+                                  <div class="card-header bg-success text-white">
+                                      <h6 class="mb-0"><i class="fas fa-chart-bar me-1"></i>Cancellation Statistics</h6>
+                                  </div>
+                                  <div class="card-body">
+                                      <p><strong>Total Cancellations:</strong> ${stats.total_cancellations}</p>
+                                      <p><strong>This Month:</strong> ${stats.month_cancellations}</p>
+                                      <p><strong>Free:</strong> ${stats.free_cancellations}</p>
+                                      <p><strong>Charged:</strong> ${stats.charged_cancellations}</p>
+                                      <p><strong>Excluded:</strong> ${stats.excluded_cancellations}</p>
+                                      <p class="mb-0"><strong>Last Activity:</strong> ${stats.last_cancellation ? new Date(stats.last_cancellation).toLocaleDateString() : 'None'}</p>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  `;
+
+                  document.getElementById('studentDetailsContent').innerHTML = content;
+              } else {
+                  document.getElementById('studentDetailsContent').innerHTML =
+                      '<div class="alert alert-danger">Error loading student details: ' + (data.message || 'Unknown error') + '</div>';
+              }
+          })
+          .catch(error => {
+              document.getElementById('studentDetailsContent').innerHTML =
+                  '<div class="alert alert-danger">Network error loading student details</div>';
+              console.error('Error:', error);
+          });
+  }
 </script>
 {% endblock %}
