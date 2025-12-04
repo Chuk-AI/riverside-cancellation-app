@@ -559,8 +559,14 @@
             <span id="selectedCount">0 cancellations selected</span>
         </div>
         <div class="btn-group">
-            <button class="btn btn-sm btn-success" onclick="batchApprove()">
+            <button class="btn btn-sm btn-success" onclick="batchApproveAsPolicy()">
                 <i class="fas fa-check me-1"></i>Approve Selected
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="processAllPending()">
+                <i class="fas fa-check-double me-1"></i>Process All Pending
+            </button>
+            <button class="btn btn-sm btn-primary" onclick="batchForceFree()">
+                <i class="fas fa-gift me-1"></i>Free Selected
             </button>
             <button class="btn btn-sm btn-warning" onclick="batchCharge()">
                 <i class="fas fa-dollar-sign me-1"></i>Mark as Charged
@@ -821,21 +827,21 @@
                 <div class="override-controls">
                     <h6 class="mb-3">
                         <i class="fas fa-user-shield me-1"></i>
-                        Manager Override
+                        Manager Override Actions
                     </h6>
                     <div class="row">
                         <div class="col-md-4 mb-2">
-                            <button class="btn btn-success btn-sm w-100" 
+                            <button class="btn btn-primary btn-sm w-100" 
                                     onclick="processAsFree({{ cancellation.id }})">
-                                <i class="fas fa-check me-1"></i>
-                                Free
+                                <i class="fas fa-gift me-1"></i>
+                                Force Free
                             </button>
                         </div>
                         <div class="col-md-4 mb-2">
                             <button class="btn btn-warning btn-sm w-100" 
                                     onclick="processAsCharged({{ cancellation.id }})">
                                 <i class="fas fa-dollar-sign me-1"></i>
-                                Charge
+                                Force Charge
                             </button>
                         </div>
                         <div class="col-md-4 mb-2">
@@ -851,9 +857,8 @@
                         <div class="input-group input-group-sm">
                             <input type="text" 
                                    class="form-control" 
-                                   placeholder="Override reason"
-                                   id="reason-{{ cancellation.id }}"
-                                   required>
+                                   placeholder="Override reason (required for above actions)"
+                                   id="reason-{{ cancellation.id }}">
                             <button class="btn btn-outline-secondary" 
                                     onclick="addNote({{ cancellation.id }})">
                                 <i class="fas fa-sticky-note"></i>
@@ -878,20 +883,15 @@
                         </button>
                     </div>
                     
+                    {% if cancellation.status == 'pending' or not cancellation.status %}
                     <div class="btn-group btn-group-sm">
-                        {% if cancellation.status != 'pending' %}
-                        <button class="btn btn-outline-warning" 
-                                onclick="revertProcessing({{ cancellation.id }})">
-                            <i class="fas fa-undo me-1"></i>
-                            Revert
-                        </button>
-                        {% endif %}
-                        <button class="btn btn-outline-secondary" 
-                                onclick="emailStudent({{ cancellation.id }})">
-                            <i class="fas fa-envelope me-1"></i>
-                            Email
+                        <button class="btn btn-success" 
+                                onclick="approveAsPolicy({{ cancellation.id }})">
+                            <i class="fas fa-check-circle me-1"></i>
+                            Approve
                         </button>
                     </div>
+                    {% endif %}
                 </div>
                 
                 {% if cancellation.excluded and cancellation.approved_by %}
@@ -1351,18 +1351,31 @@ function updateStudentContext() {
 }
 
 // Processing functions with mandatory reason validation
-function processAsFree(id) {
-    const reasonInput = document.getElementById(`reason-${id}`);
-    const reason = reasonInput?.value?.trim() || '';
-    
-    if (!reason) {
-        reasonInput.classList.add('override-reason-required');
-        showAlert('Override reason is required', 'error');
-        reasonInput.focus();
-        return;
+function processAllPending() {
+    if (confirm('Process ALL pending cancellations according to policy?')) {
+        fetch('/manager/api/cancellation/process-all-pending', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'approve_policy'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(`${data.processed} pending cancellations processed according to policy!`, 'success');
+                loadCancellations();
+            } else {
+                showAlert('Error in processing all pending: ' + (data.message || 'Unknown error'), 'error');
+            }
+        });
     }
-    
-    const confirmMessage = `Are you sure you want to process this as a FREE cancellation?\n\nReason: ${reason}`;
+}
+
+function approveAsPolicy(id) {
+    const confirmMessage = `Are you sure you want to APPROVE this cancellation according to policy?\n\nThis will process the cancellation as free if within policy limits and deadline, or charged if not.`;
     
     if (confirm(confirmMessage)) {
         fetch('/manager/api/cancellation/process', {
@@ -1371,7 +1384,47 @@ function processAsFree(id) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                action: 'approve',
+                action: 'approve_policy',
+                cancellation_id: id
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Cancellation processed according to policy successfully!', 'success');
+                loadCancellations();
+            } else {
+                showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Network error occurred', 'error');
+        });
+    }
+}
+
+function processAsFree(id) {
+    const reasonInput = document.getElementById(`reason-${id}`);
+    const reason = reasonInput?.value?.trim() || '';
+    
+    if (!reason) {
+        reasonInput.classList.add('override-reason-required');
+        showAlert('Override reason is required for forcing free', 'error');
+        reasonInput.focus();
+        return;
+    }
+    
+    const confirmMessage = `Are you sure you want to FORCE this cancellation to be FREE?\n\nReason: ${reason}`;
+    
+    if (confirm(confirmMessage)) {
+        fetch('/manager/api/cancellation/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'force_free',
                 cancellation_id: id,
                 reason: reason
             })
@@ -1379,7 +1432,7 @@ function processAsFree(id) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                showAlert('Cancellation processed as free successfully!', 'success');
+                showAlert('Cancellation forced to free successfully!', 'success');
                 loadCancellations();
             } else {
                 showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
@@ -1398,12 +1451,12 @@ function processAsCharged(id) {
     
     if (!reason) {
         reasonInput.classList.add('override-reason-required');
-        showAlert('Override reason is required', 'error');
+        showAlert('Override reason is required for forcing charge', 'error');
         reasonInput.focus();
         return;
     }
     
-    const confirmMessage = `Are you sure you want to process this as a CHARGED cancellation?\n\nReason: ${reason}`;
+    const confirmMessage = `Are you sure you want to FORCE this cancellation to be CHARGED?\n\nReason: ${reason}`;
     
     if (confirm(confirmMessage)) {
         fetch('/manager/api/cancellation/process', {
@@ -1412,7 +1465,7 @@ function processAsCharged(id) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                action: 'charge',
+                action: 'force_charge',
                 cancellation_id: id,
                 reason: reason
             })
@@ -1420,7 +1473,7 @@ function processAsCharged(id) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                showAlert('Cancellation marked as charged successfully!', 'warning');
+                showAlert('Cancellation forced to charge successfully!', 'warning');
                 loadCancellations();
             } else {
                 showAlert('Error: ' + (data.message || 'Unknown error'), 'error');
@@ -1612,25 +1665,60 @@ function clearSelection() {
 }
 
 // Batch processing functions
-function batchApprove() {
+function batchApproveAsPolicy() {
     const ids = Array.from(document.querySelectorAll('.batch-checkbox input:checked')).map(cb => cb.value);
     if (ids.length === 0) return;
     
-    if (confirm(`Process ${ids.length} cancellations as free?`)) {
+    if (confirm(`Process ${ids.length} cancellations according to policy?`)) {
         fetch('/manager/api/cancellation/batch', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                action: 'approve',
+                action: 'approve_policy',
                 cancellation_ids: ids
             })
         })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                showAlert(`${ids.length} cancellations processed successfully!`, 'success');
+                showAlert(`${ids.length} cancellations processed according to policy!`, 'success');
+                loadCancellations();
+                clearSelection();
+            } else {
+                showAlert('Error in batch processing: ' + (data.message || 'Unknown error'), 'error');
+            }
+        });
+    }
+}
+
+function batchForceFree() {
+    const ids = Array.from(document.querySelectorAll('.batch-checkbox input:checked')).map(cb => cb.value);
+    if (ids.length === 0) return;
+    
+    const reason = prompt('Reason for forcing these cancellations to be free (required):');
+    if (!reason || !reason.trim()) {
+        showAlert('Reason is required for batch free override', 'error');
+        return;
+    }
+    
+    if (confirm(`Force ${ids.length} cancellations to be FREE?\n\nReason: ${reason}`)) {
+        fetch('/manager/api/cancellation/batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'force_free',
+                cancellation_ids: ids,
+                reason: reason
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(`${ids.length} cancellations forced to free successfully!`, 'success');
                 loadCancellations();
                 clearSelection();
             } else {

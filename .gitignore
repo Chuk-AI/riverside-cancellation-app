@@ -1,6 +1,6 @@
 # Environment variables
 
-
+*.db
 
 # Python
 __pycache__/

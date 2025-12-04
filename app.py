@@ -1259,8 +1259,37 @@ def calculate_cancellation_status(student):
     }
 
 
+def parse_lesson_datetime(lesson_date_str, lesson_time_str):
+    """
+    Parse lesson date and time strings into a datetime object.
+    Handles both HH:MM and HH:MM:SS time formats.
+    """
+    try:
+        # Parse date
+        lesson_date = datetime.strptime(str(lesson_date_str), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        # Fallback to today's date if parsing fails
+        lesson_date = datetime.now().date()
+
+    try:
+        # Parse time - handle both HH:MM and HH:MM:SS formats
+        time_str = str(lesson_time_str)
+        if len(time_str.split(":")) == 2:  # HH:MM format
+            lesson_time = datetime.strptime(time_str, "%H:%M").time()
+        elif len(time_str.split(":")) == 3:  # HH:MM:SS format
+            lesson_time = datetime.strptime(time_str, "%H:%M:%S").time()
+        else:
+            # Default to noon if format is unexpected
+            lesson_time = time(12, 0)
+    except (ValueError, TypeError):
+        # Default to noon if parsing fails
+        lesson_time = time(12, 0)
+
+    return datetime.combine(lesson_date, lesson_time)
+
+
 def will_be_charged(student, lesson_datetime):
-    """Check if a cancellation will be charged based on submission time vs deadline - FIXED LOGIC"""
+    """Check if a cancellation will be charged based on submission time vs deadline"""
     tier = get_membership_tier(student["membership_level"])
     status = calculate_cancellation_status(student)
 
@@ -1273,13 +1302,10 @@ def will_be_charged(student, lesson_datetime):
         if submission_time > deadline:
             return True, "Notice submitted less than 2 hours before lesson time"
     else:
-        # FIXED: For all other tiers: 6pm the day before the lesson date
-        # The key fix is to get the day before the lesson, then set to 6pm
+        # For all other tiers: 6pm the day before
         lesson_date = lesson_datetime.date()
-        day_before_lesson = lesson_date - timedelta(days=1)
-        deadline = datetime.combine(
-            day_before_lesson, time(18, 0)
-        )  # 6pm on day before lesson
+        previous_day = lesson_date - timedelta(days=1)
+        deadline = datetime.combine(previous_day, time(18, 0))  # 6pm previous day
 
         if submission_time > deadline:
             return True, "Notice submitted after 6pm the previous day"
@@ -1669,9 +1695,18 @@ def client_dashboard():
             cancellation_dict["lesson_date"] = datetime.strptime(
                 cancellation["lesson_date"], "%Y-%m-%d"
             ).date()
-            cancellation_dict["lesson_time"] = datetime.strptime(
-                cancellation["lesson_time"], "%H:%M:%S"
-            ).time()
+
+            # Handle both HH:MM and HH:MM:SS time formats
+            time_str = str(cancellation["lesson_time"])
+            if len(time_str.split(":")) == 2:  # HH:MM format
+                cancellation_dict["lesson_time"] = datetime.strptime(
+                    time_str, "%H:%M"
+                ).time()
+            else:  # HH:MM:SS format
+                cancellation_dict["lesson_time"] = datetime.strptime(
+                    time_str, "%H:%M:%S"
+                ).time()
+
             cancellation_dict["created_at"] = datetime.strptime(
                 cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
             )
@@ -2562,17 +2597,23 @@ def process_cancellation_dates(cancellation):
 @login_required
 @admin_required
 def process_cancellation():
-    """Process individual cancellation - UPDATED with email notifications"""
+    """Process individual cancellation - UPDATED with new approve as policy functionality"""
     data = request.json
-    action = data.get("action")  # 'approve' or 'charge'
+    action = data.get("action")  # 'approve_policy', 'force_free', 'force_charge'
     cancellation_id = data.get("cancellation_id")
     reason = data.get("reason", "")
 
     if not action or not cancellation_id:
         return jsonify({"success": False, "message": "Missing required fields"})
 
-    if not reason.strip():
-        return jsonify({"success": False, "message": "Override reason is required"})
+    # Only force actions require a reason
+    if action in ["force_free", "force_charge"] and not reason.strip():
+        return jsonify(
+            {
+                "success": False,
+                "message": "Override reason is required for force actions",
+            }
+        )
 
     conn = get_db()
 
@@ -2604,63 +2645,121 @@ def process_cancellation():
             "parent_last": cancellation_data["parent_last"],
         }
 
+        # Get lesson datetime for policy check
+        lesson_datetime = parse_lesson_datetime(
+            cancellation_data["lesson_date"], cancellation_data["lesson_time"]
+        )
+
         # Update database based on action
-        if action == "approve":
-            # Mark as approved (free cancellation) with override flag
+        if action == "approve_policy":
+            # Check policy to determine if should be free or charged
+            should_be_charged, charge_reason = will_be_charged(
+                student_dict, lesson_datetime
+            )
+
+            if should_be_charged:
+                # Process as charged according to policy
+                conn.execute(
+                    """UPDATE cancellations 
+                       SET charged = 1, status = 'charged', manager_notes = ?, 
+                           approved_by = ?, updated_at = ? 
+                       WHERE id = ?""",
+                    (
+                        f"Processed according to policy: {charge_reason}",
+                        session.get("user_email", "Unknown Manager"),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        cancellation_id,
+                    ),
+                )
+                updated_cancellation = dict(cancellation_data)
+                updated_cancellation.update(
+                    {
+                        "charged": 1,
+                        "status": "charged",
+                        "manager_notes": f"Processed according to policy: {charge_reason}",
+                        "approved_by": session.get("user_email", "Unknown Manager"),
+                    }
+                )
+                log_message = f"Cancellation {cancellation_id} charged according to policy: {charge_reason}"
+            else:
+                # Process as free according to policy
+                conn.execute(
+                    """UPDATE cancellations 
+                       SET status = 'approved', charged = 0, manager_notes = ?, 
+                           approved_by = ?, updated_at = ? 
+                       WHERE id = ?""",
+                    (
+                        f"Processed according to policy: {charge_reason}",
+                        session.get("user_email", "Unknown Manager"),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        cancellation_id,
+                    ),
+                )
+                updated_cancellation = dict(cancellation_data)
+                updated_cancellation.update(
+                    {
+                        "charged": 0,
+                        "status": "approved",
+                        "manager_notes": f"Processed according to policy: {charge_reason}",
+                        "approved_by": session.get("user_email", "Unknown Manager"),
+                    }
+                )
+                log_message = f"Cancellation {cancellation_id} approved as free according to policy: {charge_reason}"
+
+        elif action == "force_free":
+            # Force as free (override policy)
             conn.execute(
                 """UPDATE cancellations 
                    SET status = 'approved', charged = 0, manager_notes = ?, 
-                       is_override = 1, updated_at = ? 
+                       is_override = 1, approved_by = ?, updated_at = ? 
                    WHERE id = ?""",
                 (
-                    f"Manager Override: {reason}",
+                    f"Manager Override (Force Free): {reason}",
+                    session.get("user_email", "Unknown Manager"),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     cancellation_id,
                 ),
             )
-
-            # Update cancellation dict with new values
             updated_cancellation = dict(cancellation_data)
             updated_cancellation.update(
                 {
                     "charged": 0,
                     "status": "approved",
                     "is_override": 1,
-                    "manager_notes": f"Manager Override: {reason}",
+                    "manager_notes": f"Manager Override (Force Free): {reason}",
+                    "approved_by": session.get("user_email", "Unknown Manager"),
                 }
             )
-
             log_message = (
-                f"Cancellation {cancellation_id} approved as free (Override: {reason})"
+                f"Cancellation {cancellation_id} forced to free (Override: {reason})"
             )
 
-        elif action == "charge":
-            # Mark as charged with override flag
+        elif action == "force_charge":
+            # Force as charged (override policy)
             conn.execute(
                 """UPDATE cancellations 
                    SET charged = 1, status = 'charged', manager_notes = ?, 
-                       is_override = 1, updated_at = ? 
+                       is_override = 1, approved_by = ?, updated_at = ? 
                    WHERE id = ?""",
                 (
-                    f"Manager Override: {reason}",
+                    f"Manager Override (Force Charge): {reason}",
+                    session.get("user_email", "Unknown Manager"),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     cancellation_id,
                 ),
             )
-
-            # Update cancellation dict with new values
             updated_cancellation = dict(cancellation_data)
             updated_cancellation.update(
                 {
                     "charged": 1,
                     "status": "charged",
                     "is_override": 1,
-                    "manager_notes": f"Manager Override: {reason}",
+                    "manager_notes": f"Manager Override (Force Charge): {reason}",
+                    "approved_by": session.get("user_email", "Unknown Manager"),
                 }
             )
-
             log_message = (
-                f"Cancellation {cancellation_id} marked as charged (Override: {reason})"
+                f"Cancellation {cancellation_id} forced to charge (Override: {reason})"
             )
 
         else:
@@ -2668,19 +2767,44 @@ def process_cancellation():
 
         conn.commit()
 
-        # SEND EMAIL NOTIFICATIONS
-        email_results = send_override_notification_emails(
-            student_dict,
-            updated_cancellation,
-            action,
-            reason,
-            session.get("user_email", "Unknown Manager"),
-        )
+        # SEND EMAIL NOTIFICATIONS - Only for force actions (overrides)
+        if action in ["force_free", "force_charge"]:
+            email_results = send_override_notification_emails(
+                student_dict,
+                updated_cancellation,
+                action,
+                reason,
+                session.get("user_email", "Unknown Manager"),
+            )
+        else:
+            # For approve_policy, no override emails needed (normal workflow)
+            email_results = {
+                "client_email": {
+                    "success": True,
+                    "message": "No override email needed",
+                },
+                "manager_notification": {
+                    "success": True,
+                    "message": "No override email needed",
+                },
+            }
 
         conn.close()
 
         # Log the action
         log_action("cancellation_processed", log_message)
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Cancellation processed successfully",
+                "email_summary": email_results,
+            }
+        )
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"success": False, "message": str(e)})
 
         # Log email results
         if email_results["client_email"].get("success"):
@@ -2729,14 +2853,22 @@ def process_cancellation():
 @login_required
 @admin_required
 def batch_process_cancellations():
-    """Batch process multiple cancellations - UPDATED with email notifications"""
+    """Batch process multiple cancellations - UPDATED with new approve as policy functionality"""
     data = request.json
-    action = data.get("action")  # 'approve', 'charge', or 'exclude'
+    action = data.get(
+        "action"
+    )  # 'approve_policy', 'force_free', 'charge', or 'exclude'
     cancellation_ids = data.get("cancellation_ids", [])
     reason = data.get("reason", "Batch processing")
 
     if not action or not cancellation_ids:
         return jsonify({"success": False, "message": "Missing required fields"})
+
+    # Force actions require a reason
+    if action in ["force_free"] and not reason.strip():
+        return jsonify(
+            {"success": False, "message": "Reason is required for force free action"}
+        )
 
     conn = get_db()
     email_summary = {
@@ -2776,39 +2908,107 @@ def batch_process_cancellations():
                 "parent_last": cancellation_data["parent_last"],
             }
 
-            # Update database
-            if action == "approve":
+            # Get lesson datetime for policy check
+            lesson_datetime = parse_lesson_datetime(
+                cancellation_data["lesson_date"], cancellation_data["lesson_time"]
+            )
+
+            # Update database based on action
+            if action == "approve_policy":
+                # Check policy to determine if should be free or charged
+                should_be_charged, charge_reason = will_be_charged(
+                    student_dict, lesson_datetime
+                )
+
+                if should_be_charged:
+                    # Process as charged according to policy
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET charged = 1, status = 'charged', manager_notes = ?, 
+                               approved_by = ?, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            f"Batch processed according to policy: {charge_reason}",
+                            session.get("user_email", "Unknown Manager"),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_id,
+                        ),
+                    )
+                    updated_cancellation = dict(cancellation_data)
+                    updated_cancellation.update(
+                        {
+                            "charged": 1,
+                            "status": "charged",
+                            "approved_by": session.get("user_email", "Unknown Manager"),
+                        }
+                    )
+                else:
+                    # Process as free according to policy
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET status = 'approved', charged = 0, manager_notes = ?, 
+                               approved_by = ?, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            f"Batch processed according to policy: {charge_reason}",
+                            session.get("user_email", "Unknown Manager"),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_id,
+                        ),
+                    )
+                    updated_cancellation = dict(cancellation_data)
+                    updated_cancellation.update(
+                        {
+                            "charged": 0,
+                            "status": "approved",
+                            "approved_by": session.get("user_email", "Unknown Manager"),
+                        }
+                    )
+
+            elif action == "force_free":
                 conn.execute(
                     """UPDATE cancellations 
                        SET status = 'approved', charged = 0, manager_notes = ?, 
-                           is_override = 1, updated_at = ? 
+                           is_override = 1, approved_by = ?, updated_at = ? 
                        WHERE id = ?""",
                     (
-                        f"Batch approval: {reason}",
+                        f"Batch force free: {reason}",
+                        session.get("user_email", "Unknown Manager"),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
                 updated_cancellation = dict(cancellation_data)
                 updated_cancellation.update(
-                    {"charged": 0, "status": "approved", "is_override": 1}
+                    {
+                        "charged": 0,
+                        "status": "approved",
+                        "is_override": 1,
+                        "approved_by": session.get("user_email", "Unknown Manager"),
+                    }
                 )
 
             elif action == "charge":
                 conn.execute(
                     """UPDATE cancellations 
                        SET charged = 1, status = 'charged', manager_notes = ?, 
-                           is_override = 1, updated_at = ? 
+                           is_override = 1, approved_by = ?, updated_at = ? 
                        WHERE id = ?""",
                     (
                         f"Batch charge: {reason}",
+                        session.get("user_email", "Unknown Manager"),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
                 updated_cancellation = dict(cancellation_data)
                 updated_cancellation.update(
-                    {"charged": 1, "status": "charged", "is_override": 1}
+                    {
+                        "charged": 1,
+                        "status": "charged",
+                        "is_override": 1,
+                        "approved_by": session.get("user_email", "Unknown Manager"),
+                    }
                 )
 
             elif action == "exclude":
@@ -2828,7 +3028,11 @@ def batch_process_cancellations():
                 updated_cancellation.update({"excluded": 1, "is_override": 1})
 
             # Send email notifications for each processed cancellation
-            if action in ["approve", "charge"]:  # Don't send emails for exclusions
+            # Only send override emails for force actions, not for approve_policy
+            if action in [
+                "force_free",
+                "charge",
+            ]:  # Don't send emails for approve_policy or exclusions
                 email_results = send_override_notification_emails(
                     student_dict,
                     updated_cancellation,
@@ -2861,6 +3065,102 @@ def batch_process_cancellations():
                 "success": True,
                 "processed": processed_count,
                 "email_summary": email_summary,
+            }
+        )
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/manager/api/cancellation/process-all-pending", methods=["POST"])
+@login_required
+@admin_required
+def process_all_pending_cancellations():
+    """Process all pending cancellations according to policy"""
+    try:
+        conn = get_db()
+
+        # Get all pending cancellations
+        pending_cancellations = conn.execute(
+            """
+            SELECT c.*, s.first_name, s.last_name, s.email, s.phone, s.membership_level,
+                   s.parent_first, s.parent_last
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.status = 'pending' OR c.status IS NULL
+            """
+        ).fetchall()
+
+        processed_count = 0
+
+        for cancellation_data in pending_cancellations:
+            # Prepare student data
+            student_dict = {
+                "id": cancellation_data["student_id"],
+                "first_name": cancellation_data["first_name"],
+                "last_name": cancellation_data["last_name"],
+                "email": cancellation_data["email"],
+                "phone": cancellation_data["phone"],
+                "membership_level": cancellation_data["membership_level"],
+                "parent_first": cancellation_data["parent_first"],
+                "parent_last": cancellation_data["parent_last"],
+            }
+
+            # Get lesson datetime for policy check
+            lesson_datetime = parse_lesson_datetime(
+                cancellation_data["lesson_date"], cancellation_data["lesson_time"]
+            )
+
+            # Check policy to determine if should be free or charged
+            should_be_charged, charge_reason = will_be_charged(
+                student_dict, lesson_datetime
+            )
+
+            if should_be_charged:
+                # Process as charged according to policy
+                conn.execute(
+                    """UPDATE cancellations 
+                       SET charged = 1, status = 'charged', manager_notes = ?, 
+                           approved_by = ?, updated_at = ? 
+                       WHERE id = ?""",
+                    (
+                        f"Auto-processed according to policy: {charge_reason}",
+                        session.get("user_email", "System"),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        cancellation_data["id"],
+                    ),
+                )
+            else:
+                # Process as free according to policy
+                conn.execute(
+                    """UPDATE cancellations 
+                       SET status = 'approved', charged = 0, manager_notes = ?, 
+                           approved_by = ?, updated_at = ? 
+                       WHERE id = ?""",
+                    (
+                        f"Auto-processed according to policy: {charge_reason}",
+                        session.get("user_email", "System"),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        cancellation_data["id"],
+                    ),
+                )
+
+            processed_count += 1
+
+        conn.commit()
+        conn.close()
+
+        log_action(
+            "process_all_pending",
+            f"Processed {processed_count} pending cancellations according to policy",
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "processed": processed_count,
+                "message": f"Processed {processed_count} pending cancellations according to policy",
             }
         )
 
