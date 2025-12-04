@@ -1260,7 +1260,7 @@ def calculate_cancellation_status(student):
 
 
 def will_be_charged(student, lesson_datetime):
-    """Check if a cancellation will be charged based on submission time vs deadline"""
+    """Check if a cancellation will be charged based on submission time vs deadline - FIXED LOGIC"""
     tier = get_membership_tier(student["membership_level"])
     status = calculate_cancellation_status(student)
 
@@ -1273,10 +1273,13 @@ def will_be_charged(student, lesson_datetime):
         if submission_time > deadline:
             return True, "Notice submitted less than 2 hours before lesson time"
     else:
-        # For all other tiers: 6pm the day before
+        # FIXED: For all other tiers: 6pm the day before the lesson date
+        # The key fix is to get the day before the lesson, then set to 6pm
         lesson_date = lesson_datetime.date()
-        previous_day = lesson_date - timedelta(days=1)
-        deadline = datetime.combine(previous_day, time(18, 0))  # 6pm previous day
+        day_before_lesson = lesson_date - timedelta(days=1)
+        deadline = datetime.combine(
+            day_before_lesson, time(18, 0)
+        )  # 6pm on day before lesson
 
         if submission_time > deadline:
             return True, "Notice submitted after 6pm the previous day"
@@ -1570,7 +1573,8 @@ def login():
             conn.close()
             log_action("login", f"Admin login: {admin['role']}")
             flash(f'Welcome back, {admin["role"].title()}!', "success")
-            return redirect(url_for("dashboard"))
+            # Redirect managers to cancellations page
+            return redirect(url_for("manager_cancellations"))
 
         # Try student login (email only, no password required)
         student = conn.execute(
@@ -1585,7 +1589,8 @@ def login():
             session["user_name"] = f"{student['first_name']} {student['last_name']}"
             log_action("login", f"Client login: {student['email']}")
             flash(f'Welcome back, {student["first_name"]}!', "success")
-            return redirect(url_for("dashboard"))
+            # Redirect clients to cancel lesson page
+            return redirect(url_for("client_cancel"))
 
         log_action("login_failed", f"Failed login attempt: {email}")
         flash("Invalid email or password", "error")

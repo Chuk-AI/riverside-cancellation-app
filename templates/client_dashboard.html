@@ -49,8 +49,6 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     border: 2px dashed #d1d5db;
     transition: all 0.3s ease;
     cursor: pointer;
-    max-width: 280px;
-    margin: 0 auto;
   }
   .quick-action-card:hover {
     border-color: #3b82f6;
@@ -74,6 +72,13 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
     color: #dc2626 !important;
     font-weight: bold;
   }
+
+  /* Center the quick action cards */
+  .quick-actions-centered {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+  }
 </style>
 {% endblock %} {% block content %}
 <!-- Welcome Header -->
@@ -88,7 +93,8 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
               Welcome back, {{ client.first_name }}!
             </h1>
             <p class="mb-0 opacity-75">
-              Submit a cancellation notice and view your account status
+              Input your cancelled lesson and review the outcome before
+              submitting
             </p>
           </div>
           <div class="col-md-4 text-md-end">
@@ -235,37 +241,40 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
   </div>
 </div>
 
-<!-- Quick Actions - Updated with centered layout -->
-<div class="row mb-4 justify-content-center">
-  <div class="col-md-4 col-lg-3 mb-3 d-flex justify-content-center">
-    <div
-      class="card quick-action-card cancel-action h-100"
-      onclick="window.location.href='{{ url_for('client_cancel') }}'"
-    >
-      <div class="card-body text-center">
-        <div class="text-primary mb-3">
-          <i class="fas fa-calendar-times fa-3x"></i>
+<!-- Quick Actions - Centered with Cancel A Lesson first, then View History below -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="d-flex flex-column align-items-center gap-3">
+      <!-- Cancel A Lesson Card (Top) -->
+      <div class="col-md-4 col-sm-6">
+        <div
+          class="card quick-action-card cancel-action h-100"
+          onclick="window.location.href='{{ url_for('client_cancel') }}'"
+        >
+          <div class="card-body text-center">
+            <div class="text-primary mb-3">
+              <i class="fas fa-calendar-times fa-3x"></i>
+            </div>
+            <h5>Cancel A Lesson</h5>
+            <p class="text-muted">Submit a new cancellation notice</p>
+          </div>
         </div>
-        <h5>Cancel A Lesson</h5>
-        <p class="text-muted">Submit a new cancellation notice</p>
       </div>
-    </div>
-  </div>
 
-  <div class="w-100"></div>
-  <!-- Force line break -->
-
-  <div class="col-md-4 col-lg-3 mb-3 d-flex justify-content-center">
-    <div
-      class="card quick-action-card h-100"
-      onclick="window.location.href='{{ url_for('client_history') }}'"
-    >
-      <div class="card-body text-center">
-        <div class="text-info mb-3">
-          <i class="fas fa-history fa-3x"></i>
+      <!-- View History Card (Below) -->
+      <div class="col-md-4 col-sm-6">
+        <div
+          class="card quick-action-card h-100"
+          onclick="window.location.href='{{ url_for('client_history') }}'"
+        >
+          <div class="card-body text-center">
+            <div class="text-info mb-3">
+              <i class="fas fa-history fa-3x"></i>
+            </div>
+            <h5>View History</h5>
+            <p class="text-muted">See your past cancellations</p>
+          </div>
         </div>
-        <h5>View History</h5>
-        <p class="text-muted">See your past cancellations</p>
       </div>
     </div>
   </div>
