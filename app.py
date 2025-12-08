@@ -29,6 +29,8 @@ import csv
 import io
 from functools import wraps
 from dotenv import load_dotenv
+import pytz
+import zoneinfo
 
 # For Excel Exports
 
@@ -59,6 +61,10 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = "riverside-equestrian-secret-key-change-in-production"
 app.config["DATABASE"] = "cancellation_system.db"
+app.config["TIMEZONE"] = "America/Toronto"
+
+# Set environment timezone for the application
+os.environ["TZ"] = "America/Toronto"
 
 
 def init_db():
@@ -400,7 +406,7 @@ def init_db():
                 "general",
                 "url",
             ),
-            ("timezone", "America/Vancouver", "System timezone", "general", "string"),
+            ("timezone", "America/Toronto", "System timezone", "general", "string"),
             (
                 "data_retention_months",
                 "12",
@@ -1213,6 +1219,107 @@ def log_action(action, details=None):
         pass  # Don't fail if logging fails
 
 
+def get_app_timezone():
+    """Get the application timezone - always use Toronto"""
+    return pytz.timezone("America/Toronto")
+
+
+def toronto_now():
+    """Get current datetime in Toronto timezone - simple and direct"""
+    toronto_tz = pytz.timezone("America/Toronto")
+    utc_now = datetime.utcnow()
+    utc_dt = pytz.UTC.localize(utc_now)
+    return utc_dt.astimezone(toronto_tz)
+
+
+def now_in_app_timezone():
+    """Get current datetime in Toronto timezone"""
+    return toronto_now()
+
+
+def localize_datetime(dt, from_tz=None):
+    """Convert a datetime to Toronto timezone"""
+    toronto_tz = pytz.timezone("America/Toronto")
+
+    if dt is None:
+        return None
+
+    # If it's a string, parse it first
+    if isinstance(dt, str):
+        try:
+            if "T" in dt:
+                dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return dt
+
+    # If datetime is naive, assume it's in UTC and convert to Toronto
+    if dt.tzinfo is None:
+        # Assume naive datetime is in UTC
+        dt = pytz.UTC.localize(dt)
+
+    # Convert to Toronto timezone
+    return dt.astimezone(toronto_tz)
+
+
+def format_datetime_for_display(dt):
+    """Format datetime for display in Toronto timezone"""
+    if dt is None:
+        return "Unknown"
+
+    toronto_tz = pytz.timezone("America/Toronto")
+
+    # If it's a string, parse it first
+    if isinstance(dt, str):
+        try:
+            if "T" in dt:
+                dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
+                # Assume parsed datetime from database is in Toronto timezone
+                dt = toronto_tz.localize(dt)
+        except (ValueError, TypeError):
+            return str(dt)
+
+    # If it's a naive datetime (from database), assume it's Toronto time
+    if isinstance(dt, datetime) and dt.tzinfo is None:
+        dt = toronto_tz.localize(dt)
+
+    # Convert to Toronto timezone if needed
+    if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
+        dt = dt.astimezone(toronto_tz)
+
+    if isinstance(dt, datetime):
+        return dt.strftime("%B %d, %Y at %I:%M %p %Z")
+
+    return str(dt)
+
+
+def format_date_for_display(dt):
+    """Format date for display"""
+    if dt is None:
+        return "Unknown"
+
+    # Convert to app timezone if it's a datetime
+    if isinstance(dt, datetime):
+        local_dt = localize_datetime(dt)
+        return local_dt.strftime("%B %d, %Y")
+    elif isinstance(dt, date):
+        return dt.strftime("%B %d, %Y")
+    elif isinstance(dt, str):
+        try:
+            if "T" in dt:
+                dt_obj = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            else:
+                dt_obj = datetime.strptime(dt, "%Y-%m-%d")
+            return format_date_for_display(dt_obj)
+        except (ValueError, TypeError):
+            return str(dt)
+
+    return str(dt)
+
+
 def get_student_by_email(email):
     """Get student information by email"""
     conn = get_db()
@@ -1235,10 +1342,11 @@ def get_membership_tier(level):
 
 def get_monthly_cancellation_count(student_id, month=None, year=None):
     """Get cancellation count for a student in a specific month"""
+    current_time = toronto_now()
     if not month:
-        month = datetime.now().month
+        month = current_time.month
     if not year:
-        year = datetime.now().year
+        year = current_time.year
 
     conn = get_db()
     count = conn.execute(
@@ -1302,7 +1410,9 @@ def will_be_charged(student, lesson_datetime):
     status = calculate_cancellation_status(student)
 
     # Calculate deadline based on lesson date/time and membership tier
-    submission_time = datetime.now()
+    submission_time = toronto_now().replace(
+        tzinfo=None
+    )  # Convert to naive for comparison
 
     # For Gold members: 2 hours before lesson
     if tier["level"] == "Gold":
@@ -1718,6 +1828,11 @@ def client_dashboard():
             cancellation_dict["created_at"] = datetime.strptime(
                 cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
             )
+            # Mark this as Toronto time for display functions
+            toronto_tz = pytz.timezone("America/Toronto")
+            cancellation_dict["created_at"] = toronto_tz.localize(
+                cancellation_dict["created_at"]
+            )
         except (ValueError, TypeError):
             # Skip problematic records
             continue
@@ -1773,7 +1888,11 @@ def client_cancel():
             flash("Invalid date or time format", "error")
             return redirect(url_for("client_cancel"))
 
-        if lesson_datetime <= datetime.now():
+        current_time = toronto_now().replace(
+            tzinfo=None
+        )  # Convert to naive for comparison
+
+        if lesson_datetime <= current_time:
             flash("Cannot cancel lessons that have already occurred", "error")
             return redirect(url_for("client_cancel"))
 
@@ -1783,7 +1902,7 @@ def client_cancel():
         # Determine deadline status for new database fields
         tier = get_membership_tier(client["membership_level"])
         deadline_hours = tier["deadline_hours"] if tier else 18
-        hours_until_lesson = (lesson_datetime - datetime.now()).total_seconds() / 3600
+        hours_until_lesson = (lesson_datetime - current_time).total_seconds() / 3600
         deadline_passed = hours_until_lesson < deadline_hours
 
         # Prepare sequential lessons data
@@ -1823,8 +1942,8 @@ def client_cancel():
                 deadline_passed,  # NEW
                 False,  # is_override starts as False
                 "pending",  # Default status
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Toronto time
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Toronto time
             ),
         )
         cancellation_id = cursor.lastrowid
@@ -2048,7 +2167,7 @@ def client_history():
 def manager_dashboard():
     """Manager dashboard"""
     # Add current_time for template
-    current_time = datetime.now()
+    current_time = toronto_now().replace(tzinfo=None)  # Convert to naive for template
 
     # Get properly calculated stats
     stats = get_dashboard_stats()
@@ -2256,7 +2375,7 @@ def manager_students():
                         request.form["email"],
                         request.form.get("phone", ""),
                         request.form["membership_level"],
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                     ),
                 )
                 conn.commit()
@@ -2675,7 +2794,7 @@ def process_cancellation():
                     (
                         f"Processed according to policy: {charge_reason}",
                         session.get("user_email", "Unknown Manager"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
@@ -2699,7 +2818,7 @@ def process_cancellation():
                     (
                         f"Processed according to policy: {charge_reason}",
                         session.get("user_email", "Unknown Manager"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
@@ -2724,7 +2843,7 @@ def process_cancellation():
                 (
                     f"Manager Override (Force Free): {reason}",
                     session.get("user_email", "Unknown Manager"),
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                     cancellation_id,
                 ),
             )
@@ -2752,7 +2871,7 @@ def process_cancellation():
                 (
                     f"Manager Override (Force Charge): {reason}",
                     session.get("user_email", "Unknown Manager"),
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                     cancellation_id,
                 ),
             )
@@ -2938,7 +3057,7 @@ def batch_process_cancellations():
                         (
                             f"Batch processed according to policy: {charge_reason}",
                             session.get("user_email", "Unknown Manager"),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                             cancellation_id,
                         ),
                     )
@@ -2960,7 +3079,7 @@ def batch_process_cancellations():
                         (
                             f"Batch processed according to policy: {charge_reason}",
                             session.get("user_email", "Unknown Manager"),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                             cancellation_id,
                         ),
                     )
@@ -2982,7 +3101,7 @@ def batch_process_cancellations():
                     (
                         f"Batch force free: {reason}",
                         session.get("user_email", "Unknown Manager"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
@@ -3005,7 +3124,7 @@ def batch_process_cancellations():
                     (
                         f"Batch charge: {reason}",
                         session.get("user_email", "Unknown Manager"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
@@ -3028,7 +3147,7 @@ def batch_process_cancellations():
                     (
                         reason,
                         session["user_email"],
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_id,
                     ),
                 )
@@ -3135,7 +3254,7 @@ def process_all_pending_cancellations():
                     (
                         f"Auto-processed according to policy: {charge_reason}",
                         session.get("user_email", "System"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_data["id"],
                     ),
                 )
@@ -3149,7 +3268,7 @@ def process_all_pending_cancellations():
                     (
                         f"Auto-processed according to policy: {charge_reason}",
                         session.get("user_email", "System"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation_data["id"],
                     ),
                 )
@@ -3197,8 +3316,8 @@ def revert_cancellation():
                    is_override = 0, manager_notes = ?, updated_at = ? 
                WHERE id = ?""",
             (
-                f"Reverted by {session['user_email']} on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                f"Reverted by {session['user_email']} on {toronto_now().strftime('%Y-%m-%d %H:%M')}",
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                 cancellation_id,
             ),
         )
@@ -3239,11 +3358,11 @@ def add_cancellation_note():
         existing_notes = (
             existing["manager_notes"] if existing and existing["manager_notes"] else ""
         )
-        new_notes = f"{existing_notes}\n[{datetime.now().strftime('%Y-%m-%d %H:%M')} - {session['user_email']}]: {note}".strip()
+        new_notes = f"{existing_notes}\n[{toronto_now().strftime('%Y-%m-%d %H:%M')} - {session['user_email']}]: {note}".strip()
 
         conn.execute(
             "UPDATE cancellations SET manager_notes = ?, updated_at = ? WHERE id = ?",
-            (new_notes, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cancellation_id),
+            (new_notes, toronto_now().strftime("%Y-%m-%d %H:%M:%S"), cancellation_id),
         )
         conn.commit()
         conn.close()
@@ -3330,7 +3449,7 @@ def process_all_pending():
                             if deadline_passed
                             else cancellation.get("deadline_passed", 0)
                         ),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation["id"],
                     ),
                 )
@@ -3347,7 +3466,7 @@ def process_all_pending():
                             if deadline_passed
                             else cancellation.get("deadline_passed", 0)
                         ),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         cancellation["id"],
                     ),
                 )
@@ -4510,7 +4629,7 @@ def exclude_cancellation(cancellation_id):
             (
                 reason,
                 session["user_email"],
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                 cancellation_id,
             ),
         )
@@ -4659,7 +4778,7 @@ def update_student_post(student_id):
                 data["email"],
                 data.get("phone", ""),
                 data["membership_level"],
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                 student_id,
             ),
         )
@@ -4734,7 +4853,7 @@ def change_student_membership(student_id):
         # Update membership
         conn.execute(
             "UPDATE students SET membership_level = ?, updated_at = ? WHERE id = ?",
-            (new_membership, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), student_id),
+            (new_membership, toronto_now().strftime("%Y-%m-%d %H:%M:%S"), student_id),
         )
         conn.commit()
         conn.close()
@@ -5469,7 +5588,7 @@ def save_template_enhanced():
                     template_data["delay_minutes"],
                     template_data["include_attachment"],
                     template_data["variables_used"],
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                     template_data["id"],
                 ),
             )
@@ -5495,8 +5614,8 @@ def save_template_enhanced():
                     template_data["delay_minutes"],
                     template_data["include_attachment"],
                     template_data["variables_used"],
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
             action = "created"
@@ -5564,7 +5683,7 @@ def toggle_template_enhanced(template_id):
         # Update status
         conn.execute(
             "UPDATE email_templates SET active = ?, updated_at = ? WHERE id = ?",
-            (new_status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), template_id),
+            (new_status, toronto_now().strftime("%Y-%m-%d %H:%M:%S"), template_id),
         )
         conn.commit()
         conn.close()
@@ -5622,8 +5741,8 @@ def duplicate_template_enhanced(template_id):
                 template_dict.get("delay_minutes", 0),
                 template_dict.get("include_attachment", False),
                 template_dict.get("variables_used", ""),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         conn.commit()
@@ -5912,7 +6031,7 @@ def import_templates_enhanced():
                             template_data.get("delay_minutes", 0),
                             template_data.get("include_attachment", False),
                             template_data.get("variables_used", ""),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                             template_data["id"],
                         ),
                     )
@@ -5938,8 +6057,8 @@ def import_templates_enhanced():
                             template_data.get("delay_minutes", 0),
                             template_data.get("include_attachment", False),
                             template_data.get("variables_used", ""),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                         ),
                     )
                     imported_count += 1
@@ -6195,6 +6314,32 @@ def test_email_route():
         return f"Email config failed: {result['message']}"
 
 
+@app.route("/test-timezone")
+def test_timezone_route():
+    """Debug route to test timezone functionality"""
+    import time
+
+    toronto_time = toronto_now()
+    system_time = datetime.now()
+    utc_time = datetime.utcnow()
+
+    html_output = f"""
+    <h2>Timezone Debug Information</h2>
+    <p><strong>Current Toronto Time:</strong> {toronto_time}</p>
+    <p><strong>Formatted Toronto Time:</strong> {format_datetime_for_display(toronto_time)}</p>
+    <p><strong>System Time:</strong> {system_time}</p>
+    <p><strong>UTC Time:</strong> {utc_time}</p>
+    <p><strong>Toronto Timezone:</strong> {toronto_time.tzname()}</p>
+    <p><strong>UTC Offset:</strong> {toronto_time.strftime('%z')}</p>
+    <p><strong>Is DST Active:</strong> {'Yes (EDT)' if toronto_time.dst().total_seconds() > 0 else 'No (EST)'}</p>
+    <p><strong>System TZ:</strong> {time.tzname}</p>
+    <hr>
+    <p><em>The Toronto time should be 5 hours behind UTC in winter (EST) or 4 hours behind in summer (EDT).</em></p>
+    """
+
+    return html_output
+
+
 # ===================================
 # API ENDPOINTS FOR AJAX CALLS
 # ===================================
@@ -6248,7 +6393,7 @@ def preview_cancellation():
 @app.context_processor
 def inject_now():
     """Inject current datetime into all templates"""
-    return {"now": datetime.now()}
+    return {"now": toronto_now()}
 
 
 # Replace your current inject_moment context processor with this:
@@ -7001,7 +7146,7 @@ def export_charged_cancellations():
         ws.cell(
             row=1,
             column=1,
-            value=f"Charged Cancellations Report - Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            value=f"Charged Cancellations Report - Generated {toronto_now().strftime('%Y-%m-%d %H:%M')}",
         )
         ws.cell(row=1, column=1).font = Font(bold=True, size=14)
         ws.cell(
@@ -7098,7 +7243,7 @@ def export_full_analytics():
         # Executive Summary content
         summary_data = [
             ["Riverside Equestrian - Analytics Report", "", ""],
-            [f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", "", ""],
+            [f"Generated: {toronto_now().strftime('%Y-%m-%d %H:%M')}", "", ""],
             ["", "", ""],
             ["MONTHLY COMPARISON", "", ""],
             ["Metric", "Current Month", "Previous Month"],
@@ -7730,7 +7875,7 @@ def log_email_attempt(to_email, subject, success, error=None, template_id=None):
                 "email_system",
                 "email_sent" if success else "email_failed",
                 details,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         conn.commit()
@@ -8708,48 +8853,13 @@ def test_email_configuration():
 @app.template_filter("format_date")
 def format_date_filter(date_value):
     """Format date as 'August 28, 2025'"""
-    if date_value is None:
-        return "Unknown"
-
-    if isinstance(date_value, str):
-        try:
-            if "T" in date_value:  # ISO format with time
-                date_value = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
-            elif len(date_value) == 10:  # YYYY-MM-DD format
-                date_value = datetime.strptime(date_value, "%Y-%m-%d")
-            else:  # Try parsing as datetime string
-                date_value = datetime.strptime(date_value, "%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            return str(date_value)
-    elif isinstance(date_value, date_type) and not isinstance(date_value, datetime):
-        # Convert date to datetime for consistent formatting
-        date_value = datetime.combine(date_value, time_type())
-
-    if isinstance(date_value, datetime):
-        return date_value.strftime("%B %d, %Y")
-
-    return str(date_value)
+    return format_date_for_display(date_value)
 
 
 @app.template_filter("format_datetime")
 def format_datetime_filter(dt_value):
-    """Format datetime as 'August 28, 2025 at 3:30 PM'"""
-    if dt_value is None:
-        return "Unknown"
-
-    if isinstance(dt_value, str):
-        try:
-            if "T" in dt_value:
-                dt_value = datetime.fromisoformat(dt_value.replace("Z", "+00:00"))
-            else:
-                dt_value = datetime.strptime(dt_value, "%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            return str(dt_value)
-
-    if isinstance(dt_value, datetime):
-        return dt_value.strftime("%B %d, %Y at %I:%M %p")
-
-    return str(dt_value)
+    """Format datetime as 'August 28, 2025 at 3:30 PM EST'"""
+    return format_datetime_for_display(dt_value)
 
 
 @app.template_filter("format_time")
