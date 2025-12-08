@@ -402,10 +402,10 @@ endblock %} {% block extra_css %}
         </h5>
         <button
           type="button"
-          class="btn btn-sm btn-outline-primary"
+          class="btn btn-sm btn-outline-success"
           onclick="exportTableData()"
         >
-          <i class="fas fa-download me-1"></i>Export
+          <i class="fas fa-file-excel me-1"></i>Export to Excel
         </button>
       </div>
       <div class="card-body p-0">
@@ -1229,32 +1229,70 @@ endblock %} {% block extra_css %}
       XLSX.writeFile(wb, fileName);
   }
 
-  // Export table
+  // Export table to Excel
   function exportTableData() {
+      const data = [];
       const table = document.getElementById('analytics-table');
+
       if (!table) {
           alert('Table not found');
           return;
       }
 
-      let csv = '';
-      for (let row of table.rows) {
-          const cols = [];
-          for (let col of row.cells) {
-              cols.push('"' + col.innerText.replace(/"/g, '""') + '"');
+      // Get table headers
+      const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      data.push(headers);
+
+      // Get table data
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+          const cells = Array.from(row.querySelectorAll('td')).map(td => {
+              // Clean the cell text - remove extra whitespace and extract plain text
+              let cellText = td.textContent.trim();
+
+              // Handle special cases like badge text extraction
+              if (td.querySelector('.badge')) {
+                  cellText = td.querySelector('.badge').textContent.trim();
+              } else if (td.querySelector('.fas.fa-sticky-note')) {
+                  // For note column, show "Yes" if there's a note icon
+                  cellText = td.querySelector('.fas.fa-sticky-note').title || 'Yes';
+              } else if (td.querySelector('.text-muted') && td.textContent.trim() === '-') {
+                  cellText = 'No';
+              }
+
+              return cellText;
+          });
+
+          // Only add rows that contain actual data (not "No cancellations found" message)
+          if (cells.length > 0 && !cells[0].includes('No cancellations found')) {
+              data.push(cells);
           }
-          csv += cols.join(',') + '\n';
+      });
+
+      if (data.length <= 1) {
+          alert('No data available to export');
+          return;
       }
 
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'analytics.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      // Create workbook and export
+      const ws = XLSX.utils.aoa_to_sheet(data);
+
+      // Auto-size columns
+      const colWidths = [];
+      data.forEach(row => {
+          row.forEach((cell, index) => {
+              const cellLength = cell ? cell.toString().length : 0;
+              colWidths[index] = Math.max(colWidths[index] || 0, cellLength + 2);
+          });
+      });
+
+      ws['!cols'] = colWidths.map(width => ({ width: Math.min(width, 50) }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Cancellation Details');
+
+      const fileName = `cancellation_details_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
   }
 
   // Initialize on DOM ready
