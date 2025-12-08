@@ -30,6 +30,14 @@ import io
 from functools import wraps
 from dotenv import load_dotenv
 
+# For Excel Exports
+
+import tempfile
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, NamedStyle, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+import pandas as pd
+
 # Email System Implementation for Riverside Equestrian
 import smtplib
 import ssl
@@ -3376,13 +3384,17 @@ def get_student_details(student_id):
         if not student:
             return jsonify({"success": False, "message": "Student not found"})
 
-        # Get cancellation statistics
+        # Get cancellation statistics with more detail
         stats = conn.execute(
             """
             SELECT 
                 COUNT(*) as total_cancellations,
                 SUM(CASE WHEN strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
-                SUM(CASE WHEN charged = 0 AND excluded = 0 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used
+                SUM(CASE WHEN charged = 0 AND excluded = 0 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
+                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as total_charged,
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as total_excluded,
+                SUM(CASE WHEN charged = 1 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_this_month,
+                SUM(CASE WHEN excluded = 1 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_this_month
             FROM cancellations 
             WHERE student_id = ?
         """,
@@ -3417,6 +3429,10 @@ def get_student_details(student_id):
                     "free_used": stats["free_used"] or 0,
                     "monthly_limit": monthly_limit,
                     "remaining": max(0, monthly_limit - (stats["free_used"] or 0)),
+                    "total_charged": stats["total_charged"] or 0,
+                    "total_excluded": stats["total_excluded"] or 0,
+                    "charged_this_month": stats["charged_this_month"] or 0,
+                    "excluded_this_month": stats["excluded_this_month"] or 0,
                 },
                 "recent_cancellations": [dict(c) for c in recent_cancellations],
             }
@@ -4617,29 +4633,6 @@ def export_students():
 
     log_action("export_students", f"Exported {len(students)} students")
     return response
-
-
-@app.route("/manager/api/student/<int:student_id>/details", methods=["GET"])
-@login_required
-@admin_required
-def get_student_details_for_edit(student_id):
-    """Get student details for editing (different from the existing one)"""
-    try:
-        conn = get_db()
-
-        student = conn.execute(
-            "SELECT * FROM students WHERE id = ?", (student_id,)
-        ).fetchone()
-
-        if not student:
-            return jsonify({"success": False, "message": "Student not found"})
-
-        conn.close()
-
-        return jsonify({"success": True, "student": dict(student)})
-
-    except Exception as e:
-        return jsonify({"success": False, "message": str(e)})
 
 
 @app.route("/manager/api/student/<int:student_id>", methods=["POST"])
@@ -6359,6 +6352,976 @@ document.addEventListener('DOMContentLoaded', function() {
 def serve_favicon():
     """Serve favicon or return 204 No Content"""
     return "", 204
+
+
+@app.route("/manager/export/cancellations")
+@login_required
+@admin_required
+def export_cancellations_excel():
+    """Export cancellations with current filters to Excel"""
+    try:
+        conn = get_db()
+
+        # Get filter parameters from the request - same as manager_cancellations route
+        filter_status = request.args.get("status", "")
+        search = request.args.get("search", "")
+        date_range = request.args.get("date_range", "month")
+        membership = request.args.get("membership", "")
+        sort_by = request.args.get("sort", "submit_date")
+        student_id = request.args.get("student")
+        date_from = request.args.get("date_from")
+        date_to = request.args.get("date_to")
+
+        # Build the same query as manager_cancellations route
+        where_clauses = []
+        params = []
+
+        # Add student filter
+        if student_id:
+            where_clauses.append("c.student_id = ?")
+            params.append(student_id)
+
+        # Status filters
+        if filter_status == "free":
+            where_clauses.append("c.charged = 0 AND c.status = 'approved'")
+        elif filter_status == "charged":
+            where_clauses.append("c.charged = 1")
+        elif filter_status == "excluded":
+            where_clauses.append("c.excluded = 1")
+        elif filter_status == "note":
+            where_clauses.append(
+                "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''"
+            )
+        elif filter_status == "deadline_passed":
+            where_clauses.append("c.deadline_passed = 1")
+        elif filter_status == "override":
+            where_clauses.append("c.is_override = 1")
+
+        # Search filter
+        if search:
+            where_clauses.append(
+                "(s.first_name LIKE ? OR s.last_name LIKE ? OR s.email LIKE ?)"
+            )
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param, search_param])
+
+        # Date range filter
+        if date_range == "today":
+            where_clauses.append("DATE(c.created_at) = DATE('now')")
+        elif date_range == "yesterday":
+            where_clauses.append("DATE(c.created_at) = DATE('now', '-1 day')")
+        elif date_range == "7days":
+            where_clauses.append("c.created_at >= DATE('now', '-7 days')")
+        elif date_range == "month":
+            where_clauses.append("c.created_at >= DATE('now', '-30 days')")
+        elif date_range == "all":
+            pass  # No date filter
+        elif date_range == "custom" and date_from and date_to:
+            where_clauses.append("DATE(c.created_at) BETWEEN ? AND ?")
+            params.extend([date_from, date_to])
+
+        # Membership filter
+        if membership:
+            where_clauses.append("s.membership_level = ?")
+            params.append(membership)
+
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+        # Sort order
+        if sort_by == "submit_date":
+            order_by = "c.created_at DESC"
+        elif sort_by == "lesson_date":
+            order_by = "c.lesson_date DESC"
+        elif sort_by == "student":
+            order_by = "s.last_name, s.first_name"
+        elif sort_by == "status":
+            order_by = "c.status, c.charged, c.excluded"
+        else:
+            order_by = "c.created_at DESC"
+
+        # Get cancellations data with the same query as the page
+        cancellations = conn.execute(
+            f"""
+            SELECT 
+                c.id,
+                s.first_name,
+                s.last_name,
+                s.parent_first,
+                s.parent_last,
+                s.email,
+                s.membership_level,
+                c.lesson_date,
+                c.lesson_time,
+                c.created_at,
+                c.charged,
+                c.excluded,
+                c.status,
+                c.deadline_passed,
+                c.is_override,
+                c.manager_notes,
+                c.cancellation_note
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE {where_sql}
+            ORDER BY {order_by}
+        """,
+            params,
+        ).fetchall()
+
+        conn.close()
+
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Cancellations Export"
+
+        # Headers
+        headers = [
+            "ID",
+            "Student First Name",
+            "Student Last Name",
+            "Parent First Name",
+            "Parent Last Name",
+            "Email",
+            "Membership Level",
+            "Lesson Date",
+            "Lesson Time",
+            "Submitted Date",
+            "Status",
+            "Cancellation Note",
+            "Manager Notes",
+        ]
+
+        # Add headers
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(
+                start_color="E6F3FF", end_color="E6F3FF", fill_type="solid"
+            )
+
+        # Add data
+        for row, cancellation in enumerate(cancellations, 2):
+            ws.cell(row=row, column=1, value=cancellation["id"])
+            ws.cell(row=row, column=2, value=cancellation["first_name"])
+            ws.cell(row=row, column=3, value=cancellation["last_name"])
+            ws.cell(row=row, column=4, value=cancellation["parent_first"] or "")
+            ws.cell(row=row, column=5, value=cancellation["parent_last"] or "")
+            ws.cell(row=row, column=6, value=cancellation["email"])
+            ws.cell(row=row, column=7, value=cancellation["membership_level"])
+            ws.cell(row=row, column=8, value=cancellation["lesson_date"])
+            ws.cell(row=row, column=9, value=cancellation["lesson_time"])
+
+            # Format submitted date
+            submitted_date = datetime.fromisoformat(
+                cancellation["created_at"]
+            ).strftime("%Y-%m-%d %H:%M")
+            ws.cell(row=row, column=10, value=submitted_date)
+
+            # Determine status
+            if cancellation["excluded"]:
+                status = "Excluded"
+            elif cancellation["charged"]:
+                status = "Charged"
+            elif cancellation["status"] == "approved":
+                status = "Free"
+            elif cancellation["deadline_passed"]:
+                status = "Deadline Passed"
+            elif cancellation["is_override"]:
+                status = "Override"
+            else:
+                status = "Pending"
+
+            ws.cell(row=row, column=11, value=status)
+            ws.cell(row=row, column=12, value=cancellation["cancellation_note"] or "")
+            ws.cell(row=row, column=13, value=cancellation["manager_notes"] or "")
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column)
+            ws.column_dimensions[column[0].column_letter].width = min(
+                max_length + 2, 50
+            )
+
+        # Save to temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(temp_file.name)
+        temp_file.close()
+
+        # Generate filename with current filters
+        filter_parts = []
+        if filter_status:
+            filter_parts.append(filter_status)
+        if date_range and date_range != "all":
+            filter_parts.append(date_range)
+        if search:
+            filter_parts.append("search")
+
+        filename_suffix = "_".join(filter_parts) if filter_parts else "all"
+        filename = (
+            f'cancellations_{filename_suffix}_{datetime.now().strftime("%Y%m%d")}.xlsx'
+        )
+
+        log_action(
+            "export_cancellations", f"Exported filtered cancellations: {filename}"
+        )
+
+        return send_file(
+            temp_file.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    except Exception as e:
+        log_action("export_error", f"Error exporting filtered cancellations: {str(e)}")
+        return jsonify({"success": False, "message": f"Export failed: {str(e)}"}), 500
+
+
+@app.route("/manager/export/cancellations/monthly")
+@login_required
+@admin_required
+def export_cancellations_monthly_excel():
+    """Export monthly cancellation report to Excel"""
+    try:
+        conn = get_db()
+
+        # Get current month and previous months data
+        current_date = datetime.now()
+        start_date = current_date.replace(day=1) - relativedelta(months=5)
+
+        # Get cancellations data
+        cancellations = conn.execute(
+            """
+            SELECT 
+                c.id,
+                s.first_name,
+                s.last_name,
+                s.parent_first,
+                s.parent_last,
+                s.email,
+                s.membership_level,
+                c.lesson_date,
+                c.lesson_time,
+                c.created_at,
+                c.charged,
+                c.excluded,
+                c.manager_notes,
+                c.cancellation_note
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.created_at >= ?
+            ORDER BY c.created_at DESC
+        """,
+            (start_date.strftime("%Y-%m-%d"),),
+        ).fetchall()
+
+        conn.close()
+
+        # Create Excel workbook
+        wb = Workbook()
+
+        # Create summary sheet
+        ws_summary = wb.active
+        ws_summary.title = "Monthly Summary"
+
+        # Summary headers
+        headers = [
+            "Month",
+            "Total Cancellations",
+            "Free",
+            "Charged",
+            "Excluded",
+            "Bronze Members",
+            "Silver Members",
+            "Gold Members",
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws_summary.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(
+                start_color="366092", end_color="366092", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+
+        # Calculate monthly summaries
+        monthly_data = {}
+        for cancellation in cancellations:
+            month_key = datetime.fromisoformat(cancellation["created_at"]).strftime(
+                "%Y-%m"
+            )
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {
+                    "total": 0,
+                    "free": 0,
+                    "charged": 0,
+                    "excluded": 0,
+                    "bronze": 0,
+                    "silver": 0,
+                    "gold": 0,
+                }
+
+            monthly_data[month_key]["total"] += 1
+            if cancellation["excluded"]:
+                monthly_data[month_key]["excluded"] += 1
+            elif cancellation["charged"]:
+                monthly_data[month_key]["charged"] += 1
+            else:
+                monthly_data[month_key]["free"] += 1
+
+            # Count by membership
+            membership = cancellation["membership_level"].lower()
+            if membership == "bronze":
+                monthly_data[month_key]["bronze"] += 1
+            elif membership == "silver":
+                monthly_data[month_key]["silver"] += 1
+            elif membership == "gold":
+                monthly_data[month_key]["gold"] += 1
+
+        # Add summary data
+        row = 2
+        for month in sorted(monthly_data.keys(), reverse=True):
+            data = monthly_data[month]
+            month_name = datetime.strptime(month, "%Y-%m").strftime("%B %Y")
+
+            ws_summary.cell(row=row, column=1, value=month_name)
+            ws_summary.cell(row=row, column=2, value=data["total"])
+            ws_summary.cell(row=row, column=3, value=data["free"])
+            ws_summary.cell(row=row, column=4, value=data["charged"])
+            ws_summary.cell(row=row, column=5, value=data["excluded"])
+            ws_summary.cell(row=row, column=6, value=data["bronze"])
+            ws_summary.cell(row=row, column=7, value=data["silver"])
+            ws_summary.cell(row=row, column=8, value=data["gold"])
+            row += 1
+
+        # Auto-adjust column widths
+        for column in ws_summary.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column)
+            ws_summary.column_dimensions[column[0].column_letter].width = max_length + 2
+
+        # Create detailed sheet
+        ws_detail = wb.create_sheet("Detailed Cancellations")
+
+        # Detailed headers
+        detail_headers = [
+            "ID",
+            "Student Name",
+            "Parent Name",
+            "Email",
+            "Membership",
+            "Lesson Date",
+            "Lesson Time",
+            "Submitted Date",
+            "Status",
+            "Cancellation Note",
+            "Manager Notes",
+        ]
+
+        for col, header in enumerate(detail_headers, 1):
+            cell = ws_detail.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(
+                start_color="366092", end_color="366092", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+
+        # Add detailed data
+        for row, cancellation in enumerate(cancellations, 2):
+            ws_detail.cell(row=row, column=1, value=cancellation["id"])
+
+            student_name = f"{cancellation['first_name']} {cancellation['last_name']}"
+            ws_detail.cell(row=row, column=2, value=student_name)
+
+            parent_name = ""
+            if cancellation["parent_first"] or cancellation["parent_last"]:
+                parent_name = f"{cancellation['parent_first'] or ''} {cancellation['parent_last'] or ''}".strip()
+            ws_detail.cell(row=row, column=3, value=parent_name)
+
+            ws_detail.cell(row=row, column=4, value=cancellation["email"])
+            ws_detail.cell(row=row, column=5, value=cancellation["membership_level"])
+            ws_detail.cell(row=row, column=6, value=cancellation["lesson_date"])
+            ws_detail.cell(row=row, column=7, value=cancellation["lesson_time"])
+
+            submitted_date = datetime.fromisoformat(
+                cancellation["created_at"]
+            ).strftime("%Y-%m-%d %H:%M")
+            ws_detail.cell(row=row, column=8, value=submitted_date)
+
+            if cancellation["excluded"]:
+                status = "Excluded"
+            elif cancellation["charged"]:
+                status = "Charged"
+            else:
+                status = "Free"
+            ws_detail.cell(row=row, column=9, value=status)
+
+            ws_detail.cell(
+                row=row, column=10, value=cancellation["cancellation_note"] or ""
+            )
+            ws_detail.cell(
+                row=row, column=11, value=cancellation["manager_notes"] or ""
+            )
+
+        # Auto-adjust column widths for detailed sheet
+        for column in ws_detail.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column)
+            ws_detail.column_dimensions[column[0].column_letter].width = min(
+                max_length + 2, 50
+            )
+
+        # Save to temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(temp_file.name)
+        temp_file.close()
+
+        log_action("export_cancellations", f"Exported cancellations report")
+
+        return send_file(
+            temp_file.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f'cancellations_report_{datetime.now().strftime("%Y%m%d")}.xlsx',
+        )
+
+    except Exception as e:
+        log_action("export_error", f"Error exporting cancellations: {str(e)}")
+        return jsonify({"success": False, "message": f"Export failed: {str(e)}"}), 500
+
+
+@app.route("/manager/export/students")
+@login_required
+@admin_required
+def export_students_excel():
+    """Export students to Excel with enhanced formatting"""
+    try:
+        conn = get_db()
+
+        # Get students data with cancellation statistics
+        students = conn.execute(
+            """
+            SELECT 
+                s.*,
+                COUNT(c.id) as total_cancellations,
+                SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 THEN 1 ELSE 0 END) as free_cancellations,
+                SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_cancellations,
+                SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations,
+                MAX(c.created_at) as last_cancellation_date
+            FROM students s
+            LEFT JOIN cancellations c ON s.id = c.student_id
+            GROUP BY s.id
+            ORDER BY s.last_name, s.first_name
+        """
+        ).fetchall()
+
+        conn.close()
+
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Students Directory"
+
+        # Headers
+        headers = [
+            "ID",
+            "First Name",
+            "Last Name",
+            "Parent First",
+            "Parent Last",
+            "Email",
+            "Phone",
+            "Membership Level",
+            "Created Date",
+            "Total Cancellations",
+            "Free",
+            "Charged",
+            "Excluded",
+            "Last Cancellation",
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(
+                start_color="366092", end_color="366092", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+
+        # Add student data
+        for row, student in enumerate(students, 2):
+            ws.cell(row=row, column=1, value=student["id"])
+            ws.cell(row=row, column=2, value=student["first_name"])
+            ws.cell(row=row, column=3, value=student["last_name"])
+            ws.cell(row=row, column=4, value=student["parent_first"] or "")
+            ws.cell(row=row, column=5, value=student["parent_last"] or "")
+            ws.cell(row=row, column=6, value=student["email"])
+            ws.cell(row=row, column=7, value=student["phone"] or "")
+            ws.cell(row=row, column=8, value=student["membership_level"])
+
+            created_date = datetime.fromisoformat(student["created_at"]).strftime(
+                "%Y-%m-%d"
+            )
+            ws.cell(row=row, column=9, value=created_date)
+
+            ws.cell(row=row, column=10, value=student["total_cancellations"])
+            ws.cell(row=row, column=11, value=student["free_cancellations"])
+            ws.cell(row=row, column=12, value=student["charged_cancellations"])
+            ws.cell(row=row, column=13, value=student["excluded_cancellations"])
+
+            last_cancellation = ""
+            if student["last_cancellation_date"]:
+                last_cancellation = datetime.fromisoformat(
+                    student["last_cancellation_date"]
+                ).strftime("%Y-%m-%d")
+            ws.cell(row=row, column=14, value=last_cancellation)
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column)
+            ws.column_dimensions[column[0].column_letter].width = min(
+                max_length + 2, 50
+            )
+
+        # Save to temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(temp_file.name)
+        temp_file.close()
+
+        log_action("export_students", f"Exported {len(students)} students")
+
+        return send_file(
+            temp_file.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f'students_directory_{datetime.now().strftime("%Y%m%d")}.xlsx',
+        )
+
+    except Exception as e:
+        log_action("export_error", f"Error exporting students: {str(e)}")
+        return jsonify({"success": False, "message": f"Export failed: {str(e)}"}), 500
+
+
+@app.route("/manager/export/charged-cancellations")
+@login_required
+@admin_required
+def export_charged_cancellations():
+    """Export charged cancellations report to Excel"""
+    try:
+        conn = get_db()
+
+        # Get charged cancellations data
+        charged_cancellations = conn.execute(
+            """
+            SELECT 
+                c.id,
+                s.first_name,
+                s.last_name,
+                s.parent_first,
+                s.parent_last,
+                s.email,
+                s.phone,
+                s.membership_level,
+                c.lesson_date,
+                c.lesson_time,
+                c.created_at,
+                c.cancellation_note,
+                c.manager_notes
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.charged = 1
+            ORDER BY c.created_at DESC
+        """
+        ).fetchall()
+
+        conn.close()
+
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Charged Cancellations"
+
+        # Headers
+        headers = [
+            "Cancellation ID",
+            "Student Name",
+            "Parent Name",
+            "Email",
+            "Phone",
+            "Membership Level",
+            "Lesson Date",
+            "Lesson Time",
+            "Submitted Date",
+            "Cancellation Note",
+            "Manager Notes",
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(
+                start_color="F59E0B", end_color="F59E0B", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+
+        # Add data
+        for row, cancellation in enumerate(charged_cancellations, 2):
+            ws.cell(row=row, column=1, value=cancellation["id"])
+
+            student_name = f"{cancellation['first_name']} {cancellation['last_name']}"
+            ws.cell(row=row, column=2, value=student_name)
+
+            parent_name = ""
+            if cancellation["parent_first"] or cancellation["parent_last"]:
+                parent_name = f"{cancellation['parent_first'] or ''} {cancellation['parent_last'] or ''}".strip()
+            ws.cell(row=row, column=3, value=parent_name)
+
+            ws.cell(row=row, column=4, value=cancellation["email"])
+            ws.cell(row=row, column=5, value=cancellation["phone"] or "")
+            ws.cell(row=row, column=6, value=cancellation["membership_level"])
+            ws.cell(row=row, column=7, value=cancellation["lesson_date"])
+            ws.cell(row=row, column=8, value=cancellation["lesson_time"])
+
+            submitted_date = datetime.fromisoformat(
+                cancellation["created_at"]
+            ).strftime("%Y-%m-%d %H:%M")
+            ws.cell(row=row, column=9, value=submitted_date)
+
+            ws.cell(row=row, column=10, value=cancellation["cancellation_note"] or "")
+            ws.cell(row=row, column=11, value=cancellation["manager_notes"] or "")
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = max(len(str(cell.value or "")) for cell in column)
+            ws.column_dimensions[column[0].column_letter].width = min(
+                max_length + 2, 50
+            )
+
+        # Add summary at top
+        ws.insert_rows(1, 2)
+        ws.cell(
+            row=1,
+            column=1,
+            value=f"Charged Cancellations Report - Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        )
+        ws.cell(row=1, column=1).font = Font(bold=True, size=14)
+        ws.cell(
+            row=2,
+            column=1,
+            value=f"Total Charged Cancellations: {len(charged_cancellations)}",
+        )
+        ws.cell(row=2, column=1).font = Font(bold=True)
+
+        # Save to temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(temp_file.name)
+        temp_file.close()
+
+        log_action(
+            "export_charged",
+            f"Exported {len(charged_cancellations)} charged cancellations",
+        )
+
+        return send_file(
+            temp_file.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f'charged_cancellations_{datetime.now().strftime("%Y%m%d")}.xlsx',
+        )
+
+    except Exception as e:
+        log_action("export_error", f"Error exporting charged cancellations: {str(e)}")
+        return jsonify({"success": False, "message": f"Export failed: {str(e)}"}), 500
+
+
+@app.route("/manager/export/analytics")
+@login_required
+@admin_required
+def export_full_analytics():
+    """Export comprehensive analytics report to Excel with multiple sheets"""
+    try:
+        conn = get_db()
+
+        # Create Excel workbook with multiple sheets
+        wb = Workbook()
+
+        # 1. Executive Summary Sheet
+        ws_summary = wb.active
+        ws_summary.title = "Executive Summary"
+
+        # Get overall statistics
+        current_month = datetime.now().replace(day=1)
+        last_month = current_month - relativedelta(months=1)
+
+        stats = {}
+
+        # Current month stats
+        stats["current_month"] = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded
+            FROM cancellations 
+            WHERE created_at >= ? AND created_at < ?
+        """,
+            (
+                current_month.strftime("%Y-%m-%d"),
+                (current_month + relativedelta(months=1)).strftime("%Y-%m-%d"),
+            ),
+        ).fetchone()
+
+        # Previous month stats
+        stats["last_month"] = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded
+            FROM cancellations 
+            WHERE created_at >= ? AND created_at < ?
+        """,
+            (last_month.strftime("%Y-%m-%d"), current_month.strftime("%Y-%m-%d")),
+        ).fetchone()
+
+        # Student counts by membership
+        membership_stats = conn.execute(
+            """
+            SELECT membership_level, COUNT(*) as count
+            FROM students
+            GROUP BY membership_level
+            ORDER BY count DESC
+        """
+        ).fetchall()
+
+        # Executive Summary content
+        summary_data = [
+            ["Riverside Equestrian - Analytics Report", "", ""],
+            [f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", "", ""],
+            ["", "", ""],
+            ["MONTHLY COMPARISON", "", ""],
+            ["Metric", "Current Month", "Previous Month"],
+            [
+                "Total Cancellations",
+                stats["current_month"]["total"],
+                stats["last_month"]["total"],
+            ],
+            [
+                "Free Cancellations",
+                stats["current_month"]["free"],
+                stats["last_month"]["free"],
+            ],
+            [
+                "Charged Cancellations",
+                stats["current_month"]["charged"],
+                stats["last_month"]["charged"],
+            ],
+            [
+                "Excluded Cancellations",
+                stats["current_month"]["excluded"],
+                stats["last_month"]["excluded"],
+            ],
+            ["", "", ""],
+            ["MEMBERSHIP DISTRIBUTION", "", ""],
+            ["Membership Level", "Student Count", "Percentage"],
+        ]
+
+        total_students = sum(m["count"] for m in membership_stats)
+        for membership in membership_stats:
+            percentage = f"{(membership['count'] / total_students * 100):.1f}%"
+            summary_data.append(
+                [membership["membership_level"], membership["count"], percentage]
+            )
+
+        # Write summary data
+        for row_idx, row_data in enumerate(summary_data, 1):
+            for col_idx, value in enumerate(row_data, 1):
+                cell = ws_summary.cell(row=row_idx, column=col_idx, value=value)
+                if row_idx in [1, 4, 11]:  # Header rows
+                    cell.font = Font(bold=True, size=12)
+                elif row_idx == 5 or row_idx == 12:  # Sub-header rows
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(
+                        start_color="E5E7EB", end_color="E5E7EB", fill_type="solid"
+                    )
+
+        # 2. Monthly Trends Sheet
+        ws_trends = wb.create_sheet("Monthly Trends")
+
+        # Get 12 months of data
+        start_date = datetime.now().replace(day=1) - relativedelta(months=11)
+        monthly_trends = conn.execute(
+            """
+            SELECT 
+                strftime('%Y-%m', created_at) as month,
+                COUNT(*) as total,
+                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded
+            FROM cancellations 
+            WHERE created_at >= ?
+            GROUP BY strftime('%Y-%m', created_at)
+            ORDER BY month
+        """,
+            (start_date.strftime("%Y-%m-%d"),),
+        ).fetchall()
+
+        # Write trends data
+        trends_headers = ["Month", "Total", "Free", "Charged", "Excluded"]
+        for col, header in enumerate(trends_headers, 1):
+            cell = ws_trends.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(
+                start_color="366092", end_color="366092", fill_type="solid"
+            )
+            cell.font = Font(bold=True, color="FFFFFF")
+
+        for row, trend in enumerate(monthly_trends, 2):
+            month_name = datetime.strptime(trend["month"], "%Y-%m").strftime("%B %Y")
+            ws_trends.cell(row=row, column=1, value=month_name)
+            ws_trends.cell(row=row, column=2, value=trend["total"])
+            ws_trends.cell(row=row, column=3, value=trend["free"])
+            ws_trends.cell(row=row, column=4, value=trend["charged"])
+            ws_trends.cell(row=row, column=5, value=trend["excluded"])
+
+        # 3. Student Analysis Sheet
+        ws_students = wb.create_sheet("Student Analysis")
+
+        # Get top students by cancellation frequency
+        top_students = conn.execute(
+            """
+            SELECT 
+                s.first_name,
+                s.last_name,
+                s.membership_level,
+                COUNT(c.id) as total_cancellations,
+                SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_count,
+                MAX(c.created_at) as last_cancellation
+            FROM students s
+            JOIN cancellations c ON s.id = c.student_id
+            GROUP BY s.id
+            HAVING COUNT(c.id) > 0
+            ORDER BY total_cancellations DESC
+            LIMIT 50
+        """
+        ).fetchall()
+
+        # Write student analysis
+        student_headers = [
+            "Student Name",
+            "Membership",
+            "Total Cancellations",
+            "Charged",
+            "Last Cancellation",
+        ]
+        for col, header in enumerate(student_headers, 1):
+            cell = ws_students.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(
+                start_color="10B981", end_color="10B981", fill_type="solid"
+            )
+            cell.font = Font(bold=True, color="FFFFFF")
+
+        for row, student in enumerate(top_students, 2):
+            student_name = f"{student['first_name']} {student['last_name']}"
+            ws_students.cell(row=row, column=1, value=student_name)
+            ws_students.cell(row=row, column=2, value=student["membership_level"])
+            ws_students.cell(row=row, column=3, value=student["total_cancellations"])
+            ws_students.cell(row=row, column=4, value=student["charged_count"])
+
+            last_date = ""
+            if student["last_cancellation"]:
+                last_date = datetime.fromisoformat(
+                    student["last_cancellation"]
+                ).strftime("%Y-%m-%d")
+            ws_students.cell(row=row, column=5, value=last_date)
+
+        # Auto-adjust column widths for all sheets
+        for ws in wb.worksheets:
+            for column in ws.columns:
+                max_length = max(len(str(cell.value or "")) for cell in column)
+                ws.column_dimensions[column[0].column_letter].width = min(
+                    max_length + 2, 50
+                )
+
+        conn.close()
+
+        # Save to temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(temp_file.name)
+        temp_file.close()
+
+        log_action("export_analytics", "Exported full analytics report")
+
+        return send_file(
+            temp_file.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f'full_analytics_report_{datetime.now().strftime("%Y%m%d")}.xlsx',
+        )
+
+    except Exception as e:
+        log_action("export_error", f"Error exporting analytics: {str(e)}")
+        return jsonify({"success": False, "message": f"Export failed: {str(e)}"}), 500
+
+
+# Add route to get cancellation details for management card
+@app.route("/manager/api/cancellation/<int:cancellation_id>/card", methods=["GET"])
+@login_required
+@admin_required
+def get_cancellation_card(cancellation_id):
+    """Get cancellation data formatted for management card view"""
+    try:
+        conn = get_db()
+
+        # Get cancellation with student and policy info
+        cancellation_data = conn.execute(
+            """
+            SELECT 
+                c.*,
+                s.first_name,
+                s.last_name,
+                s.parent_first,
+                s.parent_last,
+                s.email,
+                s.phone,
+                s.membership_level,
+                s.created_at as student_created_at
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.id = ?
+        """,
+            (cancellation_id,),
+        ).fetchone()
+
+        if not cancellation_data:
+            return jsonify({"success": False, "message": "Cancellation not found"}), 404
+
+        # Get student's current month cancellation count
+        current_month = datetime.now().replace(day=1)
+        month_cancellations = conn.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM cancellations
+            WHERE student_id = ? AND created_at >= ?
+        """,
+            (cancellation_data["student_id"], current_month.strftime("%Y-%m-%d")),
+        ).fetchone()
+
+        conn.close()
+
+        # Format response
+        response_data = {
+            "success": True,
+            "cancellation": dict(cancellation_data),
+            "month_count": month_cancellations["count"],
+        }
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 # ===================================

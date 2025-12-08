@@ -119,6 +119,17 @@
         50% { opacity: 0.5; }
     }
     
+    @keyframes pulse-highlight {
+        0%, 100% { 
+            transform: scale(1);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        50% { 
+            transform: scale(1.02);
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+        }
+    }
+    
     .details-panel {
         background: #f8fafc;
         border-radius: 0.5rem;
@@ -404,8 +415,8 @@
                     </button>
                 </div>
                 <button class="btn btn-success" onclick="exportCancellations()">
-                    <i class="fas fa-download me-1"></i>
-                    Export
+                    <i class="fas fa-file-excel me-1"></i>
+                    Export to Excel
                 </button>
             </div>
         </div>
@@ -625,7 +636,7 @@
         </div>
         
         <!-- Custom Date Picker (Hidden by default) -->
-        <div class="col-md-2 mb-3 date-picker-container" id="customDatePicker">
+        <div class="col-md-1 mb-3 date-picker-container" id="customDatePicker">
             <label class="form-label">From - To</label>
             <div class="input-group">
                 <input type="date" class="form-control" id="dateFrom" placeholder="From">
@@ -633,7 +644,7 @@
             </div>
         </div>
         
-        <div class="col-md-2 mb-3">
+        <div class="col-md-1 mb-3">
             <label class="form-label">Membership</label>
             <select class="form-select" id="membershipFilter" onchange="applyFilters()">
                 <option value="">All Levels</option>
@@ -645,7 +656,7 @@
             </select>
         </div>
         
-        <div class="col-md-1 mb-3">
+        <div class="col-md-2 mb-3">
             <label class="form-label">Sort By</label>
             <select class="form-select" id="sortFilter" onchange="applyFilters()">
                 <option value="submit_date" {{ 'selected' if request.args.get('sort') == 'submit_date' else '' }}>Submit Date</option>
@@ -1813,8 +1824,7 @@ function toggleAutoRefresh() {
 
 function exportCancellations() {
     const params = new URLSearchParams(currentFilters);
-    params.set('export', 'csv');
-    window.location.href = `{{ url_for('manager_cancellations') }}?${params.toString()}`;
+    window.location.href = `{{ url_for('export_cancellations_excel') }}?${params.toString()}`;
 }
 
 // Note functionality - placeholder for now
@@ -2312,8 +2322,68 @@ document.addEventListener('DOMContentLoaded', function() {
     // Animate cards on load
     animateCards();
     
-    // Set default view
-    switchView('list');
+    // Handle URL parameters for direct navigation to specific cancellation
+    const urlParams = new URLSearchParams(window.location.search);
+    const viewCancellationId = urlParams.get('view');
+    const highlightCancellationId = urlParams.get('highlight');
+    
+    if (viewCancellationId || highlightCancellationId) {
+        const targetId = viewCancellationId || highlightCancellationId;
+        console.log('Navigation requested for cancellation ID:', targetId);
+        
+        // Force switch to card view first
+        switchView('card');
+        
+        // Wait for view switch to complete, then find and highlight target
+        setTimeout(() => {
+            const targetCard = document.querySelector(`[data-id="${targetId}"]`);
+            
+            if (targetCard) {
+                console.log('Target card found, applying highlighting');
+                
+                // Scroll to the card first
+                targetCard.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                });
+                
+                // Apply enhanced highlighting after a brief delay
+                setTimeout(() => {
+                    targetCard.style.cssText += `
+                        border: 3px solid var(--primary-color) !important;
+                        box-shadow: 0 0 30px rgba(59, 130, 246, 0.7) !important;
+                        transform: scale(1.02) !important;
+                        transition: all 0.3s ease !important;
+                        animation: pulse-highlight 2s ease-in-out 3 !important;
+                    `;
+                    
+                    // Show success message
+                    showAlert(`Cancellation #${targetId}`, 'success');
+                    
+                    // Clean up highlighting after 6 seconds
+                    setTimeout(() => {
+                        targetCard.style.border = '';
+                        targetCard.style.boxShadow = '';
+                        targetCard.style.transform = '';
+                        targetCard.style.animation = '';
+                    }, 6000);
+                }, 200);
+                
+            } else {
+                console.log('Target card not found, available cards:');
+                const allCards = document.querySelectorAll('[data-id]');
+                allCards.forEach(card => {
+                    console.log('- Card ID:', card.getAttribute('data-id'));
+                });
+                showAlert(`Cancellation #${targetId} not found on this page. Check filters or try a different cancellation.`, 'warning');
+            }
+        }, 500);
+        
+    } else {
+        // Set default view to list only when no specific cancellation is targeted
+        console.log('No navigation parameters, setting default list view');
+        switchView('list');
+    }
     
     // Set up date range filter listener
     const dateRangeFilter = document.getElementById('dateRangeFilter');
@@ -2346,9 +2416,6 @@ document.addEventListener('DOMContentLoaded', function() {
             customPicker.classList.add('show');
         }
     }
-    
-    // Show cancellations list initially in list view
-    document.getElementById('listView').style.display = 'block';
 });
 </script>
 {% endblock %}
