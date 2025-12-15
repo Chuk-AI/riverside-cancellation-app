@@ -864,7 +864,7 @@
                 </div>
                 
                 <!-- Manager Override Controls -->
-                {% if cancellation.status == 'pending' or not cancellation.status %}
+                <!-- Always show override controls for manager flexibility -->
                 <div class="override-controls">
                     <h6 class="mb-3">
                         <i class="fas fa-user-shield me-1"></i>
@@ -907,7 +907,6 @@
                         </div>
                     </div>
                 </div>
-                {% endif %}
                 
                 <!-- Action Buttons -->
                 <div class="d-flex justify-content-between mt-3">
@@ -924,7 +923,7 @@
                         </button>
                     </div>
                     
-                    {% if cancellation.status == 'pending' or not cancellation.status %}
+                    {% if not cancellation.approved_by %}
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-success" 
                                 onclick="approveAsPolicy({{ cancellation.id }})">
