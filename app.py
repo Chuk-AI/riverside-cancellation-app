@@ -2192,9 +2192,14 @@ def manager_dashboard():
     for cancellation in recent_cancellations_raw:
         cancellation_dict = dict(cancellation)
 
-        # Convert created_at string to datetime
+        # Convert created_at string to datetime and localize to Pacific timezone
         cancellation_dict["created_at"] = datetime.strptime(
             cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
+        )
+        # Localize to Pacific timezone since database stores in Pacific time
+        pacific_tz = pytz.timezone("America/Los_Angeles")
+        cancellation_dict["created_at"] = pacific_tz.localize(
+            cancellation_dict["created_at"]
         )
 
         # Convert lesson_date string to date object
@@ -2244,6 +2249,11 @@ def manager_dashboard():
         action_dict = dict(action)
         action_dict["created_at"] = datetime.strptime(
             action["created_at"], "%Y-%m-%d %H:%M:%S"
+        )
+        # Localize to Pacific timezone since database stores in Pacific time
+        pacific_tz = pytz.timezone("America/Los_Angeles")
+        action_dict["created_at"] = pacific_tz.localize(
+            action_dict["created_at"]
         )
         action_dict["lesson_date"] = datetime.strptime(
             action["lesson_date"], "%Y-%m-%d"
@@ -2314,8 +2324,8 @@ def manager_dashboard():
             "excluded": "Excluded Cancellation",
         }.get(activity_type, "Cancellation")
 
-        # Calculate time ago
-        time_diff = datetime.now() - cancellation["created_at"]
+        # Calculate time ago - use PST time for comparison
+        time_diff = toronto_now() - cancellation["created_at"]
         if time_diff.days > 0:
             time_ago = f"{time_diff.days} day{'s' if time_diff.days != 1 else ''} ago"
         elif time_diff.seconds > 3600:
@@ -2461,11 +2471,14 @@ def manager_students():
                 student["created_at"] = datetime.strptime(
                     student["created_at"], "%Y-%m-%d %H:%M:%S"
                 )
+                # Localize to Pacific timezone since database stores in Pacific time
+                pacific_tz = pytz.timezone("America/Los_Angeles")
+                student["created_at"] = pacific_tz.localize(student["created_at"])
             except ValueError:
-                # If parsing fails, set to current time
-                student["created_at"] = datetime.now()
+                # If parsing fails, set to current time in Pacific
+                student["created_at"] = toronto_now()
         elif not student.get("created_at"):
-            student["created_at"] = datetime.now()
+            student["created_at"] = toronto_now()
 
         # Calculate statistics
         student["total_cancellations"] = student.get("total_cancellations") or 0
@@ -2621,8 +2634,13 @@ def process_cancellation_dates(cancellation):
             cancellation_dict["created_at"] = datetime.strptime(
                 cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
             )
+            # Localize to Pacific timezone since database stores in Pacific time
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            cancellation_dict["created_at"] = pacific_tz.localize(
+                cancellation_dict["created_at"]
+            )
         except (ValueError, TypeError):
-            cancellation_dict["created_at"] = datetime.now()
+            cancellation_dict["created_at"] = toronto_now()
 
     # Convert lesson_date string to date object
     if isinstance(cancellation_dict.get("lesson_date"), str):
@@ -2656,8 +2674,8 @@ def process_cancellation_dates(cancellation):
         cancellation_dict["submitted_date"] = created_at.date()
         cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p")
 
-        # Calculate time ago
-        now = datetime.now()
+        # Calculate time ago - use PST time for comparison
+        now = toronto_now()  # Use PST time, not system time
         time_diff = now - created_at
         if time_diff.days > 0:
             cancellation_dict["time_ago"] = (
@@ -3831,6 +3849,10 @@ def manager_cancellations():
             lesson_datetime = datetime.combine(
                 cancellation["lesson_date"], cancellation["lesson_time"]
             )
+            # Localize lesson_datetime to Pacific timezone for comparison
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            lesson_datetime = pacific_tz.localize(lesson_datetime)
+            
             hours_notice = (
                 lesson_datetime - cancellation["created_at"]
             ).total_seconds() / 3600
@@ -3854,10 +3876,10 @@ def manager_cancellations():
         cancellation["error_report"] = cancellation.get("error_report", "")
         cancellation["approved_by"] = cancellation.get("approved_by", "")
 
-        # Add urgency flags
+        # Add urgency flags - use PST time for comparison
         if cancellation.get("created_at"):
             hours_since = (
-                datetime.now() - cancellation["created_at"]
+                toronto_now() - cancellation["created_at"]
             ).total_seconds() / 3600
             cancellation["is_recent"] = hours_since < 2
             cancellation["is_urgent"] = (
