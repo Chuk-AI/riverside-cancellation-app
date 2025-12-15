@@ -1918,8 +1918,9 @@ def client_cancel():
             str(sequential_lessons) if sequential_lessons else None
         )
 
-        # Determine status based on charge - auto-approve free cancellations
-        initial_status = "charged" if will_charge else "approved"
+        # All cancellations start as 'pending' - manager must review and approve
+        # The 'charged' field indicates if it will be charged, but status is always pending initially
+        initial_status = "pending"
         
         # Insert cancellation - UPDATED with new fields
         conn = get_db()
@@ -2750,6 +2751,12 @@ def process_cancellation():
     action = data.get("action")  # 'approve_policy', 'force_free', 'force_charge'
     cancellation_id = data.get("cancellation_id")
     reason = data.get("reason", "")
+    
+    # DEBUG LOGGING
+    print(f"\n=== PROCESS CANCELLATION DEBUG ===")
+    print(f"Action: {action}")
+    print(f"Cancellation ID: {cancellation_id}")
+    print(f"Reason: {reason}")
 
     if not action or not cancellation_id:
         return jsonify({"success": False, "message": "Missing required fields"})
@@ -2781,32 +2788,40 @@ def process_cancellation():
         if not cancellation_data:
             return jsonify({"success": False, "message": "Cancellation not found"})
 
+        # Convert Row object to dict for easier access
+        cancellation_dict = dict(cancellation_data)
+
         # Prepare student and cancellation data
         student_dict = {
-            "id": cancellation_data["student_id"],
-            "first_name": cancellation_data["first_name"],
-            "last_name": cancellation_data["last_name"],
-            "email": cancellation_data["email"],
-            "phone": cancellation_data["phone"],
-            "membership_level": cancellation_data["membership_level"],
-            "parent_first": cancellation_data["parent_first"],
-            "parent_last": cancellation_data["parent_last"],
+            "id": cancellation_dict["student_id"],
+            "first_name": cancellation_dict["first_name"],
+            "last_name": cancellation_dict["last_name"],
+            "email": cancellation_dict["email"],
+            "phone": cancellation_dict["phone"],
+            "membership_level": cancellation_dict["membership_level"],
+            "parent_first": cancellation_dict["parent_first"],
+            "parent_last": cancellation_dict["parent_last"],
         }
 
         # Get lesson datetime for policy check
         lesson_datetime = parse_lesson_datetime(
-            cancellation_data["lesson_date"], cancellation_data["lesson_time"]
+            cancellation_dict["lesson_date"], cancellation_dict["lesson_time"]
         )
 
         # Update database based on action
         if action == "approve_policy":
-            # Check policy to determine if should be free or charged
-            should_be_charged, charge_reason = will_be_charged(
-                student_dict, lesson_datetime
-            )
+            # Use the ORIGINAL charge status that was calculated when submitted
+            # Don't recalculate based on current time!
+            should_be_charged = bool(cancellation_dict["charged"])
+            charge_reason = cancellation_dict.get("manager_notes") or "Processed according to membership policy"
+            
+            print(f"Should be charged: {should_be_charged}")
+            print(f"Charge reason: {charge_reason}")
+            print(f"Manager email: {session.get('user_email', 'Unknown Manager')}")
 
             if should_be_charged:
                 # Process as charged according to policy
+                print(f"Executing UPDATE for CHARGED cancellation...")
                 conn.execute(
                     """UPDATE cancellations 
                        SET charged = 1, status = 'charged', manager_notes = ?, 
@@ -2819,7 +2834,8 @@ def process_cancellation():
                         cancellation_id,
                     ),
                 )
-                updated_cancellation = dict(cancellation_data)
+                print(f"UPDATE executed for CHARGED")
+                updated_cancellation = dict(cancellation_dict)
                 updated_cancellation.update(
                     {
                         "charged": 1,
@@ -2831,6 +2847,7 @@ def process_cancellation():
                 log_message = f"Cancellation {cancellation_id} charged according to policy: {charge_reason}"
             else:
                 # Process as free according to policy
+                print(f"Executing UPDATE for FREE cancellation...")
                 conn.execute(
                     """UPDATE cancellations 
                        SET status = 'approved', charged = 0, manager_notes = ?, 
@@ -2843,7 +2860,8 @@ def process_cancellation():
                         cancellation_id,
                     ),
                 )
-                updated_cancellation = dict(cancellation_data)
+                print(f"UPDATE executed for FREE")
+                updated_cancellation = dict(cancellation_dict)
                 updated_cancellation.update(
                     {
                         "charged": 0,
@@ -2868,7 +2886,7 @@ def process_cancellation():
                     cancellation_id,
                 ),
             )
-            updated_cancellation = dict(cancellation_data)
+            updated_cancellation = dict(cancellation_dict)
             updated_cancellation.update(
                 {
                     "charged": 0,
@@ -2896,7 +2914,7 @@ def process_cancellation():
                     cancellation_id,
                 ),
             )
-            updated_cancellation = dict(cancellation_data)
+            updated_cancellation = dict(cancellation_dict)
             updated_cancellation.update(
                 {
                     "charged": 1,
@@ -2937,10 +2955,17 @@ def process_cancellation():
                 },
             }
 
+        # CRITICAL: Commit the database changes before closing
+        print(f"Committing changes to database...")
+        conn.commit()
+        print(f"Changes committed successfully!")
         conn.close()
 
         # Log the action
         log_action("cancellation_processed", log_message)
+        
+        print(f"Returning success response")
+        print(f"===================================\n")
 
         return jsonify(
             {
@@ -3827,21 +3852,32 @@ def manager_cancellations():
             f"{cancellation['first_name']} {cancellation['last_name']}"
         )
 
-        # Status class for CSS - UPDATED with new status types
+        # Status class for CSS - UPDATED to use approved_by
+        # Check if approved (has approved_by email) or still pending
+        is_approved = cancellation.get("approved_by") is not None and cancellation.get("approved_by") != ""
+        
+        # Priority 1: Special markers (notes, override, excluded)
         if cancellation.get("cancellation_note"):
             cancellation["status_class"] = "note"
-        elif cancellation.get("deadline_passed"):
-            cancellation["status_class"] = "deadline-passed"
         elif cancellation.get("is_override"):
             cancellation["status_class"] = "override"
         elif cancellation["excluded"]:
             cancellation["status_class"] = "excluded"
+        # Priority 2: Check if approved (this should come before deadline_passed check!)
+        elif not is_approved:
+            # Not yet approved by manager - show as pending regardless of charged status
+            # Can also show deadline-passed badge if applicable
+            if cancellation.get("deadline_passed"):
+                cancellation["status_class"] = "deadline-passed"
+            else:
+                cancellation["status_class"] = "pending"
+        # Priority 3: Approved cancellations (show final charge status)
         elif cancellation["charged"]:
+            # Approved AND charged
             cancellation["status_class"] = "charged"
-        elif cancellation.get("status") == "approved":
-            cancellation["status_class"] = "free"
         else:
-            cancellation["status_class"] = "pending"
+            # Approved AND free
+            cancellation["status_class"] = "free"
 
         # Calculate deadline status
         tier = get_membership_tier(cancellation["membership_level"])
