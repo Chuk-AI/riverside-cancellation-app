@@ -27,6 +27,30 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Optional: adds subtle shadow for depth */
       }
 
+      /* New Gradient Style for the Navbar */
+      .navbar-gradient-bg {
+        /* This creates a gradient from a very light blue (near white) to a primary dark blue */
+        background: linear-gradient(
+          90deg,
+          #e3f2fd 0%,
+          /* Very Light Blue (Like Bootstrap's 'light') */ #0d6efd 35%,
+          /* Primary Blue (where the text/links start) */ #0d6efd 100%
+        ) !important;
+        /* Ensure the links are dark on the light section */
+      }
+
+      /* Make the brand/logo text dark for contrast on the light part of the gradient */
+      .navbar-gradient-bg .navbar-brand {
+        color: #212529 !important; /* Dark Text Color */
+        font-weight: bold;
+      }
+
+      /* Ensure other items remain white on the dark blue part of the nav */
+      .navbar-gradient-bg .navbar-nav .nav-link,
+      .navbar-gradient-bg .navbar-nav .dropdown-toggle {
+        color: #ffffff !important;
+      }
+
       /* Ensure dropdown appears above everything */
       .navbar-nav .dropdown-menu {
         z-index: 1030; /* Higher than sticky navbar */
@@ -62,15 +86,128 @@
         position: relative;
         z-index: 1010;
       }
+
+      /* ========================================= */
+      /* GLOBAL TEXT CONTRAST FIXES */
+      /* ========================================= */
+
+      /* Override Bootstrap's text utilities with higher specificity */
+      /* Ensure dark text on warning/light backgrounds */
+      .bg-warning.text-white,
+      .bg-warning.text-white h1,
+      .bg-warning.text-white h2,
+      .bg-warning.text-white h3,
+      .bg-warning.text-white h4,
+      .bg-warning.text-white h5,
+      .bg-warning.text-purple h6,
+      .bg-warning.text-white i,
+      .bg-warning.text-dark,
+      .bg-warning.text-dark h1,
+      .bg-warning.text-dark h2,
+      .bg-warning.text-dark h3,
+      .bg-warning.text-dark h4,
+      .bg-warning.text-dark h5,
+      .bg-warning.text-dark h6,
+      .bg-warning.text-dark i,
+      .card-header.bg-warning.text-white,
+      .card-header.bg-warning.text-white h1,
+      .card-header.bg-warning.text-white h2,
+      .card-header.bg-warning.text-white h3,
+      .card-header.bg-warning.text-white h4,
+      .card-header.bg-warning.text-white h5,
+      .card-header.bg-warning.text-purple h6,
+      .card-header.bg-warning.text-white i,
+      .card-header.bg-warning.text-dark,
+      .card-header.bg-warning.text-dark h1,
+      .card-header.bg-warning.text-dark h2,
+      .card-header.bg-warning.text-dark h3,
+      .card-header.bg-warning.text-dark h4,
+      .card-header.bg-warning.text-dark h5,
+      .card-header.bg-warning.text-dark h6,
+      .card-header.bg-warning.text-dark i,
+      .bg-warning,
+      .bg-warning h1,
+      .bg-warning h2,
+      .bg-warning h3,
+      .bg-warning h4,
+      .bg-warning h5,
+      .bg-warning h6,
+      .bg-warning i,
+      .card-header.bg-warning,
+      .card-header.bg-warning h1,
+      .card-header.bg-warning h2,
+      .card-header.bg-warning h3,
+      .card-header.bg-warning h4,
+      .card-header.bg-warning h5,
+      .card-header.bg-warning h6,
+      .card-header.bg-warning i {
+        color: #212529 !important; /* Bootstrap dark text color */
+      }
+
+      .bg-light.text-white,
+      .bg-light.text-white h1,
+      .bg-light.text-white h2,
+      .bg-light.text-white h3,
+      .bg-light.text-white h4,
+      .bg-light.text-white h5,
+      .bg-light.text-white h6,
+      .bg-light.text-white i,
+      .bg-light,
+      .bg-light h1,
+      .bg-light h2,
+      .bg-light h3,
+      .bg-light h4,
+      .bg-light h5,
+      .bg-light h6,
+      .bg-light i,
+      .card-header.bg-light,
+      .card-header.bg-light h1,
+      .card-header.bg-light h2,
+      .card-header.bg-light h3,
+      .card-header.bg-light h4,
+      .card-header.bg-light h5,
+      .card-header.bg-light h6,
+      .card-header.bg-light i {
+        color: #212529 !important;
+      }
+      /* ========================================= */
+      /* TEXT CONTRAST FIXES (Keep Dark Text on Light Backgrounds) */
+      /* ========================================= */
+
+      /* Force dark text on specific light backgrounds where Bootstrap defaults to white or is hard to read */
+      .bg-warning,
+      .bg-light,
+      .card-header.bg-warning,
+      .card-header.bg-light {
+        color: #212529 !important; /* Bootstrap dark text color */
+      }
+      /* Ensure elements inside inherit this dark color */
+      .bg-warning *,
+      .bg-light * {
+        color: #212529 !important;
+      }
+
+      /* Custom purple background is a dark background, so keep it white */
+      .bg-purple,
+      .bg-purple *,
+      .card-header.bg-purple,
+      .card-header.bg-purple * {
+        background-color: #8b5cf6 !important;
+        color: #ffffff !important;
+      }
     </style>
     {% block extra_css %}{% endblock %}
   </head>
   <body>
     <!-- Navigation Bar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-      <div class="container">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+      <div class="container-fluid">
         <a class="navbar-brand" href="{{ url_for('index') }}">
-          <i class="fas fa-horse me-2"></i>
+          <img
+            src="{{ url_for('static', filename='riverside1.png') }}"
+            alt="Riverside Equestrian"
+            style="height: 30px; margin-right: 0.5rem; vertical-align: middle"
+          />
           Riverside Equestrian
         </a>
 

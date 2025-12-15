@@ -61,10 +61,10 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = "riverside-equestrian-secret-key-change-in-production"
 app.config["DATABASE"] = "cancellation_system.db"
-app.config["TIMEZONE"] = "America/Toronto"
+app.config["TIMEZONE"] = "America/Los_Angeles"
 
 # Set environment timezone for the application
-os.environ["TZ"] = "America/Toronto"
+os.environ["TZ"] = "America/Los_Angeles"
 
 
 def init_db():
@@ -406,7 +406,7 @@ def init_db():
                 "general",
                 "url",
             ),
-            ("timezone", "America/Toronto", "System timezone", "general", "string"),
+            ("timezone", "America/Los_Angeles", "System timezone", "general", "string"),
             (
                 "data_retention_months",
                 "12",
@@ -1220,26 +1220,26 @@ def log_action(action, details=None):
 
 
 def get_app_timezone():
-    """Get the application timezone - always use Toronto"""
-    return pytz.timezone("America/Toronto")
+    """Get the application timezone - always use Pacific (PST/PDT)"""
+    return pytz.timezone("America/Los_Angeles")
 
 
 def toronto_now():
-    """Get current datetime in Toronto timezone - simple and direct"""
-    toronto_tz = pytz.timezone("America/Toronto")
+    """Get current datetime in Pacific timezone (PST/PDT) - simple and direct"""
+    pacific_tz = pytz.timezone("America/Los_Angeles")
     utc_now = datetime.utcnow()
     utc_dt = pytz.UTC.localize(utc_now)
-    return utc_dt.astimezone(toronto_tz)
+    return utc_dt.astimezone(pacific_tz)
 
 
 def now_in_app_timezone():
-    """Get current datetime in Toronto timezone"""
+    """Get current datetime in Pacific timezone (PST/PDT)"""
     return toronto_now()
 
 
 def localize_datetime(dt, from_tz=None):
-    """Convert a datetime to Toronto timezone"""
-    toronto_tz = pytz.timezone("America/Toronto")
+    """Convert a datetime to Pacific timezone (PST/PDT)"""
+    pacific_tz = pytz.timezone("America/Los_Angeles")
 
     if dt is None:
         return None
@@ -1254,21 +1254,21 @@ def localize_datetime(dt, from_tz=None):
         except (ValueError, TypeError):
             return dt
 
-    # If datetime is naive, assume it's in UTC and convert to Toronto
+    # If datetime is naive, assume it's in UTC and convert to Pacific
     if dt.tzinfo is None:
         # Assume naive datetime is in UTC
         dt = pytz.UTC.localize(dt)
 
-    # Convert to Toronto timezone
-    return dt.astimezone(toronto_tz)
+    # Convert to Pacific timezone
+    return dt.astimezone(pacific_tz)
 
 
 def format_datetime_for_display(dt):
-    """Format datetime for display in Toronto timezone"""
+    """Format datetime for display in Pacific timezone (PST/PDT)"""
     if dt is None:
         return "Unknown"
 
-    toronto_tz = pytz.timezone("America/Toronto")
+    pacific_tz = pytz.timezone("America/Los_Angeles")
 
     # If it's a string, parse it first
     if isinstance(dt, str):
@@ -1277,18 +1277,18 @@ def format_datetime_for_display(dt):
                 dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
             else:
                 dt = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
-                # Assume parsed datetime from database is in Toronto timezone
-                dt = toronto_tz.localize(dt)
+                # Assume parsed datetime from database is in Pacific timezone
+                dt = pacific_tz.localize(dt)
         except (ValueError, TypeError):
             return str(dt)
 
-    # If it's a naive datetime (from database), assume it's Toronto time
+    # If it's a naive datetime (from database), assume it's Pacific time
     if isinstance(dt, datetime) and dt.tzinfo is None:
-        dt = toronto_tz.localize(dt)
+        dt = pacific_tz.localize(dt)
 
-    # Convert to Toronto timezone if needed
+    # Convert to Pacific timezone if needed
     if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
-        dt = dt.astimezone(toronto_tz)
+        dt = dt.astimezone(pacific_tz)
 
     if isinstance(dt, datetime):
         return dt.strftime("%B %d, %Y at %I:%M %p %Z")
@@ -1716,7 +1716,7 @@ def login():
             session["user_name"] = admin["email"]
             conn.close()
             log_action("login", f"Admin login: {admin['role']}")
-            flash(f'Welcome back, {admin["role"].title()}!', "success")
+            
             # Redirect managers to cancellations page
             return redirect(url_for("manager_cancellations"))
 
@@ -1732,7 +1732,7 @@ def login():
             session["user_role"] = "client"
             session["user_name"] = f"{student['first_name']} {student['last_name']}"
             log_action("login", f"Client login: {student['email']}")
-            flash(f'Welcome back, {student["first_name"]}!', "success")
+            
             # Redirect clients to cancel lesson page
             return redirect(url_for("client_cancel"))
 
@@ -1748,7 +1748,7 @@ def logout():
     user_name = session.get("user_name", "User")
     log_action("logout", f"User logged out: {user_name}")
     session.clear()
-    flash(f"Goodbye, {user_name}!", "info")
+    
     return redirect(url_for("login"))
 
 
@@ -1828,9 +1828,9 @@ def client_dashboard():
             cancellation_dict["created_at"] = datetime.strptime(
                 cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
             )
-            # Mark this as Toronto time for display functions
-            toronto_tz = pytz.timezone("America/Toronto")
-            cancellation_dict["created_at"] = toronto_tz.localize(
+            # Mark this as Pacific time for display functions
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            cancellation_dict["created_at"] = pacific_tz.localize(
                 cancellation_dict["created_at"]
             )
         except (ValueError, TypeError):
@@ -1918,6 +1918,9 @@ def client_cancel():
             str(sequential_lessons) if sequential_lessons else None
         )
 
+        # Determine status based on charge - auto-approve free cancellations
+        initial_status = "charged" if will_charge else "approved"
+        
         # Insert cancellation - UPDATED with new fields
         conn = get_db()
         cursor = conn.execute(
@@ -1941,9 +1944,9 @@ def client_cancel():
                 will_charge,
                 deadline_passed,  # NEW
                 False,  # is_override starts as False
-                "pending",  # Default status
-                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Toronto time
-                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Toronto time
+                initial_status,  # Auto-approve free, or set as charged
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Pacific time
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Pacific time
             ),
         )
         cancellation_id = cursor.lastrowid
@@ -3701,6 +3704,7 @@ def manager_cancellations():
     student_id = request.args.get("student")
     date_from = request.args.get("date_from")
     date_to = request.args.get("date_to")
+    approval_status = request.args.get("approval_status", "")
 
     # Check if this is an AJAX request
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -3717,7 +3721,9 @@ def manager_cancellations():
         params.append(student_id)
 
     # Status filters - UPDATED with new options
-    if filter_status == "free":
+    if filter_status == "pending":
+        where_clauses.append("c.status = 'pending'")
+    elif filter_status == "free":
         where_clauses.append("c.charged = 0 AND c.status = 'approved'")
     elif filter_status == "charged":
         where_clauses.append("c.charged = 1")
@@ -3731,6 +3737,12 @@ def manager_cancellations():
         where_clauses.append("c.deadline_passed = 1")
     elif filter_status == "override":
         where_clauses.append("c.is_override = 1")
+    
+    # Approval status filter (independent from payment status filter)
+    if approval_status == "approved":
+        where_clauses.append("(c.status = 'approved' OR c.excluded = 1 OR c.is_override = 1)")
+    elif approval_status == "pending":
+        where_clauses.append("c.status = 'pending' AND c.excluded = 0 AND c.is_override = 0")
 
     # Search filter
     if search:
@@ -3870,6 +3882,7 @@ def manager_cancellations():
             SUM(CASE WHEN c.deadline_passed = 1 AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as deadline_passed,
             SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
+        JOIN students s ON c.student_id = s.id
         WHERE {where_sql}
         """,
         params,
@@ -6319,22 +6332,22 @@ def test_timezone_route():
     """Debug route to test timezone functionality"""
     import time
 
-    toronto_time = toronto_now()
+    pacific_time = toronto_now()
     system_time = datetime.now()
     utc_time = datetime.utcnow()
 
     html_output = f"""
     <h2>Timezone Debug Information</h2>
-    <p><strong>Current Toronto Time:</strong> {toronto_time}</p>
-    <p><strong>Formatted Toronto Time:</strong> {format_datetime_for_display(toronto_time)}</p>
+    <p><strong>Current Pacific Time:</strong> {pacific_time}</p>
+    <p><strong>Formatted Pacific Time:</strong> {format_datetime_for_display(pacific_time)}</p>
     <p><strong>System Time:</strong> {system_time}</p>
     <p><strong>UTC Time:</strong> {utc_time}</p>
-    <p><strong>Toronto Timezone:</strong> {toronto_time.tzname()}</p>
-    <p><strong>UTC Offset:</strong> {toronto_time.strftime('%z')}</p>
-    <p><strong>Is DST Active:</strong> {'Yes (EDT)' if toronto_time.dst().total_seconds() > 0 else 'No (EST)'}</p>
+    <p><strong>Pacific Timezone:</strong> {pacific_time.tzname()}</p>
+    <p><strong>UTC Offset:</strong> {pacific_time.strftime('%z')}</p>
+    <p><strong>Is DST Active:</strong> {'Yes (PDT)' if pacific_time.dst().total_seconds() > 0 else 'No (PST)'}</p>
     <p><strong>System TZ:</strong> {time.tzname}</p>
     <hr>
-    <p><em>The Toronto time should be 5 hours behind UTC in winter (EST) or 4 hours behind in summer (EDT).</em></p>
+    <p><em>The Pacific time should be 8 hours behind UTC in winter (PST) or 7 hours behind in summer (PDT).</em></p>
     """
 
     return html_output
@@ -8858,7 +8871,7 @@ def format_date_filter(date_value):
 
 @app.template_filter("format_datetime")
 def format_datetime_filter(dt_value):
-    """Format datetime as 'August 28, 2025 at 3:30 PM EST'"""
+    """Format datetime as 'August 28, 2025 at 3:30 PM PST'"""
     return format_datetime_for_display(dt_value)
 
 

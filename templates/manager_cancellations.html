@@ -534,18 +534,7 @@
                     <i class="fas fa-check-double me-1"></i>
                     Process All Pending
                 </button>
-                <button class="btn btn-sm btn-danger" onclick="reviewPassedDeadline()">
-                    <i class="fas fa-clock me-1"></i>
-                    Passed Deadline
-                </button>
-                <button class="btn btn-sm btn-purple" onclick="viewNotesSubmissions()">
-                    <i class="fas fa-sticky-note me-1"></i>
-                    Notes
-                </button>
-                <button class="btn btn-sm btn-info" onclick="viewTodaysCancellations()">
-                    <i class="fas fa-calendar-day me-1"></i>
-                    Today's Cancellations
-                </button>
+
             </div>
         </div>
         <div class="col-md-4 text-md-end">
@@ -592,61 +581,59 @@
     </div>
 </div>
 
-<!-- Updated Search and Filters (Added refresh button here) -->
+<!-- Updated Search and Filters (Cleaner layout) -->
 <div class="search-section">
-    <div class="row align-items-end">
-        <div class="col-md-2 mb-3">
-            <label class="form-label">Search</label>
-            <div class="input-group">
+    <div class="row g-3">
+        <!-- Row 1: Search and Main Filters -->
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Search Student</label>
+            <div class="input-group input-group-sm">
                 <input type="text" 
                        class="form-control" 
                        id="searchInput"
                        value="{{ request.args.get('search', '') }}"
-                       placeholder="Student name, email...">
+                       placeholder="Name or email...">
                 <button class="btn btn-outline-secondary" type="button" onclick="applyFilters()">
                     <i class="fas fa-search"></i>
                 </button>
             </div>
         </div>
         
-        <div class="col-md-2 mb-3">
-            <label class="form-label">Status</label>
-            <select class="form-select" id="statusFilter" onchange="applyFilters()">
-                <option value="">All Status</option>
-                <option value="pending" {{ 'selected' if request.args.get('status') == 'pending' else '' }}>Pending</option>
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Approval Status</label>
+            <select class="form-select form-select-sm" id="approvalStatusFilter" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="approved" {{ 'selected' if request.args.get('approval_status') == 'approved' else '' }}>Approved</option>
+                <option value="pending" {{ 'selected' if request.args.get('approval_status') == 'pending' else '' }}>Pending</option>
+            </select>
+        </div>
+        
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Payment Status</label>
+            <select class="form-select form-select-sm" id="statusFilter" onchange="applyFilters()">
+                <option value="">All</option>
                 <option value="free" {{ 'selected' if request.args.get('status') == 'free' else '' }}>Free</option>
                 <option value="charged" {{ 'selected' if request.args.get('status') == 'charged' else '' }}>Charged</option>
                 <option value="excluded" {{ 'selected' if request.args.get('status') == 'excluded' else '' }}>Excluded</option>
-                <option value="note" {{ 'selected' if request.args.get('status') == 'note' else '' }}>Note</option>
-                <option value="deadline_passed" {{ 'selected' if request.args.get('status') == 'deadline_passed' else '' }}>Passed Deadline</option>
                 <option value="override" {{ 'selected' if request.args.get('status') == 'override' else '' }}>Override</option>
             </select>
         </div>
         
-        <div class="col-md-2 mb-3">
-            <label class="form-label">Date Range</label>
-            <select class="form-select" id="dateRangeFilter" onchange="applyFilters()">
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Date Range</label>
+            <select class="form-select form-select-sm" id="dateRangeFilter" onchange="applyFilters()">
                 <option value="today" {{ 'selected' if request.args.get('date_range') == 'today' else '' }}>Today</option>
                 <option value="yesterday" {{ 'selected' if request.args.get('date_range') == 'yesterday' else '' }}>Yesterday</option>
-                <option value="7days" {{ 'selected' if request.args.get('date_range') == '7days' else '' }}>7 Days</option>
+                <option value="7days" {{ 'selected' if request.args.get('date_range', '7days') == '7days' else '' }}>7 Days</option>
                 <option value="month" {{ 'selected' if request.args.get('date_range') == 'month' else '' }}>This Month</option>
                 <option value="all" {{ 'selected' if request.args.get('date_range') == 'all' else '' }}>All Time</option>
-                <option value="custom" {{ 'selected' if request.args.get('date_range') == 'custom' else '' }}>Custom</option>
+                <option value="custom" {{ 'selected' if request.args.get('date_range') == 'custom' else '' }}>Custom Range</option>
             </select>
         </div>
         
-        <!-- Custom Date Picker (Hidden by default) -->
-        <div class="col-md-1 mb-3 date-picker-container" id="customDatePicker">
-            <label class="form-label">From - To</label>
-            <div class="input-group">
-                <input type="date" class="form-control" id="dateFrom" placeholder="From">
-                <input type="date" class="form-control" id="dateTo" placeholder="To">
-            </div>
-        </div>
-        
-        <div class="col-md-1 mb-3">
-            <label class="form-label">Membership</label>
-            <select class="form-select" id="membershipFilter" onchange="applyFilters()">
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Membership</label>
+            <select class="form-select form-select-sm" id="membershipFilter" onchange="applyFilters()">
                 <option value="">All Levels</option>
                 {% for tier in membership_tiers %}
                 <option value="{{ tier }}" {{ 'selected' if request.args.get('membership') == tier else '' }}>
@@ -656,9 +643,35 @@
             </select>
         </div>
         
-        <div class="col-md-2 mb-3">
-            <label class="form-label">Sort By</label>
-            <select class="form-select" id="sortFilter" onchange="applyFilters()">
+        <div class="col-md-1">
+            <label class="form-label small fw-semibold">&nbsp;</label>
+            <div class="d-flex gap-1">
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="refreshData()" title="Refresh">
+                    <i class="fas fa-sync"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearFilters()" title="Clear">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Row 2: Additional Filters (shown when needed) -->
+    <div class="row g-3 mt-2">
+        <!-- Custom Date Picker (Hidden by default) -->
+        <div class="col-md-4" id="customDatePicker" style="display: none;">
+            <label class="form-label small fw-semibold">Custom Date Range</label>
+            <div class="input-group input-group-sm">
+                <input type="date" class="form-control" id="dateFrom" placeholder="From">
+                <span class="input-group-text">to</span>
+                <input type="date" class="form-control" id="dateTo" placeholder="To">
+                <button class="btn btn-primary" onclick="applyFilters()">Apply</button>
+            </div>
+        </div>
+        
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Sort By</label>
+            <select class="form-select form-select-sm" id="sortFilter" onchange="applyFilters()">
                 <option value="submit_date" {{ 'selected' if request.args.get('sort') == 'submit_date' else '' }}>Submit Date</option>
                 <option value="lesson_date" {{ 'selected' if request.args.get('sort') == 'lesson_date' else '' }}>Lesson Date</option>
                 <option value="student" {{ 'selected' if request.args.get('sort') == 'student' else '' }}>Student Name</option>
@@ -666,16 +679,13 @@
             </select>
         </div>
         
-        <div class="col-md-1 mb-3">
-            <label class="form-label">&nbsp;</label>
-            <div class="d-flex gap-1">
-                <button type="button" class="btn btn-outline-info" onclick="refreshData()">
-                    <i class="fas fa-sync"></i>
-                </button>
-                <button type="button" class="btn btn-outline-secondary" onclick="clearFilters()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Special Filters</label>
+            <select class="form-select form-select-sm" id="specialFilter" onchange="applyFilters()">
+                <option value="">None</option>
+                <option value="note" {{ 'selected' if request.args.get('status') == 'note' else '' }}>With Notes</option>
+                <option value="deadline_passed" {{ 'selected' if request.args.get('status') == 'deadline_passed' else '' }}>Passed Deadline</option>
+            </select>
         </div>
     </div>
 </div>
@@ -689,6 +699,10 @@
     <button class="filter-tab" onclick="filterByStatus('today')" id="tab-today">
         Today
         <span class="badge bg-info ms-1">{{ stats.today_cancellations }}</span>
+    </button>
+    <button class="filter-tab" onclick="filterByStatus('yesterday')" id="tab-yesterday">
+        Yesterday
+        <span class="badge bg-secondary ms-1">{{ stats.yesterday_cancellations|default(0) }}</span>
     </button>
     <button class="filter-tab" onclick="filterByStatus('deadline_passed')" id="tab-deadline">
         Passed Deadline
@@ -727,18 +741,34 @@
                         <span class="badge bg-secondary">{{ cancellation.membership_level }}</span>
                     </div>
                     <div class="text-end">
+                        <!-- Approval Status Badge -->
+                        {% if cancellation.status == 'approved' or cancellation.excluded or cancellation.is_override %}
+                            <span class="status-badge bg-success text-white mb-1 d-block">
+                                <i class="fas fa-check-circle me-1"></i>Approved
+                            </span>
+                        {% else %}
+                            <span class="status-badge bg-warning text-dark mb-1 d-block">
+                                <i class="fas fa-clock me-1"></i>Pending
+                            </span>
+                        {% endif %}
+                        
+                        <!-- Payment Status Badge -->
                         {% if cancellation.excluded %}
-                            <span class="status-badge status-excluded">Excluded</span>
+                            <span class="status-badge status-excluded">
+                                <i class="fas fa-shield-alt me-1"></i>Excluded
+                            </span>
                         {% elif cancellation.charged %}
-                            <span class="status-badge status-charged">Charged</span>
-                        {% elif cancellation.status == 'approved' %}
-                            <span class="status-badge status-free">Free</span>
-                        {% elif cancellation.cancellation_note %}
-                            <span class="status-badge status-note">Note</span>
-                        {% elif not cancellation.within_deadline %}
-                            <span class="status-badge status-deadline-passed">Passed Deadline</span>
+                            <span class="status-badge status-charged">
+                                <i class="fas fa-dollar-sign me-1"></i>Charged
+                            </span>
+                        {% elif not cancellation.charged and not cancellation.excluded %}
+                            <span class="status-badge status-free">
+                                <i class="fas fa-gift me-1"></i>Free
+                            </span>
                         {% elif cancellation.is_override %}
-                            <span class="status-badge status-override">Override</span>
+                            <span class="status-badge status-override">
+                                <i class="fas fa-hand-paper me-1"></i>Override
+                            </span>
                         {% endif %}
                     </div>
                 </div>
@@ -834,7 +864,6 @@
                 </div>
                 
                 <!-- Manager Override Controls -->
-                {% if cancellation.status == 'pending' or not cancellation.status %}
                 <div class="override-controls">
                     <h6 class="mb-3">
                         <i class="fas fa-user-shield me-1"></i>
@@ -877,7 +906,6 @@
                         </div>
                     </div>
                 </div>
-                {% endif %}
                 
                 <!-- Action Buttons -->
                 <div class="d-flex justify-content-between mt-3">
@@ -899,7 +927,7 @@
                         <button class="btn btn-success" 
                                 onclick="approveAsPolicy({{ cancellation.id }})">
                             <i class="fas fa-check-circle me-1"></i>
-                            Approve
+                            Process
                         </button>
                     </div>
                     {% endif %}
@@ -929,7 +957,8 @@
                         <th>Student</th>
                         <th>Submit Date</th>
                         <th>Lesson Date</th>
-                        <th>Status</th>
+                        <th>Approval</th>
+                        <th>Payment</th>
                         <th>Note</th>
                         <th>Actions</th>
                     </tr>
@@ -956,18 +985,21 @@
                             </div>
                         </td>
                         <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
-                            {% if cancellation.excluded %}
-                                <span class="badge bg-info">Excluded</span>
-                            {% elif cancellation.charged %}
-                                <span class="badge bg-warning">Charged</span>
-                            {% elif cancellation.status == 'approved' %}
-                                <span class="badge bg-success">Free</span>
-                            {% elif cancellation.cancellation_note %}
-                                <span class="badge bg-purple">Note</span>
-                            {% elif not cancellation.within_deadline %}
-                                <span class="badge bg-danger">Passed Deadline</span>
+                            {% if cancellation.status == 'approved' or cancellation.excluded or cancellation.is_override %}
+                                <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Approved</span>
                             {% else %}
-                                <span class="badge bg-secondary">Pending</span>
+                                <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending</span>
+                            {% endif %}
+                        </td>
+                        <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
+                            {% if cancellation.excluded %}
+                                <span class="badge bg-info"><i class="fas fa-shield-alt me-1"></i>Excluded</span>
+                            {% elif cancellation.charged %}
+                                <span class="badge bg-warning"><i class="fas fa-dollar-sign me-1"></i>Charged</span>
+                            {% elif not cancellation.charged and not cancellation.excluded %}
+                                <span class="badge bg-success"><i class="fas fa-gift me-1"></i>Free</span>
+                            {% elif cancellation.is_override %}
+                                <span class="badge bg-cyan"><i class="fas fa-hand-paper me-1"></i>Override</span>
                             {% endif %}
                         </td>
                         <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
@@ -1265,14 +1297,22 @@ function applyFilters() {
     const dateRangeFilter = document.getElementById('dateRangeFilter');
     const membershipFilter = document.getElementById('membershipFilter');
     const sortFilter = document.getElementById('sortFilter');
+    const approvalStatusFilter = document.getElementById('approvalStatusFilter');
+    const specialFilter = document.getElementById('specialFilter');
     
     currentFilters = {
         search: searchInput.value,
         status: statusFilter.value,
         date_range: dateRangeFilter.value,
         membership: membershipFilter.value,
-        sort: sortFilter.value
+        sort: sortFilter.value,
+        approval_status: approvalStatusFilter.value
     };
+    
+    // Handle special filter
+    if (specialFilter.value) {
+        currentFilters.status = specialFilter.value;
+    }
     
     // Preserve student filter if it exists
     const currentStudentId = {% if current_student_id %}{{ current_student_id }}{% else %}null{% endif %};
@@ -1298,6 +1338,9 @@ function filterByStatus(status) {
     document.querySelectorAll('.filter-tab').forEach(tab => tab.classList.remove('active'));
     document.getElementById(`tab-${status}`).classList.add('active');
     
+    // Reset special filter
+    document.getElementById('specialFilter').value = '';
+    
     // Update filter and apply
     if (status === 'all') {
         document.getElementById('statusFilter').value = '';
@@ -1306,13 +1349,17 @@ function filterByStatus(status) {
         document.getElementById('dateRangeFilter').value = 'today';
         currentFilters.date_range = 'today';
         currentFilters.status = '';
+    } else if (status === 'yesterday') {
+        document.getElementById('dateRangeFilter').value = 'yesterday';
+        currentFilters.date_range = 'yesterday';
+        currentFilters.status = '';
     } else if (status === 'deadline_passed') {
-        document.getElementById('statusFilter').value = 'deadline_passed';
+        document.getElementById('specialFilter').value = 'deadline_passed';
         document.getElementById('dateRangeFilter').value = '7days';
         currentFilters.status = 'deadline_passed';
         currentFilters.date_range = '7days';
     } else if (status === 'notes') {
-        document.getElementById('statusFilter').value = 'note';
+        document.getElementById('specialFilter').value = 'note';
         document.getElementById('dateRangeFilter').value = '7days';
         currentFilters.status = 'note';
         currentFilters.date_range = '7days';
@@ -1323,6 +1370,7 @@ function filterByStatus(status) {
     
     applyFilters();
 }
+
 
 function updateStudentContext() {
     const currentStudentId = {% if current_student_id %}{{ current_student_id }}{% else %}null{% endif %};
@@ -1579,14 +1627,17 @@ function clearFilters() {
     document.getElementById('dateRangeFilter').value = 'month';
     document.getElementById('membershipFilter').value = '';
     document.getElementById('sortFilter').value = 'submit_date';
-    document.getElementById('customDatePicker').classList.remove('show');
+    document.getElementById('approvalStatusFilter').value = '';
+    document.getElementById('specialFilter').value = '';
+    document.getElementById('customDatePicker').style.display = 'none';
     
     currentFilters = {
         search: '',
         status: '',
         date_range: 'month',
         membership: '',
-        sort: 'submit_date'
+        sort: 'submit_date',
+        approval_status: ''
     };
     
     // Preserve student filter if it exists (only clear other filters)
@@ -1932,7 +1983,7 @@ function viewCancellationDetails(cancellationId) {
                         <!-- Student Information -->
                         <div class="col-md-6 mb-3">
                             <div class="card h-100">
-                                <div class="card-header bg-primary text-white">
+                                <div class="card-header bg-primary text-dark">
                                     <h6 class="mb-0"><i class="fas fa-user me-1"></i>Student Information</h6>
                                 </div>
                                 <div class="card-body">
@@ -1948,7 +1999,7 @@ function viewCancellationDetails(cancellationId) {
                         <!-- Lesson Details -->
                         <div class="col-md-6 mb-3">
                             <div class="card h-100">
-                                <div class="card-header bg-info text-white">
+                                <div class="card-header bg-info text-dark">
                                     <h6 class="mb-0"><i class="fas fa-calendar me-1"></i>Lesson Details</h6>
                                 </div>
                                 <div class="card-body">
@@ -1968,7 +2019,7 @@ function viewCancellationDetails(cancellationId) {
                         <!-- Policy Analysis -->
                         <div class="col-md-6 mb-3">
                             <div class="card h-100">
-                                <div class="card-header ${policy.within_deadline ? 'bg-success' : 'bg-danger'} text-white">
+                                <div class="card-header ${policy.within_deadline ? 'bg-success' : 'bg-danger'} text-dark">
                                     <h6 class="mb-0"><i class="fas fa-gavel me-1"></i>Policy Analysis</h6>
                                 </div>
                                 <div class="card-body">
@@ -1989,28 +2040,28 @@ function viewCancellationDetails(cancellationId) {
                             </div>
                         </div>
                         
-                        <!-- Charges & Overrides -->
-                        <div class="col-md-6 mb-3">
-                            <div class="card h-100">
-                                <div class="card-header bg-warning text-dark">
-                                    <h6 class="mb-0"><i class="fas fa-dollar-sign me-1"></i>Charges & Overrides</h6>
-                                </div>
-                                <div class="card-body">
-                                    <p><strong>Will be Charged:</strong> 
-                                        <span class="badge ${cancellation.charged ? 'bg-warning' : 'bg-success'}">
-                                            ${cancellation.charged ? 'Yes' : 'No'}
-                                        </span>
-                                    </p>
-                                    <p><strong>Excluded:</strong> 
-                                        <span class="badge ${cancellation.excluded ? 'bg-info' : 'bg-secondary'}">
-                                            ${cancellation.excluded ? 'Yes' : 'No'}
-                                        </span>
-                                    </p>
-                                    <p><strong>Manager Override:</strong> 
-                                        <span class="badge ${cancellation.is_override ? 'bg-primary' : 'bg-secondary'}">
-                                            ${cancellation.is_override ? 'Yes' : 'No'}
-                                        </span>
-                                    </p>
+<!-- Status & Charges -->
+<div class="col-md-6 mb-3">
+    <div class="card h-100">
+        <div class="card-header bg-warning text-dark">
+            <h6 class="mb-0"><i class="fas fa-dollar-sign me-1"></i>Status & Charges</h6>
+        </div>
+        <div class="card-body">
+            <p><strong>Approval Status:</strong> 
+                <span class="badge ${cancellation.status === 'approved' || cancellation.excluded || cancellation.is_override ? 'bg-success' : 'bg-secondary'}">
+                    ${cancellation.status === 'approved' || cancellation.excluded || cancellation.is_override ? 'Approved' : 'Pending'}
+                </span>
+            </p>
+            <p><strong>Payment Status:</strong> 
+                <span class="badge ${cancellation.excluded ? 'bg-info' : (cancellation.charged ? 'bg-warning' : 'bg-success')}">
+                    ${cancellation.excluded ? 'Excluded' : (cancellation.charged ? 'Charged' : 'Free')}
+                </span>
+            </p>
+            <p><strong>Manager Override:</strong> 
+                <span class="badge ${cancellation.is_override ? 'bg-primary' : 'bg-secondary'}">
+                    ${cancellation.is_override ? 'Yes' : 'No'}
+                </span>
+            </p>
                                     ${cancellation.approved_by ? `<p><strong>Approved By:</strong> ${cancellation.approved_by}</p>` : ''}
                                     ${cancellation.exclusion_reason ? `<p><strong>Exclusion Reason:</strong><br><small>${cancellation.exclusion_reason}</small></p>` : ''}
                                 </div>
@@ -2085,7 +2136,7 @@ function viewCancellationDetails(cancellationId) {
                         ${cancellation.manager_notes ? `
                         <div class="col-12 mb-3">
                             <div class="card">
-                                <div class="card-header bg-dark text-white">
+                                <div class="card-header bg-dark text-dark">
                                     <h6 class="mb-0"><i class="fas fa-clipboard me-1"></i>Manager Notes</h6>
                                 </div>
                                 <div class="card-body">
@@ -2099,7 +2150,7 @@ function viewCancellationDetails(cancellationId) {
                         ${data.action_history && data.action_history.length > 0 ? `
                         <div class="col-12 mb-3">
                             <div class="card">
-                                <div class="card-header bg-info text-white">
+                                <div class="card-header bg-info text-dark">
                                     <h6 class="mb-0"><i class="fas fa-history me-1"></i>Action History</h6>
                                 </div>
                                 <div class="card-body">
@@ -2391,9 +2442,9 @@ document.addEventListener('DOMContentLoaded', function() {
         dateRangeFilter.addEventListener('change', function() {
             const customPicker = document.getElementById('customDatePicker');
             if (this.value === 'custom') {
-                customPicker.classList.add('show');
+                customPicker.style.display = 'block';
             } else {
-                customPicker.classList.remove('show');
+                customPicker.style.display = 'none';
             }
         });
     }
@@ -2413,7 +2464,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (currentDateRange === 'custom') {
         const customPicker = document.getElementById('customDatePicker');
         if (customPicker) {
-            customPicker.classList.add('show');
+            customPicker.style.display = 'block';
         }
     }
 });

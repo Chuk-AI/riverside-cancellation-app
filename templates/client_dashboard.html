@@ -88,10 +88,6 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
       <div class="card-body">
         <div class="row align-items-center">
           <div class="col-md-8">
-            <h1 class="h3 mb-2">
-              <i class="fas fa-user-circle me-2"></i>
-              Welcome back, {{ client.first_name }}!
-            </h1>
             <p class="mb-0 opacity-75">
               Input your cancelled lesson and review the outcome before
               submitting
@@ -212,12 +208,13 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
             Membership
           </h5>
           <p class="mb-2">
+            if received by
+            <strong>{{ cancellation_policy.deadline_display }}</strong>,
             <strong
               >{{ cancellation_policy.free_notices }} free cancellation notices
               per month</strong
             >
-            if received by
-            <strong>{{ cancellation_policy.deadline_display }}</strong>.
+            are allowed.
           </p>
           <p class="mb-0 small text-muted">
             <strong>Remember:</strong> Sequential lessons can be included in one

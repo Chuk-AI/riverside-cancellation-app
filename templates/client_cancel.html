@@ -82,6 +82,36 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     background-color: #2e59d9;
     border-color: #2e59d9;
   }
+
+  .policy-card-error {
+    border: 2px solid #dc2626 !important;
+    background-color: #fef2f2 !important;
+    animation: shake 0.5s;
+  }
+
+  @keyframes shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-10px);
+    }
+    75% {
+      transform: translateX(10px);
+    }
+  }
+
+  .policy-error-message {
+    color: #dc2626;
+    font-weight: bold;
+    margin-top: 0.5rem;
+    display: none;
+  }
+
+  .policy-error-message.show {
+    display: block;
+  }
 </style>
 {% endblock %} {% block content %}
 <div class="cancellation-form">
@@ -239,7 +269,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       <div class="card-header">
         <h5 class="mb-0">
           <i class="fas fa-calendar-plus me-2"></i>
-          Would you like to Book a Lesson? (Optional)
+          Would you like to book a lesson? (Optional)
         </h5>
       </div>
       <div class="card-body">
@@ -308,7 +338,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     </div>
 
     <!-- Policy Acknowledgment -->
-    <div class="card">
+    <div class="card" id="policyCard">
       <div class="card-body">
         <div class="form-check mb-3">
           <input
@@ -321,6 +351,11 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           <label class="form-check-label" for="policy_acknowledgment">
             I understand and agree to the cancellation terms shown above
           </label>
+        </div>
+        <div class="policy-error-message" id="policyError">
+          <i class="fas fa-exclamation-circle me-1"></i>
+          Please check the box to acknowledge the cancellation policy before
+          submitting.
         </div>
 
         <div class="d-grid gap-2 d-md-flex justify-content-md-end">
@@ -338,6 +373,12 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
   // Form validation
   document.getElementById('policy_acknowledgment').addEventListener('change', function() {
       document.getElementById('submitBtn').disabled = !this.checked;
+
+      // Remove error styling when checkbox is checked
+      if (this.checked) {
+          document.getElementById('policyCard').classList.remove('policy-card-error');
+          document.getElementById('policyError').classList.remove('show');
+      }
   });
 
   // Toggle additional lessons section
@@ -380,7 +421,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           preview.innerHTML = `
               <div class="text-center">
                   <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
-                  <p class="mb-0">Enter lesson details to see cancellation status</p>
+                  <p class="mb-0">Enter lesson details above.  The cancellation outcome will display here.</p>
               </div>
           `;
           preview.className = 'status-preview';
@@ -465,6 +506,23 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
 
   // Form submission handling
   document.getElementById('cancellationForm').addEventListener('submit', function(e) {
+      // Check if policy acknowledgment is checked
+      const policyCheckbox = document.getElementById('policy_acknowledgment');
+      if (!policyCheckbox.checked) {
+          e.preventDefault();
+          const policyCard = document.getElementById('policyCard');
+          const policyError = document.getElementById('policyError');
+
+          // Add error styling
+          policyCard.classList.add('policy-card-error');
+          policyError.classList.add('show');
+
+          // Scroll to the policy card
+          policyCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          return;
+      }
+
       const submitBtn = document.getElementById('submitBtn');
       submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
       submitBtn.disabled = true;
