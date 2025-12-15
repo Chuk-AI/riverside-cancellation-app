@@ -2169,8 +2169,8 @@ def client_history():
 @admin_required
 def manager_dashboard():
     """Manager dashboard"""
-    # Add current_time for template
-    current_time = toronto_now().replace(tzinfo=None)  # Convert to naive for template
+    # Add current_time for template - keep timezone-aware to match created_at
+    current_time = toronto_now()
 
     # Get properly calculated stats
     stats = get_dashboard_stats()
