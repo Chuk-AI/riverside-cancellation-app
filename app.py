@@ -1716,7 +1716,7 @@ def login():
             session["user_name"] = admin["email"]
             conn.close()
             log_action("login", f"Admin login: {admin['role']}")
-            
+
             # Redirect managers to cancellations page
             return redirect(url_for("manager_cancellations"))
 
@@ -1732,7 +1732,7 @@ def login():
             session["user_role"] = "client"
             session["user_name"] = f"{student['first_name']} {student['last_name']}"
             log_action("login", f"Client login: {student['email']}")
-            
+
             # Redirect clients to cancel lesson page
             return redirect(url_for("client_cancel"))
 
@@ -1748,7 +1748,7 @@ def logout():
     user_name = session.get("user_name", "User")
     log_action("logout", f"User logged out: {user_name}")
     session.clear()
-    
+
     return redirect(url_for("login"))
 
 
@@ -1921,7 +1921,7 @@ def client_cancel():
         # All cancellations start as 'pending' - manager must review and approve
         # The 'charged' field indicates if it will be charged, but status is always pending initially
         initial_status = "pending"
-        
+
         # Insert cancellation - UPDATED with new fields
         conn = get_db()
         cursor = conn.execute(
@@ -2253,9 +2253,7 @@ def manager_dashboard():
         )
         # Localize to Pacific timezone since database stores in Pacific time
         pacific_tz = pytz.timezone("America/Los_Angeles")
-        action_dict["created_at"] = pacific_tz.localize(
-            action_dict["created_at"]
-        )
+        action_dict["created_at"] = pacific_tz.localize(action_dict["created_at"])
         action_dict["lesson_date"] = datetime.strptime(
             action["lesson_date"], "%Y-%m-%d"
         ).date()
@@ -2751,7 +2749,7 @@ def process_cancellation():
     action = data.get("action")  # 'approve_policy', 'force_free', 'force_charge'
     cancellation_id = data.get("cancellation_id")
     reason = data.get("reason", "")
-    
+
     # DEBUG LOGGING
     print(f"\n=== PROCESS CANCELLATION DEBUG ===")
     print(f"Action: {action}")
@@ -2813,8 +2811,11 @@ def process_cancellation():
             # Use the ORIGINAL charge status that was calculated when submitted
             # Don't recalculate based on current time!
             should_be_charged = bool(cancellation_dict["charged"])
-            charge_reason = cancellation_dict.get("manager_notes") or "Processed according to membership policy"
-            
+            charge_reason = (
+                cancellation_dict.get("manager_notes")
+                or "Processed according to membership policy"
+            )
+
             print(f"Should be charged: {should_be_charged}")
             print(f"Charge reason: {charge_reason}")
             print(f"Manager email: {session.get('user_email', 'Unknown Manager')}")
@@ -2963,7 +2964,7 @@ def process_cancellation():
 
         # Log the action
         log_action("cancellation_processed", log_message)
-        
+
         print(f"Returning success response")
         print(f"===================================\n")
 
@@ -3769,7 +3770,7 @@ def manager_cancellations():
     elif filter_status == "free":
         where_clauses.append("c.charged = 0 AND c.status = 'approved'")
     elif filter_status == "charged":
-        where_clauses.append("c.charged = 1")
+        where_clauses.append("c.charged = 1 AND c.excluded = 0")
     elif filter_status == "excluded":
         where_clauses.append("c.excluded = 1")
     elif filter_status == "note":
@@ -3777,15 +3778,29 @@ def manager_cancellations():
             "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''"
         )
     elif filter_status == "deadline_passed":
-        where_clauses.append("c.deadline_passed = 1")
+        where_clauses.append(
+            """
+        (
+            (s.membership_level = 'Gold' AND 
+             datetime(c.lesson_date || ' ' || c.lesson_time) <= datetime(c.created_at, '+2 hours'))
+            OR
+            (s.membership_level != 'Gold' AND 
+             datetime(c.lesson_date || ' 18:00:00', '-1 day') <= datetime(c.created_at))
+        )
+    """
+        )
     elif filter_status == "override":
         where_clauses.append("c.is_override = 1")
-    
+
     # Approval status filter (independent from payment status filter)
     if approval_status == "approved":
-        where_clauses.append("(c.status = 'approved' OR c.excluded = 1 OR c.is_override = 1)")
+        where_clauses.append(
+            "(c.status = 'approved' OR c.excluded = 1 OR c.is_override = 1)"
+        )
     elif approval_status == "pending":
-        where_clauses.append("c.status = 'pending' AND c.excluded = 0 AND c.is_override = 0")
+        where_clauses.append(
+            "c.status = 'pending' AND c.excluded = 0 AND c.is_override = 0"
+        )
 
     # Search filter
     if search:
@@ -3854,8 +3869,11 @@ def manager_cancellations():
 
         # Status class for CSS - UPDATED to use approved_by
         # Check if approved (has approved_by email) or still pending
-        is_approved = cancellation.get("approved_by") is not None and cancellation.get("approved_by") != ""
-        
+        is_approved = (
+            cancellation.get("approved_by") is not None
+            and cancellation.get("approved_by") != ""
+        )
+
         # Priority 1: Special markers (notes, override, excluded)
         if cancellation.get("cancellation_note"):
             cancellation["status_class"] = "note"
@@ -3888,7 +3906,7 @@ def manager_cancellations():
             # Localize lesson_datetime to Pacific timezone for comparison
             pacific_tz = pytz.timezone("America/Los_Angeles")
             lesson_datetime = pacific_tz.localize(lesson_datetime)
-            
+
             hours_notice = (
                 lesson_datetime - cancellation["created_at"]
             ).total_seconds() / 3600
@@ -6601,7 +6619,7 @@ def export_cancellations_excel():
         if filter_status == "free":
             where_clauses.append("c.charged = 0 AND c.status = 'approved'")
         elif filter_status == "charged":
-            where_clauses.append("c.charged = 1")
+            where_clauses.append("c.charged = 1 AND c.excluded = 0")
         elif filter_status == "excluded":
             where_clauses.append("c.excluded = 1")
         elif filter_status == "note":
@@ -6609,7 +6627,17 @@ def export_cancellations_excel():
                 "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''"
             )
         elif filter_status == "deadline_passed":
-            where_clauses.append("c.deadline_passed = 1")
+            where_clauses.append(
+                """
+        (
+            (s.membership_level = 'Gold' AND 
+             datetime(c.lesson_date || ' ' || c.lesson_time) <= datetime(c.created_at, '+2 hours'))
+            OR
+            (s.membership_level != 'Gold' AND 
+             datetime(c.lesson_date || ' 18:00:00', '-1 day') <= datetime(c.created_at))
+        )
+    """
+            )
         elif filter_status == "override":
             where_clauses.append("c.is_override = 1")
 

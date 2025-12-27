@@ -177,18 +177,18 @@ Riverside Equestrian{% endblock %} {% block extra_css %}
 
         <div class="row text-center">
           <div class="col-6">
+            <h4 class="text-info mb-0">
+              {{ cancellation_policy.deadline_display }}
+            </h4>
+            <small class="text-muted">Deadline</small>
+          </div>
+          <div class="col-6">
             <h4
               class="{% if cancellation_status.remaining == 0 %}remaining-free-zero{% else %}text-success{% endif %} mb-0"
             >
               {{ cancellation_status.remaining }}
             </h4>
             <small class="text-muted">Remaining Free</small>
-          </div>
-          <div class="col-6">
-            <h4 class="text-info mb-0">
-              {{ cancellation_policy.deadline_display }}
-            </h4>
-            <small class="text-muted">Deadline</small>
           </div>
         </div>
       </div>
