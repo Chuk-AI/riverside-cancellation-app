@@ -112,6 +112,41 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
   .policy-error-message.show {
     display: block;
   }
+
+  /* Field error states */
+  .form-control.field-error {
+    border: 2px solid #dc2626 !important;
+    background-color: #fef2f2 !important;
+    animation: shake 0.5s;
+  }
+
+  .form-control.field-error:focus {
+    border-color: #dc2626 !important;
+    box-shadow: 0 0 0 0.25rem rgba(220, 38, 38, 0.25) !important;
+  }
+
+  .form-floating.has-error label {
+    color: #dc2626;
+  }
+
+  .field-error-message {
+    color: #dc2626;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-top: 0.25rem;
+    display: none;
+  }
+
+  .field-error-message.show {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    animation: slideDown 0.3s ease;
+  }
+
+  .field-error-message i {
+    font-size: 0.75rem;
+  }
 </style>
 {% endblock %} {% block content %}
 <div class="cancellation-form">
@@ -180,7 +215,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       <div class="card-body">
         <div class="row">
           <div class="col-md-6 mb-3">
-            <div class="form-floating">
+            <div class="form-floating" id="lessonDateContainer">
               <input
                 type="date"
                 class="form-control"
@@ -188,26 +223,34 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 name="lesson_date"
                 required
                 min="{{ min_date }}"
-                onchange="updateStatusPreview()"
+                onchange="updateStatusPreview(); clearFieldError('lesson_date')"
               />
               <label for="lesson_date">
                 <i class="fas fa-calendar me-1"></i>Lesson Date
               </label>
             </div>
+            <div class="field-error-message" id="lessonDateError">
+              <i class="fas fa-exclamation-circle"></i>
+              <span>Please select a lesson date</span>
+            </div>
           </div>
           <div class="col-md-6 mb-3">
-            <div class="form-floating">
+            <div class="form-floating" id="lessonTimeContainer">
               <input
                 type="time"
                 class="form-control"
                 id="lesson_time"
                 name="lesson_time"
                 required
-                onchange="updateStatusPreview()"
+                onchange="updateStatusPreview(); clearFieldError('lesson_time')"
               />
               <label for="lesson_time">
                 <i class="fas fa-clock me-1"></i>Lesson Time
               </label>
+            </div>
+            <div class="field-error-message" id="lessonTimeError">
+              <i class="fas fa-exclamation-circle"></i>
+              <span>Please select a lesson time</span>
             </div>
           </div>
         </div>
@@ -507,50 +550,69 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
 
   // Form submission handling
   document.getElementById('cancellationForm').addEventListener('submit', function(e) {
+      let hasErrors = false;
+      let firstErrorField = null;
+
+      // Clear all previous errors first
+      clearAllFieldErrors();
+
+      // Validate lesson date
+      const lessonDate = document.getElementById('lesson_date').value;
+      if (!lessonDate) {
+          showFieldError('lesson_date', 'Please select a lesson date');
+          hasErrors = true;
+          if (!firstErrorField) firstErrorField = 'lesson_date';
+      }
+
+      // Validate lesson time
+      const lessonTime = document.getElementById('lesson_time').value;
+      if (!lessonTime) {
+          showFieldError('lesson_time', 'Please select a lesson time');
+          hasErrors = true;
+          if (!firstErrorField) firstErrorField = 'lesson_time';
+      }
+
+      // Validate that lesson is in the future (only if both date and time are provided)
+      if (lessonDate && lessonTime) {
+          const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
+          const now = new Date();
+
+          if (lessonDateTime <= now) {
+              showFieldError('lesson_date', 'Cannot cancel lessons that have already occurred');
+              showFieldError('lesson_time', 'Lesson time is in the past');
+              hasErrors = true;
+              if (!firstErrorField) firstErrorField = 'lesson_date';
+          }
+      }
+
       // Check if policy acknowledgment is checked
       const policyCheckbox = document.getElementById('policy_acknowledgment');
       if (!policyCheckbox.checked) {
-          e.preventDefault();
           const policyCard = document.getElementById('policyCard');
           const policyError = document.getElementById('policyError');
-
-          // Add error styling
           policyCard.classList.add('policy-card-error');
           policyError.classList.add('show');
+          hasErrors = true;
+          if (!firstErrorField) firstErrorField = 'policy_acknowledgment';
+      }
 
-          // Scroll to the policy card
-          policyCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // If there are errors, prevent submission and scroll to first error
+      if (hasErrors) {
+          e.preventDefault();
 
+          // Scroll to the first error field
+          if (firstErrorField === 'policy_acknowledgment') {
+              document.getElementById('policyCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+              document.getElementById(firstErrorField).scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
           return;
       }
 
+      // Show processing state
       const submitBtn = document.getElementById('submitBtn');
       submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
       submitBtn.disabled = true;
-
-      // Validate main lesson inputs
-      const lessonDate = document.getElementById('lesson_date').value;
-      const lessonTime = document.getElementById('lesson_time').value;
-
-      if (!lessonDate || !lessonTime) {
-          e.preventDefault();
-          alert('Please enter both lesson date and time.');
-          submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation Notice';
-          submitBtn.disabled = false;
-          return;
-      }
-
-      // Validate that lesson is in the future
-      const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
-      const now = new Date();
-
-      if (lessonDateTime <= now) {
-          e.preventDefault();
-          alert('Cannot cancel lessons that have already occurred.');
-          submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation Notice';
-          submitBtn.disabled = false;
-          return;
-      }
 
       // Show confirmation dialog for charged cancellations
       const preview = document.getElementById('statusPreview');
@@ -558,11 +620,57 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           if (!confirm('This cancellation will result in charges. Are you sure you want to proceed?')) {
               e.preventDefault();
               submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation Notice';
-              submitBtn.disabled = false;
+              submitBtn.disabled = !policyCheckbox.checked;
               return;
           }
       }
   });
+
+  // Show error on a specific field
+  function showFieldError(fieldId, message) {
+      const field = document.getElementById(fieldId);
+      const container = field.closest('.form-floating');
+      const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
+      const errorElement = document.getElementById(errorId);
+
+      // Add error styling to field
+      field.classList.add('field-error');
+      container.classList.add('has-error');
+
+      // Show error message with custom text
+      if (errorElement) {
+          errorElement.querySelector('span').textContent = message;
+          errorElement.classList.add('show');
+      }
+  }
+
+  // Clear error on a specific field
+  function clearFieldError(fieldId) {
+      const field = document.getElementById(fieldId);
+      const container = field.closest('.form-floating');
+      const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
+      const errorElement = document.getElementById(errorId);
+
+      // Remove error styling
+      field.classList.remove('field-error');
+      container.classList.remove('has-error');
+
+      // Hide error message
+      if (errorElement) {
+          errorElement.classList.remove('show');
+      }
+  }
+
+  // Clear all field errors
+  function clearAllFieldErrors() {
+      // Clear date and time field errors
+      clearFieldError('lesson_date');
+      clearFieldError('lesson_time');
+
+      // Clear policy error
+      document.getElementById('policyCard').classList.remove('policy-card-error');
+      document.getElementById('policyError').classList.remove('show');
+  }
 
   // Auto-focus first input
   document.addEventListener('DOMContentLoaded', function() {
@@ -572,6 +680,28 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('lesson_date').min = today;
       document.getElementById('return_date').min = today;
+
+      // Add input/focus listeners to clear errors when user interacts with fields
+      document.getElementById('lesson_date').addEventListener('focus', function() {
+          clearFieldError('lesson_date');
+      });
+
+      document.getElementById('lesson_time').addEventListener('focus', function() {
+          clearFieldError('lesson_time');
+      });
+
+      // Also clear errors on input for immediate feedback
+      document.getElementById('lesson_date').addEventListener('input', function() {
+          if (this.value) {
+              clearFieldError('lesson_date');
+          }
+      });
+
+      document.getElementById('lesson_time').addEventListener('input', function() {
+          if (this.value) {
+              clearFieldError('lesson_time');
+          }
+      });
   });
 </script>
 {% endblock %}
