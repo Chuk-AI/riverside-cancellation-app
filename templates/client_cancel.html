@@ -204,6 +204,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     method="POST"
     action="{{ url_for('client_cancel') }}"
     id="cancellationForm"
+    novalidate
   >
     <div class="card">
       <div class="card-header">
@@ -221,7 +222,6 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 class="form-control"
                 id="lesson_date"
                 name="lesson_date"
-                required
                 min="{{ min_date }}"
                 onchange="updateStatusPreview(); clearFieldError('lesson_date')"
               />
@@ -231,7 +231,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             </div>
             <div class="field-error-message" id="lessonDateError">
               <i class="fas fa-exclamation-circle"></i>
-              <span>Please select a lesson date</span>
+              <span>Fill this field - Lesson date is required</span>
             </div>
           </div>
           <div class="col-md-6 mb-3">
@@ -241,7 +241,6 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 class="form-control"
                 id="lesson_time"
                 name="lesson_time"
-                required
                 onchange="updateStatusPreview(); clearFieldError('lesson_time')"
               />
               <label for="lesson_time">
@@ -250,7 +249,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             </div>
             <div class="field-error-message" id="lessonTimeError">
               <i class="fas fa-exclamation-circle"></i>
-              <span>Please select a lesson time</span>
+              <span>Fill this field - Lesson time is required</span>
             </div>
           </div>
         </div>
@@ -390,7 +389,6 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
             type="checkbox"
             id="policy_acknowledgment"
             name="policy_acknowledgment"
-            required
           />
           <label class="form-check-label" for="policy_acknowledgment">
             I understand and agree to the cancellation terms shown above
@@ -398,12 +396,12 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         </div>
         <div class="policy-error-message" id="policyError">
           <i class="fas fa-exclamation-circle me-1"></i>
-          Please check the box to acknowledge the cancellation policy before
-          submitting.
+          Fill this field - You must acknowledge the cancellation policy before
+          submitting
         </div>
 
         <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-          <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
+          <button type="submit" class="btn btn-primary" id="submitBtn">
             <i class="fas fa-paper-plane me-2"></i>
             Submit Cancellation Notice
           </button>
@@ -414,10 +412,8 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
 </div>
 {% endblock %} {% block extra_js %}
 <script>
-  // Form validation
+  // Form validation - clear policy error when checkbox is checked
   document.getElementById('policy_acknowledgment').addEventListener('change', function() {
-      document.getElementById('submitBtn').disabled = !this.checked;
-
       // Remove error styling when checkbox is checked
       if (this.checked) {
           document.getElementById('policyCard').classList.remove('policy-card-error');
@@ -559,7 +555,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       // Validate lesson date
       const lessonDate = document.getElementById('lesson_date').value;
       if (!lessonDate) {
-          showFieldError('lesson_date', 'Please select a lesson date');
+          showFieldError('lesson_date', 'Fill this field - Lesson date is required');
           hasErrors = true;
           if (!firstErrorField) firstErrorField = 'lesson_date';
       }
@@ -567,7 +563,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       // Validate lesson time
       const lessonTime = document.getElementById('lesson_time').value;
       if (!lessonTime) {
-          showFieldError('lesson_time', 'Please select a lesson time');
+          showFieldError('lesson_time', 'Fill this field - Lesson time is required');
           hasErrors = true;
           if (!firstErrorField) firstErrorField = 'lesson_time';
       }
@@ -620,7 +616,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           if (!confirm('This cancellation will result in charges. Are you sure you want to proceed?')) {
               e.preventDefault();
               submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation Notice';
-              submitBtn.disabled = !policyCheckbox.checked;
+              submitBtn.disabled = false;
               return;
           }
       }
