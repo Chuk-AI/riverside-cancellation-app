@@ -12,7 +12,15 @@
         position: relative;
         overflow: hidden;
     }
-    
+    @keyframes statsUpdate {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+    }
+
+    .stats-updating {
+        animation: statsUpdate 0.3s ease;
+    }
     .cancellation-card::before {
         content: '';
         position: absolute;
@@ -493,7 +501,7 @@
 {% endif %}
 
 <!-- Context-Aware Stats - Adapt based on current filter/view -->
-<div class="row mb-4">
+<div class="row mb-4" id="statsCardsContainer">
     <div class="col-lg mb-3">
         <div class="stats-card">
             <div class="icon text-{{ stats.box1_color }}">
@@ -1265,6 +1273,7 @@ function goBackToList() {
 
 
 // SINGLE loadCancellations function (removed duplicate)
+
 function loadCancellations() {
     const params = new URLSearchParams(currentFilters);
     
@@ -1295,8 +1304,28 @@ function loadCancellations() {
             document.getElementById('listViewTable').innerHTML = newTable.innerHTML;
         }
         
-        // Update stats if they're in the response
-        updateStats(doc);
+        // **FIX: Update stats cards container (entire row with all boxes)**
+        const newStatsContainer = doc.getElementById('statsCardsContainer');
+        if (newStatsContainer) {
+            const container = document.getElementById('statsCardsContainer');
+            // Optional: Add visual feedback
+            container.classList.add('stats-updating');
+            container.innerHTML = newStatsContainer.innerHTML;
+            setTimeout(() => container.classList.remove('stats-updating'), 300);
+        }
+        
+        // **FIX: Update filter tabs badges**
+        const newTabAll = doc.getElementById('tab-all');
+        const newTabToday = doc.getElementById('tab-today');
+        const newTabYesterday = doc.getElementById('tab-yesterday');
+        const newTabDeadline = doc.getElementById('tab-deadline');
+        const newTabNotes = doc.getElementById('tab-notes');
+        
+        if (newTabAll) document.getElementById('tab-all').innerHTML = newTabAll.innerHTML;
+        if (newTabToday) document.getElementById('tab-today').innerHTML = newTabToday.innerHTML;
+        if (newTabYesterday) document.getElementById('tab-yesterday').innerHTML = newTabYesterday.innerHTML;
+        if (newTabDeadline) document.getElementById('tab-deadline').innerHTML = newTabDeadline.innerHTML;
+        if (newTabNotes) document.getElementById('tab-notes').innerHTML = newTabNotes.innerHTML;
         
         // Show/hide no results
         const cancellations = document.querySelectorAll('#cancellationsList .cancellation-card, #listViewTable tr');
@@ -1693,16 +1722,7 @@ function clearStudentFilter() {
     window.location.href = newUrl;
 }
 
-function updateStats(doc) {
-    const statsCards = document.querySelectorAll('.stats-card .number');
-    const newStatsCards = doc.querySelectorAll('.stats-card .number');
-    
-    statsCards.forEach((card, index) => {
-        if (newStatsCards[index]) {
-            card.textContent = newStatsCards[index].textContent;
-        }
-    });
-}
+
 
 // Utility function to show alerts
 function showAlert(message, type = 'info') {

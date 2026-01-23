@@ -285,7 +285,7 @@ Equestrian{% endblock %} {% block extra_css %}
 
 <!-- 5-Box Stats Overview -->
 <!-- First Row: This Month's Stats -->
-<div class="row mb-4">
+<div class="row mb-4" id="monthlyStatsContainer">
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="card stats-card">
       <div class="card-body">
@@ -356,7 +356,7 @@ Equestrian{% endblock %} {% block extra_css %}
 </div>
 
 <!-- Second Row: System Overview -->
-<div class="row mb-4">
+<div class="row mb-4" id="systemStatsContainer">
   <div class="col-lg-3 col-md-6 mb-3">
     <div class="card stats-card">
       <div class="card-body">
@@ -481,7 +481,7 @@ Equestrian{% endblock %} {% block extra_css %}
 <div class="row">
   <!-- Cancellations by Submission Date -->
   <div class="col-lg-6 mb-4">
-    <div class="card">
+    <div class="card" id="cancellationsBySubmission">
       <div
         class="card-header d-flex justify-content-between align-items-center"
       >
@@ -599,7 +599,7 @@ Equestrian{% endblock %} {% block extra_css %}
 
   <!-- Cancellations by Lesson Date -->
   <div class="col-lg-6 mb-4">
-    <div class="card">
+    <div class="card" id="cancellationsByLesson">
       <div
         class="card-header d-flex justify-content-between align-items-center"
       >
@@ -1479,5 +1479,207 @@ Equestrian{% endblock %} {% block extra_css %}
           });
   }
 </script>
+<script>
+  // Dashboard Auto-Refresh System
+  let dashboardRefreshInterval = null;
 
+  /**
+   * Refreshes dashboard statistics without full page reload
+   */
+  function refreshDashboardStats() {
+    fetch('{{ url_for("manager_dashboard") }}', {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    })
+      .then((response) => response.text())
+      .then((html) => {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+
+        // Update monthly stats (This Month's Stats)
+        const newMonthlyStats = doc.getElementById("monthlyStatsContainer");
+        if (newMonthlyStats) {
+          const currentContainer = document.getElementById(
+            "monthlyStatsContainer",
+          );
+          if (currentContainer) {
+            currentContainer.classList.add("updating");
+            currentContainer.innerHTML = newMonthlyStats.innerHTML;
+            setTimeout(
+              () => currentContainer.classList.remove("updating"),
+              300,
+            );
+          }
+        }
+
+        // Update system stats (System Overview)
+        const newSystemStats = doc.getElementById("systemStatsContainer");
+        if (newSystemStats) {
+          const currentContainer = document.getElementById(
+            "systemStatsContainer",
+          );
+          if (currentContainer) {
+            currentContainer.classList.add("updating");
+            currentContainer.innerHTML = newSystemStats.innerHTML;
+            setTimeout(
+              () => currentContainer.classList.remove("updating"),
+              300,
+            );
+          }
+        }
+
+        // Update the "Last updated" timestamp
+        const currentTimeEl = doc.querySelector(".col-md-4.text-md-end small");
+        if (currentTimeEl) {
+          const timestampEl = document.querySelector(
+            ".col-md-4.text-md-end small",
+          );
+          if (timestampEl) {
+            timestampEl.textContent = currentTimeEl.textContent;
+          }
+        }
+
+        // Update recent cancellations tables if they exist
+        updateRecentCancellationsTables(doc);
+
+        console.log("Dashboard stats refreshed successfully");
+      })
+      .catch((error) => {
+        console.error("Error refreshing dashboard stats:", error);
+      });
+  }
+
+  /**
+   * Updates the recent cancellations tables
+   */
+  function updateRecentCancellationsTables(doc) {
+    // Update "Cancellations by Submission Date" table
+    const newSubmissionTable = doc.querySelector("#cancellationsBySubmission");
+    if (newSubmissionTable) {
+      const currentSubmissionTable = document.querySelector(
+        "#cancellationsBySubmission",
+      );
+      if (currentSubmissionTable) {
+        currentSubmissionTable.innerHTML = newSubmissionTable.innerHTML;
+        // Re-attach click handlers if needed
+        reattachTableClickHandlers(currentSubmissionTable);
+      }
+    }
+
+    // Update "Cancellations by Lesson Date" table
+    const newLessonTable = doc.querySelector("#cancellationsByLesson");
+    if (newLessonTable) {
+      const currentLessonTable = document.querySelector(
+        "#cancellationsByLesson",
+      );
+      if (currentLessonTable) {
+        currentLessonTable.innerHTML = newLessonTable.innerHTML;
+        // Re-attach click handlers if needed
+        reattachTableClickHandlers(currentLessonTable);
+      }
+    }
+  }
+
+  /**
+   * Re-attaches click handlers to table rows after update
+   */
+  function reattachTableClickHandlers(tableContainer) {
+    // Find all clickable rows and ensure they work
+    const clickableRows = tableContainer.querySelectorAll("tr[onclick]");
+    clickableRows.forEach((row) => {
+      const onclickAttr = row.getAttribute("onclick");
+      if (onclickAttr) {
+        // The onclick attribute is already there, so it should work
+        // But we can ensure it's properly bound
+        row.style.cursor = "pointer";
+      }
+    });
+  }
+
+  /**
+   * Starts auto-refresh with 30-second interval
+   */
+  function startDashboardAutoRefresh() {
+    if (dashboardRefreshInterval) {
+      clearInterval(dashboardRefreshInterval);
+    }
+    dashboardRefreshInterval = setInterval(refreshDashboardStats, 30000); // 30 seconds
+    console.log("Dashboard auto-refresh started (refreshing every 30 seconds)");
+  }
+
+  /**
+   * Stops auto-refresh
+   */
+  function stopDashboardAutoRefresh() {
+    if (dashboardRefreshInterval) {
+      clearInterval(dashboardRefreshInterval);
+      dashboardRefreshInterval = null;
+      console.log("Dashboard auto-refresh stopped");
+    }
+  }
+
+  /**
+   * Manual refresh triggered by user
+   */
+  function manualRefreshDashboard() {
+    console.log("Manual refresh triggered");
+    refreshDashboardStats();
+    // Show visual feedback
+    const allStatCards = document.querySelectorAll(".stats-card");
+    allStatCards.forEach((card) => {
+      card.classList.add("updating");
+      setTimeout(() => card.classList.remove("updating"), 300);
+    });
+  }
+
+  // Initialize auto-refresh on page load
+  document.addEventListener("DOMContentLoaded", function () {
+    console.log("Dashboard loaded, initializing auto-refresh...");
+    startDashboardAutoRefresh();
+
+    // Optional: Add visibility change handler to pause/resume when tab is not visible
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) {
+        console.log("Tab hidden, pausing auto-refresh");
+        stopDashboardAutoRefresh();
+      } else {
+        console.log("Tab visible, resuming auto-refresh");
+        startDashboardAutoRefresh();
+        // Refresh immediately when tab becomes visible
+        refreshDashboardStats();
+      }
+    });
+  });
+
+  // Optional: Add keyboard shortcut for manual refresh (Ctrl+R or Cmd+R)
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "r") {
+      e.preventDefault();
+      manualRefreshDashboard();
+    }
+  });
+</script>
+
+<!-- OPTIONAL: Add update animation CSS -->
+<style>
+  @keyframes dashboardUpdate {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.02);
+      opacity: 0.9;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .updating {
+    animation: dashboardUpdate 0.3s ease;
+  }
+</style>
 {% endblock %}
