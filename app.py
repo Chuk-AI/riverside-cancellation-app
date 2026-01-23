@@ -1514,7 +1514,11 @@ def get_dashboard_stats():
                 SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded,
                 SUM(CASE WHEN is_override = 1 THEN 1 ELSE 0 END) as override_count,
                 SUM(CASE WHEN deadline_passed = 1 THEN 1 ELSE 0 END) as deadline_passed,
-                SUM(CASE WHEN cancellation_note IS NOT NULL AND cancellation_note != '' THEN 1 ELSE 0 END) as with_notes
+                SUM(CASE WHEN 
+                    (sequential_lessons IS NOT NULL AND sequential_lessons != '' AND sequential_lessons != '[]') 
+                    OR 
+                    (error_report IS NOT NULL AND error_report != '')
+                THEN 1 ELSE 0 END) as with_notes
                FROM cancellations 
                WHERE created_at >= ? AND created_at < ?""",
             (month_start, next_month),
@@ -3775,7 +3779,11 @@ def manager_cancellations():
         where_clauses.append("c.excluded = 1")
     elif filter_status == "note":
         where_clauses.append(
-            "c.cancellation_note IS NOT NULL AND c.cancellation_note != ''"
+            """(
+                (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
+                OR 
+                (c.error_report IS NOT NULL AND c.error_report != '')
+            )"""
         )
     elif filter_status == "deadline_passed":
         where_clauses.append(
@@ -4218,7 +4226,11 @@ def manager_cancellations():
             SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
             SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday_cancellations,
             SUM(CASE WHEN c.deadline_passed = 1 AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as deadline_passed,
-            SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as with_notes
+            SUM(CASE WHEN 
+                (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
+                OR 
+                (c.error_report IS NOT NULL AND c.error_report != '')
+            THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
         JOIN students s ON c.student_id = s.id
         """
@@ -4521,7 +4533,11 @@ def manager_analytics():
                 CAST(SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) AS INTEGER) as excluded_cancellations,
                 CAST(SUM(CASE WHEN c.is_override = 1 THEN 1 ELSE 0 END) AS INTEGER) as override_cancellations,
                 CAST(SUM(CASE WHEN c.deadline_passed = 1 THEN 1 ELSE 0 END) AS INTEGER) as deadline_passed,
-                CAST(SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' THEN 1 ELSE 0 END) AS INTEGER) as with_notes
+                CAST(SUM(CASE WHEN 
+                    (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
+                    OR 
+                    (c.error_report IS NOT NULL AND c.error_report != '')
+                THEN 1 ELSE 0 END) AS INTEGER) as with_notes
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
             {where_clause}
