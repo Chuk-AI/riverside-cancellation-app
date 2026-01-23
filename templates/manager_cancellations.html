@@ -206,6 +206,30 @@
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
+    
+    /* Highlight variants for active filters */
+    .text-success-highlight {
+        color: #059669 !important;
+        font-weight: 700;
+    }
+    
+    .text-warning-highlight {
+        color: #d97706 !important;
+        font-weight: 700;
+    }
+    
+    .text-primary-highlight {
+        color: #2563eb !important;
+        font-weight: 700;
+    }
+    
+    .stats-card:has(.text-success-highlight),
+    .stats-card:has(.text-warning-highlight),
+    .stats-card:has(.text-primary-highlight) {
+        border-color: var(--primary-color);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        transform: scale(1.02);
+    }
 
     .usage-over-limit {
         color: #ef4444 !important;
@@ -468,55 +492,55 @@
 </div>
 {% endif %}
 
-<!-- Updated Stats - 5 boxes (added yesterday, kept all original boxes) -->
+<!-- Context-Aware Stats - Adapt based on current filter/view -->
 <div class="row mb-4">
     <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-info">
-                <i class="fas fa-calendar-day"></i>
+            <div class="icon text-{{ stats.box1_color }}">
+                <i class="fas fa-{{ stats.box1_icon }}"></i>
             </div>
-            <div class="number text-info">{{ stats.today_cancellations }}</div>
-            <div class="label">Today</div>
+            <div class="number text-{{ stats.box1_color }}">{{ stats.box1_value }}</div>
+            <div class="label">{{ stats.box1_label }}</div>
         </div>
     </div>
     
     <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-secondary">
-                <i class="fas fa-calendar-alt"></i>
+            <div class="icon text-{{ stats.box2_color }}">
+                <i class="fas fa-{{ stats.box2_icon }}"></i>
             </div>
-            <div class="number text-secondary">{{ stats.yesterday_cancellations|default(0) }}</div>
-            <div class="label">Yesterday</div>
+            <div class="number text-{{ stats.box2_color }}">{{ stats.box2_value }}</div>
+            <div class="label">{{ stats.box2_label }}</div>
         </div>
     </div>
     
     <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-success">
-                <i class="fas fa-check-circle"></i>
+            <div class="icon text-{{ stats.box3_color }}">
+                <i class="fas fa-{{ stats.box3_icon }}"></i>
             </div>
-            <div class="number text-success">{{ stats.free_cancellations }}</div>
-            <div class="label">Free This Month</div>
+            <div class="number text-{{ stats.box3_color }}">{{ stats.box3_value }}</div>
+            <div class="label">{{ stats.box3_label }}</div>
         </div>
     </div>
     
     <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-warning">
-                <i class="fas fa-dollar-sign"></i>
+            <div class="icon text-{{ stats.box4_color }}">
+                <i class="fas fa-{{ stats.box4_icon }}"></i>
             </div>
-            <div class="number text-warning">{{ stats.charged_cancellations }}</div>
-            <div class="label">Charged This Month</div>
+            <div class="number text-{{ stats.box4_color }}">{{ stats.box4_value }}</div>
+            <div class="label">{{ stats.box4_label }}</div>
         </div>
     </div>
 
     <div class="col-lg mb-3">
         <div class="stats-card">
-            <div class="icon text-primary">
-                <i class="fas fa-shield-alt"></i>
+            <div class="icon text-{{ stats.box5_color }}">
+                <i class="fas fa-{{ stats.box5_icon }}"></i>
             </div>
-            <div class="number text-primary">{{ stats.excluded_cancellations }}</div>
-            <div class="label">Excluded This Month</div>
+            <div class="number text-{{ stats.box5_color }}">{{ stats.box5_value }}</div>
+            <div class="label">{{ stats.box5_label }}</div>
         </div>
     </div>
 </div>
@@ -694,23 +718,23 @@
 <div class="filter-tabs">
     <button class="filter-tab active" onclick="filterByStatus('all')" id="tab-all">
         All
-        <span class="badge bg-secondary ms-1">{{ stats.total_cancellations }}</span>
+        <span class="badge bg-secondary ms-1">{{ tab_stats.total_cancellations }}</span>
     </button>
     <button class="filter-tab" onclick="filterByStatus('today')" id="tab-today">
         Today
-        <span class="badge bg-info ms-1">{{ stats.today_cancellations }}</span>
+        <span class="badge bg-info ms-1">{{ tab_stats.today_cancellations }}</span>
     </button>
     <button class="filter-tab" onclick="filterByStatus('yesterday')" id="tab-yesterday">
         Yesterday
-        <span class="badge bg-secondary ms-1">{{ stats.yesterday_cancellations|default(0) }}</span>
+        <span class="badge bg-secondary ms-1">{{ tab_stats.yesterday_cancellations|default(0) }}</span>
     </button>
     <button class="filter-tab" onclick="filterByStatus('deadline_passed')" id="tab-deadline">
         Passed Deadline
-        <span class="badge bg-danger ms-1">{{ stats.deadline_passed|default(0) }}</span>
+        <span class="badge bg-danger ms-1">{{ tab_stats.deadline_passed|default(0) }}</span>
     </button>
     <button class="filter-tab" onclick="filterByStatus('notes')" id="tab-notes">
         Notes
-        <span class="badge bg-purple ms-1">{{ stats.with_notes|default(0) }}</span>
+        <span class="badge bg-purple ms-1">{{ tab_stats.with_notes|default(0) }}</span>
     </button>
 </div>
 
@@ -863,6 +887,9 @@
                     </div>
                 </div>
                 
+                <!-- CHANGE #2: Action Buttons moved BEFORE Manager Override Controls -->
+                <!-- Action Buttons -->
+
                 <!-- Manager Override Controls -->
                 <!-- Always show override controls for manager flexibility -->
                 <div class="override-controls">
@@ -870,6 +897,18 @@
                         <i class="fas fa-user-shield me-1"></i>
                         Manager Override Actions
                     </h6>
+                    <div class="mt-2">
+                        <div class="input-group input-group-sm">
+                            <input type="text" 
+                                   class="form-control" 
+                                   placeholder="Override reason (required for above actions)"
+                                   id="reason-{{ cancellation.id }}">
+                            <button class="btn btn-outline-secondary" 
+                                    onclick="addNote({{ cancellation.id }})">
+                                <i class="fas fa-sticky-note"></i>
+                            </button>
+                        </div>
+                    </div>
                     <div class="row">
                         <div class="col-md-4 mb-2">
                             <button class="btn btn-primary btn-sm w-100" 
@@ -894,21 +933,8 @@
                         </div>
                     </div>
                     
-                    <div class="mt-2">
-                        <div class="input-group input-group-sm">
-                            <input type="text" 
-                                   class="form-control" 
-                                   placeholder="Override reason (required for above actions)"
-                                   id="reason-{{ cancellation.id }}">
-                            <button class="btn btn-outline-secondary" 
-                                    onclick="addNote({{ cancellation.id }})">
-                                <i class="fas fa-sticky-note"></i>
-                            </button>
-                        </div>
-                    </div>
+
                 </div>
-                
-                <!-- Action Buttons -->
                 <div class="d-flex justify-content-between mt-3">
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-outline-primary" 
@@ -933,6 +959,7 @@
                     </div>
                     {% endif %}
                 </div>
+                
                 
                 {% if cancellation.excluded and cancellation.approved_by %}
                 <div class="mt-2">
@@ -1004,12 +1031,10 @@
                             {% endif %}
                         </td>
                         <td class="clickable-cancellation" onclick="switchToCardView({{ cancellation.id }})" style="cursor: pointer;" title="Click to view cancellation card">
-                            {% if cancellation.cancellation_note %}
-                                <small class="text-truncate" style="max-width: 150px; display: block;">
-                                    {{ cancellation.cancellation_note }}
-                                </small>
+                            {% if cancellation.has_notes %}
+                                <span class="badge bg-info">Yes</span>
                             {% else %}
-                                <span class="text-muted">-</span>
+                                <span class="text-muted">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -1352,7 +1377,9 @@ function filterByStatus(status) {
     // Update filter and apply
     if (status === 'all') {
         document.getElementById('statusFilter').value = '';
+        document.getElementById('dateRangeFilter').value = 'all';
         currentFilters.status = '';
+        currentFilters.date_range = 'all';
     } else if (status === 'today') {
         document.getElementById('dateRangeFilter').value = 'today';
         currentFilters.date_range = 'today';

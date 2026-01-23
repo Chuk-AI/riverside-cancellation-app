@@ -3738,11 +3738,11 @@ def get_cancellation_details(cancellation_id):
 @login_required
 @admin_required
 def manager_cancellations():
-    """Manager cancellations page - UPDATED with consistent date processing"""
+    """Manager cancellations page - CONTEXT-AWARE STATS VERSION"""
     # Get filter parameters
     filter_status = request.args.get("status", "")
     search = request.args.get("search", "")
-    date_range = request.args.get("date_range", "month")
+    date_range = request.args.get("date_range", "7days")
     membership = request.args.get("membership", "")
     sort_by = request.args.get("sort", "submit_date")
     student_id = request.args.get("student")
@@ -3764,7 +3764,7 @@ def manager_cancellations():
         where_clauses.append("c.student_id = ?")
         params.append(student_id)
 
-    # Status filters - UPDATED with new options
+    # Status filters
     if filter_status == "pending":
         where_clauses.append("c.status = 'pending'")
     elif filter_status == "free":
@@ -3792,7 +3792,7 @@ def manager_cancellations():
     elif filter_status == "override":
         where_clauses.append("c.is_override = 1")
 
-    # Approval status filter (independent from payment status filter)
+    # Approval status filter
     if approval_status == "approved":
         where_clauses.append(
             "(c.status = 'approved' OR c.excluded = 1 OR c.is_override = 1)"
@@ -3810,7 +3810,7 @@ def manager_cancellations():
         search_param = f"%{search}%"
         params.extend([search_param, search_param, search_param])
 
-    # Date range filter - UPDATED with new options
+    # Date range filter
     if date_range == "today":
         where_clauses.append("DATE(c.created_at) = DATE('now')")
     elif date_range == "yesterday":
@@ -3832,7 +3832,7 @@ def manager_cancellations():
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-    # Sort order - UPDATED with new options
+    # Sort order
     if sort_by == "submit_date":
         order_by = "c.created_at DESC"
     elif sort_by == "lesson_date":
@@ -3857,7 +3857,7 @@ def manager_cancellations():
         params,
     ).fetchall()
 
-    # Process cancellations data with consistent date formatting
+    # Process cancellations data
     cancellations = []
     for row in cancellations_raw:
         cancellation = process_cancellation_dates(row)
@@ -3867,34 +3867,29 @@ def manager_cancellations():
             f"{cancellation['first_name']} {cancellation['last_name']}"
         )
 
-        # Status class for CSS - UPDATED to use approved_by
-        # Check if approved (has approved_by email) or still pending
+        # Status class for CSS
         is_approved = (
             cancellation.get("approved_by") is not None
             and cancellation.get("approved_by") != ""
         )
 
-        # Priority 1: Special markers (notes, override, excluded)
+        # Priority 1: Special markers
         if cancellation.get("cancellation_note"):
             cancellation["status_class"] = "note"
         elif cancellation.get("is_override"):
             cancellation["status_class"] = "override"
         elif cancellation["excluded"]:
             cancellation["status_class"] = "excluded"
-        # Priority 2: Check if approved (this should come before deadline_passed check!)
+        # Priority 2: Check if approved
         elif not is_approved:
-            # Not yet approved by manager - show as pending regardless of charged status
-            # Can also show deadline-passed badge if applicable
             if cancellation.get("deadline_passed"):
                 cancellation["status_class"] = "deadline-passed"
             else:
                 cancellation["status_class"] = "pending"
-        # Priority 3: Approved cancellations (show final charge status)
+        # Priority 3: Approved cancellations
         elif cancellation["charged"]:
-            # Approved AND charged
             cancellation["status_class"] = "charged"
         else:
-            # Approved AND free
             cancellation["status_class"] = "free"
 
         # Calculate deadline status
@@ -3903,7 +3898,6 @@ def manager_cancellations():
             lesson_datetime = datetime.combine(
                 cancellation["lesson_date"], cancellation["lesson_time"]
             )
-            # Localize lesson_datetime to Pacific timezone for comparison
             pacific_tz = pytz.timezone("America/Los_Angeles")
             lesson_datetime = pacific_tz.localize(lesson_datetime)
 
@@ -3930,7 +3924,20 @@ def manager_cancellations():
         cancellation["error_report"] = cancellation.get("error_report", "")
         cancellation["approved_by"] = cancellation.get("approved_by", "")
 
-        # Add urgency flags - use PST time for comparison
+        # Add has_notes flag for Notes column
+        sequential_lessons_json = cancellation.get("sequential_lessons", "")
+        has_sequential_lessons = False
+        if sequential_lessons_json:
+            try:
+                import json
+                sequential_data = json.loads(sequential_lessons_json)
+                has_sequential_lessons = len(sequential_data) > 0 if isinstance(sequential_data, list) else False
+            except:
+                has_sequential_lessons = False
+        
+        cancellation["has_notes"] = has_sequential_lessons or bool(cancellation.get("error_report"))
+
+        # Add urgency flags
         if cancellation.get("created_at"):
             hours_since = (
                 toronto_now() - cancellation["created_at"]
@@ -3945,39 +3952,285 @@ def manager_cancellations():
 
         cancellations.append(cancellation)
 
-    # Get summary stats
-    stats_raw = conn.execute(
-        f"""
+    # ============================================================
+    # CONTEXT-AWARE STATS CALCULATION
+    # ============================================================
+    
+    # Determine context
+    stats_context = "global"  # default
+    
+    if student_id:
+        stats_context = "student"
+    elif date_range == "today":
+        stats_context = "today"
+    elif date_range == "yesterday":
+        stats_context = "yesterday"
+    elif date_range in ["7days", "month", "custom"]:
+        stats_context = "date_range"
+    elif filter_status in ["free", "charged", "excluded", "override"]:
+        stats_context = "status_filter"
+    
+    # Calculate context-appropriate stats
+    if stats_context == "student":
+        # Student-specific stats
+        student_stats = conn.execute(
+            """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
+                SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
+                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded
+            FROM cancellations c
+            WHERE c.student_id = ?
+            """,
+            (student_id,)
+        ).fetchone()
+        
+        # Get student's membership tier for limit
+        student_info = conn.execute(
+            "SELECT membership_level FROM students WHERE id = ?", (student_id,)
+        ).fetchone()
+        tier = get_membership_tier(student_info["membership_level"]) if student_info else None
+        monthly_limit = tier["free_notices"] if tier else 1
+        
+        stats = {
+            "box1_value": student_stats["total"] or 0,
+            "box1_label": "Total Cancellations",
+            "box1_icon": "calendar-check",
+            "box1_color": "primary",
+            
+            "box2_value": student_stats["this_month"] or 0,
+            "box2_label": "This Month",
+            "box2_icon": "calendar-day",
+            "box2_color": "info",
+            
+            "box3_value": f"{student_stats['free_used'] or 0}/{monthly_limit}",
+            "box3_label": "Free Used",
+            "box3_icon": "gift",
+            "box3_color": "success",
+            
+            "box4_value": student_stats["charged"] or 0,
+            "box4_label": "Charged",
+            "box4_icon": "dollar-sign",
+            "box4_color": "warning",
+            
+            "box5_value": max(0, monthly_limit - (student_stats['free_used'] or 0)),
+            "box5_label": "Remaining Free",
+            "box5_icon": "check-circle",
+            "box5_color": "success",
+        }
+        
+    elif stats_context == "today":
+        # Today's breakdown
+        today_stats = conn.execute(
+            """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded,
+                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE DATE(c.created_at) = DATE('now')
+            """
+        ).fetchone()
+        
+        stats = {
+            "box1_value": today_stats["total"] or 0,
+            "box1_label": "Total Today",
+            "box1_icon": "calendar-day",
+            "box1_color": "primary",
+            
+            "box2_value": today_stats["free"] or 0,
+            "box2_label": "Free Today",
+            "box2_icon": "gift",
+            "box2_color": "success",
+            
+            "box3_value": today_stats["charged"] or 0,
+            "box3_label": "Charged Today",
+            "box3_icon": "dollar-sign",
+            "box3_color": "warning",
+            
+            "box4_value": today_stats["excluded"] or 0,
+            "box4_label": "Excluded Today",
+            "box4_icon": "shield-alt",
+            "box4_color": "info",
+            
+            "box5_value": today_stats["pending"] or 0,
+            "box5_label": "Pending Today",
+            "box5_icon": "clock",
+            "box5_color": "secondary",
+        }
+        
+    elif stats_context == "yesterday":
+        # Yesterday's breakdown
+        yesterday_stats = conn.execute(
+            """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded,
+                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE DATE(c.created_at) = DATE('now', '-1 day')
+            """
+        ).fetchone()
+        
+        stats = {
+            "box1_value": yesterday_stats["total"] or 0,
+            "box1_label": "Total Yesterday",
+            "box1_icon": "calendar-alt",
+            "box1_color": "primary",
+            
+            "box2_value": yesterday_stats["free"] or 0,
+            "box2_label": "Free Yesterday",
+            "box2_icon": "gift",
+            "box2_color": "success",
+            
+            "box3_value": yesterday_stats["charged"] or 0,
+            "box3_label": "Charged Yesterday",
+            "box3_icon": "dollar-sign",
+            "box3_color": "warning",
+            
+            "box4_value": yesterday_stats["excluded"] or 0,
+            "box4_label": "Excluded Yesterday",
+            "box4_icon": "shield-alt",
+            "box4_color": "info",
+            
+            "box5_value": yesterday_stats["pending"] or 0,
+            "box5_label": "Pending Yesterday",
+            "box5_icon": "clock",
+            "box5_color": "secondary",
+        }
+        
+    elif stats_context == "date_range":
+        # Date range breakdown
+        range_stats = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free,
+                SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded,
+                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE {where_sql}
+            """,
+            params
+        ).fetchone()
+        
+        # Determine label based on date range
+        range_label_map = {
+            "7days": "Last 7 Days",
+            "month": "Last 30 Days",
+            "custom": "Date Range"
+        }
+        range_label = range_label_map.get(date_range, "Selected Period")
+        
+        stats = {
+            "box1_value": range_stats["total"] or 0,
+            "box1_label": f"Total ({range_label})",
+            "box1_icon": "calendar-check",
+            "box1_color": "primary",
+            
+            "box2_value": range_stats["free"] or 0,
+            "box2_label": f"Free ({range_label})",
+            "box2_icon": "gift",
+            "box2_color": "success",
+            
+            "box3_value": range_stats["charged"] or 0,
+            "box3_label": f"Charged ({range_label})",
+            "box3_icon": "dollar-sign",
+            "box3_color": "warning",
+            
+            "box4_value": range_stats["excluded"] or 0,
+            "box4_label": f"Excluded ({range_label})",
+            "box4_icon": "shield-alt",
+            "box4_color": "info",
+            
+            "box5_value": range_stats["pending"] or 0,
+            "box5_label": f"Pending ({range_label})",
+            "box5_icon": "clock",
+            "box5_color": "secondary",
+        }
+        
+    else:
+        # Global overview (default for "all" and status filters)
+        global_stats = conn.execute(
+            """
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today,
+                SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday,
+                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_month,
+                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_month,
+                SUM(CASE WHEN c.excluded = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_month
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            """
+        ).fetchone()
+        
+        stats = {
+            "box1_value": global_stats["today"] or 0,
+            "box1_label": "Today",
+            "box1_icon": "calendar-day",
+            "box1_color": "info",
+            
+            "box2_value": global_stats["yesterday"] or 0,
+            "box2_label": "Yesterday",
+            "box2_icon": "calendar-alt",
+            "box2_color": "secondary",
+            
+            "box3_value": global_stats["free_month"] or 0,
+            "box3_label": "Free This Month",
+            "box3_icon": "gift",
+            "box3_color": "success",
+            
+            "box4_value": global_stats["charged_month"] or 0,
+            "box4_label": "Charged This Month",
+            "box4_icon": "dollar-sign",
+            "box4_color": "warning",
+            
+            "box5_value": global_stats["excluded_month"] or 0,
+            "box5_label": "Excluded This Month",
+            "box5_icon": "shield-alt",
+            "box5_color": "primary",
+        }
+        
+        # If filtering by status, highlight the relevant box
+        if filter_status == "free":
+            stats["box3_color"] = "success-highlight"
+        elif filter_status == "charged":
+            stats["box4_color"] = "warning-highlight"
+        elif filter_status == "excluded":
+            stats["box5_color"] = "primary-highlight"
+    
+    # Get filter tab stats (always show these for the tabs)
+    tab_stats_raw = conn.execute(
+        """
         SELECT
             COUNT(*) as total_cancellations,
             SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
-            SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' THEN 1 ELSE 0 END) as free_cancellations,
-            SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) as charged_cancellations,
-            SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations,
-            SUM(CASE WHEN c.is_override = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as override_this_month,
+            SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday_cancellations,
             SUM(CASE WHEN c.deadline_passed = 1 AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as deadline_passed,
             SUM(CASE WHEN c.cancellation_note IS NOT NULL AND c.cancellation_note != '' AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
         JOIN students s ON c.student_id = s.id
-        WHERE {where_sql}
-        """,
-        params,
+        """
     ).fetchone()
-
-    stats = (
-        dict(stats_raw)
-        if stats_raw
-        else {
-            "total_cancellations": 0,
-            "today_cancellations": 0,
-            "free_cancellations": 0,
-            "charged_cancellations": 0,
-            "excluded_cancellations": 0,
-            "override_this_month": 0,
-            "deadline_passed": 0,
-            "with_notes": 0,
-        }
-    )
+    
+    tab_stats = dict(tab_stats_raw) if tab_stats_raw else {
+        "total_cancellations": 0,
+        "today_cancellations": 0,
+        "yesterday_cancellations": 0,
+        "deadline_passed": 0,
+        "with_notes": 0,
+    }
 
     # Get membership tiers for filter dropdown
     membership_tiers = [
@@ -4028,6 +4281,8 @@ def manager_cancellations():
         "manager_cancellations.html",
         cancellations=cancellations,
         stats=stats,
+        tab_stats=tab_stats,
+        stats_context=stats_context,
         filter_status=filter_status,
         membership_tiers=membership_tiers,
         pagination=pagination,
@@ -4037,8 +4292,6 @@ def manager_cancellations():
 
 
 # Add these helper functions to your app.py file in the UTILITY FUNCTIONS section
-
-
 def prepare_cancellations_for_json(cancellations):
     """
     Prepare cancellation data specifically for JSON serialization
