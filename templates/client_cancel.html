@@ -5,6 +5,19 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     max-width: 800px;
     margin: 0 auto;
   }
+  /* Make "Additional lessons" toggle button text darker + clearer */
+  #addAdditionalBtn.btn-outline-info {
+    color: #0f172a; /* dark text */
+    border-color: #0ea5e9; /* keep a nice blue border */
+    font-weight: 600;
+  }
+
+  #addAdditionalBtn.btn-outline-info:hover,
+  #addAdditionalBtn.btn-outline-info:focus {
+    color: #ffffff;
+    background-color: #0ea5e9;
+    border-color: #0ea5e9;
+  }
 
   .status-preview {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -556,7 +569,8 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           const returnDateObj = new Date(returnDate);
           const daysDiff = Math.ceil((returnDateObj - lessonDateObj) / (1000 * 60 * 60 * 24));
           if (daysDiff > 1) {
-              additionalLessonsText = `<br><small class="text-info">This notice will include lessons from ${lessonDate} until ${returnDate} (approximately ${daysDiff} days).</small>`;
+              additionalLessonsText = `<br><small class="text-dark fw-semibold">Lessons are cancelled starting ${lessonDate}, and resume on ${returnDate} (approximately ${daysDiff} days).</small>`;
+
           }
       }
 
@@ -598,7 +612,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       }
 
       const chargesApplyText = willCharge ?
-        'You may still submit this cancellation, but charges will apply, as per the <a href="https://www.riversideequestrian.ca/cancellations" target="_blank">cancellation policy</a>.' : '';
+        'Charges will apply as per the <a href="https://www.riversideequestrian.ca/cancellations" target="_blank">cancellation policy</a>.' : '';
 
       preview.innerHTML = `
           <div class="d-flex align-items-center">

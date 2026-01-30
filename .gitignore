@@ -32,3 +32,4 @@ backups/
 instance/
 
 .zip
+cancellation_system.db

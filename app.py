@@ -1518,6 +1518,8 @@ def get_dashboard_stats():
                     (sequential_lessons IS NOT NULL AND sequential_lessons != '' AND sequential_lessons != '[]') 
                     OR 
                     (error_report IS NOT NULL AND error_report != '')
+                    OR
+                    (reschedule_requested = 1)
                 THEN 1 ELSE 0 END) as with_notes
                FROM cancellations 
                WHERE created_at >= ? AND created_at < ?""",
@@ -3783,6 +3785,8 @@ def manager_cancellations():
                 (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
                 OR 
                 (c.error_report IS NOT NULL AND c.error_report != '')
+                OR
+                (c.reschedule_requested = 1)
             )"""
         )
     elif filter_status == "deadline_passed":
@@ -3943,7 +3947,11 @@ def manager_cancellations():
             except:
                 has_sequential_lessons = False
         
-        cancellation["has_notes"] = has_sequential_lessons or bool(cancellation.get("error_report"))
+        cancellation["has_notes"] = (
+            has_sequential_lessons 
+            or bool(cancellation.get("error_report"))
+            or bool(cancellation.get("reschedule_requested"))
+        )
 
         # Add urgency flags
         if cancellation.get("created_at"):
@@ -4230,6 +4238,8 @@ def manager_cancellations():
                 (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
                 OR 
                 (c.error_report IS NOT NULL AND c.error_report != '')
+                OR
+                (c.reschedule_requested = 1)
             THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
         JOIN students s ON c.student_id = s.id
@@ -4537,6 +4547,8 @@ def manager_analytics():
                     (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
                     OR 
                     (c.error_report IS NOT NULL AND c.error_report != '')
+                    OR
+                    (c.reschedule_requested = 1)
                 THEN 1 ELSE 0 END) AS INTEGER) as with_notes
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
