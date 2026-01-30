@@ -1570,13 +1570,14 @@ def get_dashboard_stats():
             print(f"DEBUG: Error getting new students: {e}")
             new_students_month = 0
 
-        # Pending reviews - simplified logic
+        # Pending reviews - simplified logic (excluding overridden cancellations)
         print("DEBUG: Checking pending reviews...")
 
         pending_reviews_result = conn.execute(
             """SELECT COUNT(*) as count FROM cancellations 
-               WHERE status = 'pending' 
-               OR (charged = 1 AND excluded = 0 AND status != 'processed')"""
+               WHERE is_override = 0
+               AND (status = 'pending' 
+                    OR (charged = 1 AND excluded = 0 AND status != 'processed'))"""
         ).fetchone()
         pending_reviews = (
             pending_reviews_result["count"] if pending_reviews_result else 0
