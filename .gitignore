@@ -1,6 +1,5 @@
 # Environment variables
 
-*.db
 
 # Python
 __pycache__/
@@ -32,4 +31,3 @@ backups/
 instance/
 
 .zip
-cancellation_system.db
