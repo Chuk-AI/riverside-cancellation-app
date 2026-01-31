@@ -6636,6 +6636,15 @@ def save_tiers():
 
     try:
         for tier in tiers:
+            # Calculate deadline_hours based on deadline type
+            deadline_mapping = {
+                "6pm_previous_day": 18,
+                "2_hours_before": 2,
+                "24_hours_before": 24,
+                "same_day": 0,
+            }
+            deadline_hours = deadline_mapping.get(tier["deadline"], 18)
+            
             conn.execute(
                 """
                 UPDATE membership_tiers 
@@ -6644,10 +6653,10 @@ def save_tiers():
             """,
                 (
                     tier["limit"],
-                    18 if tier["deadline"] == "6pm_previous_day" else 2,
+                    deadline_hours,
                     tier["deadline"].replace("_", " "),
                     1 if tier["status"] == "active" else 0,
-                    tier["id"],
+                    tier["name"],
                 ),
             )
 

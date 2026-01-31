@@ -1,5 +1,7 @@
-{% extends "base.html" %} {% block title %}Membership Tiers - Riverside
-Equestrian{% endblock %} {% block content %}
+{% extends "base.html" %} 
+{% block title %}Membership Tiers - Riverside Equestrian{% endblock %} 
+
+{% block content %}
 <div class="container-fluid">
   <div class="row">
     <div class="col-12">
@@ -43,452 +45,72 @@ Equestrian{% endblock %} {% block content %}
                 </tr>
               </thead>
               <tbody id="tiersTableBody">
-                <tr data-tier="bronze">
+                {% for tier in tiers %}
+                <tr data-tier="{{ tier.level|lower|replace(' ', '_') }}">
                   <td>
                     <input
                       type="text"
                       class="form-control tier-name"
-                      value="Bronze"
-                      data-original="Bronze"
+                      value="{{ tier.level }}"
+                      data-original="{{ tier.level }}"
                     />
                   </td>
                   <td>
                     <input
                       type="number"
                       class="form-control tier-limit"
-                      value="1"
+                      value="{{ tier.free_notices }}"
                       min="0"
                       max="10"
-                      data-original="1"
+                      data-original="{{ tier.free_notices }}"
                     />
                   </td>
                   <td>
                     <select
                       class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
+                      data-original="{{ '6pm_previous_day' if tier.deadline_hours == 18 else '2_hours_before' if tier.deadline_hours == 2 else '24_hours_before' if tier.deadline_hours == 24 else 'same_day' }}"
                     >
-                      <option value="6pm_previous_day" selected>
+                      <option value="6pm_previous_day" {{ 'selected' if tier.deadline_hours == 18 else '' }}>
                         6pm previous day
                       </option>
-                      <option value="2_hours_before">
+                      <option value="2_hours_before" {{ 'selected' if tier.deadline_hours == 2 else '' }}>
                         2 hours before lesson
                       </option>
-                      <option value="24_hours_before">
+                      <option value="24_hours_before" {{ 'selected' if tier.deadline_hours == 24 else '' }}>
                         24 hours before lesson
                       </option>
-                      <option value="same_day">Same day allowed</option>
+                      <option value="same_day" {{ 'selected' if tier.deadline_hours == 0 else '' }}>Same day allowed</option>
                     </select>
                   </td>
                   <td>
-                    <span class="badge bg-info">25 students</span>
+                    <span class="badge {{ 'bg-warning' if tier.active == 0 else 'bg-info' }}">{{ tier.student_count or 0 }} students</span>
                   </td>
                   <td>
                     <select
                       class="form-select tier-status"
-                      data-original="active"
+                      data-original="{{ 'active' if tier.active == 1 else 'inactive' }}"
                     >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
+                      <option value="active" {{ 'selected' if tier.active == 1 else '' }}>Active</option>
+                      <option value="inactive" {{ 'selected' if tier.active == 0 else '' }}>Inactive</option>
                       <option value="deprecated">Deprecated</option>
                     </select>
                   </td>
                   <td>
                     <button
                       class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('bronze')"
+                      onclick="editTierDetails('{{ tier.level|lower|replace(' ', '_') }}')"
                     >
                       <i class="fas fa-edit"></i>
                     </button>
                     <button
                       class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('bronze')"
+                      onclick="deleteTier('{{ tier.level|lower|replace(' ', '_') }}')"
                     >
                       <i class="fas fa-trash"></i>
                     </button>
                   </td>
                 </tr>
-                <tr data-tier="silver">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Silver"
-                      data-original="Silver"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="2"
-                      min="0"
-                      max="10"
-                      data-original="2"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
-                    >
-                      <option value="6pm_previous_day" selected>
-                        6pm previous day
-                      </option>
-                      <option value="2_hours_before">
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-info">45 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="active"
-                    >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated">Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('silver')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('silver')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
-                <tr data-tier="gold">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Gold"
-                      data-original="Gold"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="4"
-                      min="0"
-                      max="10"
-                      data-original="4"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="2_hours_before"
-                    >
-                      <option value="6pm_previous_day">6pm previous day</option>
-                      <option value="2_hours_before" selected>
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-info">35 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="active"
-                    >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated">Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('gold')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('gold')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
-                <tr data-tier="intro_package">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Intro Package"
-                      data-original="Intro Package"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="1"
-                      min="0"
-                      max="10"
-                      data-original="1"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
-                    >
-                      <option value="6pm_previous_day" selected>
-                        6pm previous day
-                      </option>
-                      <option value="2_hours_before">
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-info">15 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="active"
-                    >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated">Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('intro_package')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('intro_package')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
-                <tr data-tier="legacy">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Legacy"
-                      data-original="Legacy"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="1"
-                      min="0"
-                      max="10"
-                      data-original="1"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
-                    >
-                      <option value="6pm_previous_day" selected>
-                        6pm previous day
-                      </option>
-                      <option value="2_hours_before">
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-warning">12 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="deprecated"
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated" selected>Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('legacy')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('legacy')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
-                <tr data-tier="guest">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Guest"
-                      data-original="Guest"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="1"
-                      min="0"
-                      max="10"
-                      data-original="1"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
-                    >
-                      <option value="6pm_previous_day" selected>
-                        6pm previous day
-                      </option>
-                      <option value="2_hours_before">
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-info">8 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="active"
-                    >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated">Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('guest')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('guest')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
-                <tr data-tier="welcome_package">
-                  <td>
-                    <input
-                      type="text"
-                      class="form-control tier-name"
-                      value="Welcome Package"
-                      data-original="Welcome Package"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      class="form-control tier-limit"
-                      value="1"
-                      min="0"
-                      max="10"
-                      data-original="1"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-deadline"
-                      data-original="6pm_previous_day"
-                    >
-                      <option value="6pm_previous_day" selected>
-                        6pm previous day
-                      </option>
-                      <option value="2_hours_before">
-                        2 hours before lesson
-                      </option>
-                      <option value="24_hours_before">
-                        24 hours before lesson
-                      </option>
-                      <option value="same_day">Same day allowed</option>
-                    </select>
-                  </td>
-                  <td>
-                    <span class="badge bg-info">10 students</span>
-                  </td>
-                  <td>
-                    <select
-                      class="form-select tier-status"
-                      data-original="active"
-                    >
-                      <option value="active" selected>Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="deprecated">Deprecated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-primary"
-                      onclick="editTierDetails('welcome_package')"
-                    >
-                      <i class="fas fa-edit"></i>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      onclick="deleteTier('welcome_package')"
-                    >
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </td>
-                </tr>
+                {% endfor %}
               </tbody>
             </table>
           </div>
@@ -515,21 +137,25 @@ Equestrian{% endblock %} {% block content %}
           <h6 class="m-0 font-weight-bold text-success">Usage Statistics</h6>
         </div>
         <div class="card-body">
+          {% set total_students = tiers|sum(attribute='student_count') %}
+          {% set active_tiers = tiers|selectattr('active', 'equalto', 1)|list|length %}
+          {% set most_popular = tiers|max(attribute='student_count') %}
+          
           <div class="mb-3">
             <div class="small text-muted">Most Popular Tier</div>
-            <div class="h5 mb-0">Silver (45 students)</div>
+            <div class="h5 mb-0">{{ most_popular.level }} ({{ most_popular.student_count }} students)</div>
           </div>
           <div class="mb-3">
-            <div class="small text-muted">Average Cancellations/Student</div>
-            <div class="h5 mb-0">1.3 per month</div>
+            <div class="small text-muted">Total Students</div>
+            <div class="h5 mb-0">{{ total_students }}</div>
           </div>
           <div class="mb-3">
             <div class="small text-muted">Total Active Tiers</div>
-            <div class="h5 mb-0">6 of 7</div>
+            <div class="h5 mb-0">{{ active_tiers }} of {{ tiers|length }}</div>
           </div>
           <div class="mb-3">
-            <div class="small text-muted">Students on Deprecated Tiers</div>
-            <div class="h5 mb-0 text-warning">12 students</div>
+            <div class="small text-muted">Students on Inactive Tiers</div>
+            <div class="h5 mb-0 text-warning">{{ tiers|selectattr('active', 'equalto', 0)|sum(attribute='student_count') }} students</div>
           </div>
         </div>
       </div>
@@ -551,18 +177,18 @@ Equestrian{% endblock %} {% block content %}
                 <label class="form-label">From Tier:</label>
                 <select class="form-select" id="migrationFromTier">
                   <option value="">Select tier...</option>
-                  <option value="legacy">Legacy (12 students)</option>
-                  <option value="bronze">Bronze (25 students)</option>
-                  <option value="silver">Silver (45 students)</option>
+                  {% for tier in tiers %}
+                  <option value="{{ tier.level }}">{{ tier.level }} ({{ tier.student_count }} students)</option>
+                  {% endfor %}
                 </select>
               </div>
               <div class="mb-3">
                 <label class="form-label">To Tier:</label>
                 <select class="form-select" id="migrationToTier">
                   <option value="">Select tier...</option>
-                  <option value="bronze">Bronze</option>
-                  <option value="silver">Silver</option>
-                  <option value="gold">Gold</option>
+                  {% for tier in tiers %}
+                  <option value="{{ tier.level }}">{{ tier.level }}</option>
+                  {% endfor %}
                 </select>
               </div>
               <button class="btn btn-warning" onclick="migrateStudents()">
@@ -850,30 +476,26 @@ Equestrian{% endblock %} {% block content %}
     const ctx = document
       .getElementById("tierDistributionChart")
       .getContext("2d");
+    
+    // Build chart data from server-side tiers
+    const tierLabels = [];
+    const tierData = [];
+    const tierColors = [];
+    
+    {% for tier in tiers %}
+    tierLabels.push("{{ tier.level }}");
+    tierData.push({{ tier.student_count or 0 }});
+    tierColors.push("{{ tier.color or '#007bff' }}");
+    {% endfor %}
+    
     tierChart = new Chart(ctx, {
       type: "doughnut",
       data: {
-        labels: [
-          "Bronze",
-          "Silver",
-          "Gold",
-          "Intro Package",
-          "Legacy",
-          "Guest",
-          "Welcome Package",
-        ],
+        labels: tierLabels,
         datasets: [
           {
-            data: [25, 45, 35, 15, 12, 8, 10],
-            backgroundColor: [
-              "#cd7f32",
-              "#c0c0c0",
-              "#ffd700",
-              "#17a2b8",
-              "#6c757d",
-              "#28a745",
-              "#fd7e14",
-            ],
+            data: tierData,
+            backgroundColor: tierColors,
           },
         ],
       },
