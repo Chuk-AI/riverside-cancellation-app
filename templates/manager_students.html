@@ -722,37 +722,52 @@
             <div class="modal-body">
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle me-2"></i>
-                    <strong>Format:</strong> Copy and paste from Excel with columns: 
-                    Student First, Student Last, Parent First, Parent Last, Email, Phone
+                    <strong>Required Format:</strong> Each row must have at least 5 columns:
+                    <br><small>Student First Name, Student Last Name, Parent First Name, Parent Last Name, Email, Phone (optional), Membership Level (optional)</small>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Important:</strong>
+                    <ul class="mb-0 mt-2" style="font-size: 0.9em;">
+                        <li>Email addresses must be unique (duplicates will be skipped)</li>
+                        <li>First name, last name, and email are required for each student</li>
+                        <li>If membership level is not provided, default will be used</li>
+                        <li>Skip the header row when copying from Excel</li>
+                    </ul>
                 </div>
                 
                 <form method="POST" action="{{ url_for('manager_students') }}" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="bulk_import">
                     
                     <div class="mb-3">
-                        <label class="form-label">CSV File Upload</label>
+                        <label class="form-label fw-bold">Option 1: Upload CSV File</label>
                         <input type="file" class="form-control" name="csv_file" accept=".csv">
-                        <div class="form-text">Upload a CSV file with student data</div>
+                        <div class="form-text">Upload a CSV file with student data (no header row)</div>
                     </div>
                     
                     <div class="text-center mb-3">
-                        <strong>OR</strong>
+                        <strong class="text-muted">— OR —</strong>
                     </div>
                     
                     <div class="mb-3">
-                        <label class="form-label">Paste Data from Excel</label>
-                        <textarea class="form-control" 
+                        <label class="form-label fw-bold">Option 2: Paste Data from Excel</label>
+                        <textarea class="form-control font-monospace" 
                                   name="paste_data" 
-                                  rows="8" 
-                                  placeholder="Paste copied Excel data here..."></textarea>
+                                  rows="10" 
+                                  placeholder="John,Doe,Jane,Doe,john@example.com,555-1234,Bronze
+Emily,Smith,Tom,Smith,emily@example.com,555-5678,Silver
+Sarah,Johnson,Mike,Johnson,sarah@example.com,555-9012,Gold"
+                                  style="font-size: 0.85em;"></textarea>
                         <div class="form-text">
-                            Copy rows from Excel and paste here. Each line should have: 
-                            FirstName, LastName, ParentFirst, ParentLast, Email, Phone
+                            <strong>Example format:</strong><br>
+                            <code>John,Doe,Jane,Doe,john@example.com,555-1234,Bronze</code><br>
+                            Copy rows directly from Excel (without header) and paste here.
                         </div>
                     </div>
                     
                     <div class="mb-3">
-                        <label class="form-label">Default Membership Level</label>
+                        <label class="form-label fw-bold">Default Membership Level (for rows without membership)</label>
                         <select class="form-select" name="default_membership">
                             {% for tier in membership_tiers %}
                             <option value="{{ tier }}" {{ 'selected' if tier == 'Bronze' else '' }}>{{ tier }}</option>
