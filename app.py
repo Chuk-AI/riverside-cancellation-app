@@ -2420,73 +2420,83 @@ def manager_students():
             if not csv_data:
                 flash("No data provided for import", "error")
             else:
-                # Parse CSV data
-                csv_reader = csv.reader(io.StringIO(csv_data))
-                imported = 0
-                errors = []
+                # Get database connection
+                conn = get_db()
                 
-                for row_num, row in enumerate(csv_reader, 1):
-                    # Skip empty rows
-                    if not row or all(not cell.strip() for cell in row):
-                        continue
+                try:
+                    # Parse CSV data
+                    csv_reader = csv.reader(io.StringIO(csv_data))
+                    imported = 0
+                    errors = []
                     
-                    # Check minimum required columns (at least email is needed)
-                    if len(row) < 5:
-                        errors.append(f"Row {row_num}: Insufficient data (need at least: First Name, Last Name, Parent First, Parent Last, Email)")
-                        continue
+                    for row_num, row in enumerate(csv_reader, 1):
+                        # Skip empty rows
+                        if not row or all(not cell.strip() for cell in row):
+                            continue
+                        
+                        # Check minimum required columns (at least email is needed)
+                        if len(row) < 5:
+                            errors.append(f"Row {row_num}: Insufficient data (need at least: First Name, Last Name, Parent First, Parent Last, Email)")
+                            continue
+                        
+                        try:
+                            # Get values with defaults for optional fields
+                            first_name = row[0].strip() if len(row) > 0 else ""
+                            last_name = row[1].strip() if len(row) > 1 else ""
+                            parent_first = row[2].strip() if len(row) > 2 else ""
+                            parent_last = row[3].strip() if len(row) > 3 else ""
+                            email = row[4].strip() if len(row) > 4 else ""
+                            phone = row[5].strip() if len(row) > 5 else ""
+                            membership = row[6].strip() if len(row) > 6 else default_membership
+                            
+                            # Validate required fields
+                            if not email:
+                                errors.append(f"Row {row_num}: Email is required")
+                                continue
+                            if not first_name:
+                                errors.append(f"Row {row_num}: First name is required")
+                                continue
+                            if not last_name:
+                                errors.append(f"Row {row_num}: Last name is required")
+                                continue
+                            
+                            # Insert into database
+                            conn.execute(
+                                """INSERT INTO students 
+                                   (first_name, last_name, parent_first, parent_last, email, phone, membership_level, created_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (first_name, last_name, parent_first, parent_last, email, phone, membership, 
+                                 toronto_now().strftime("%Y-%m-%d %H:%M:%S"))
+                            )
+                            imported += 1
+                            
+                        except sqlite3.IntegrityError as e:
+                            if "UNIQUE constraint failed: students.email" in str(e):
+                                errors.append(f"Row {row_num}: Email '{email}' already exists")
+                            else:
+                                errors.append(f"Row {row_num}: Database error - {str(e)}")
+                        except Exception as e:
+                            errors.append(f"Row {row_num}: {str(e)}")
                     
-                    try:
-                        # Get values with defaults for optional fields
-                        first_name = row[0].strip() if len(row) > 0 else ""
-                        last_name = row[1].strip() if len(row) > 1 else ""
-                        parent_first = row[2].strip() if len(row) > 2 else ""
-                        parent_last = row[3].strip() if len(row) > 3 else ""
-                        email = row[4].strip() if len(row) > 4 else ""
-                        phone = row[5].strip() if len(row) > 5 else ""
-                        membership = row[6].strip() if len(row) > 6 else default_membership
-                        
-                        # Validate required fields
-                        if not email:
-                            errors.append(f"Row {row_num}: Email is required")
-                            continue
-                        if not first_name:
-                            errors.append(f"Row {row_num}: First name is required")
-                            continue
-                        if not last_name:
-                            errors.append(f"Row {row_num}: Last name is required")
-                            continue
-                        
-                        # Insert into database
-                        conn.execute(
-                            """INSERT INTO students 
-                               (first_name, last_name, parent_first, parent_last, email, phone, membership_level, created_at)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                            (first_name, last_name, parent_first, parent_last, email, phone, membership, 
-                             toronto_now().strftime("%Y-%m-%d %H:%M:%S"))
-                        )
-                        imported += 1
-                        
-                    except sqlite3.IntegrityError as e:
-                        if "UNIQUE constraint failed: students.email" in str(e):
-                            errors.append(f"Row {row_num}: Email '{email}' already exists")
-                        else:
-                            errors.append(f"Row {row_num}: Database error - {str(e)}")
-                    except Exception as e:
-                        errors.append(f"Row {row_num}: {str(e)}")
-                
-                # Commit all successful imports
-                conn.commit()
-                
-                # Show results
-                if imported > 0:
-                    flash(f"Successfully imported {imported} student(s)!", "success")
-                if errors:
-                    error_message = f"{len(errors)} error(s) occurred:<br>" + "<br>".join(errors[:10])
-                    if len(errors) > 10:
-                        error_message += f"<br>... and {len(errors) - 10} more errors"
-                    flash(error_message, "warning")
-                
-                log_action("bulk_import", f"Imported {imported} students, {len(errors)} errors")
+                    # Commit all successful imports
+                    conn.commit()
+                    
+                    # Show results
+                    if imported > 0:
+                        flash(f"Successfully imported {imported} student(s)!", "success")
+                    if errors:
+                        error_message = f"{len(errors)} error(s) occurred:<br>" + "<br>".join(errors[:10])
+                        if len(errors) > 10:
+                            error_message += f"<br>... and {len(errors) - 10} more errors"
+                        flash(error_message, "warning")
+                    
+                    log_action("bulk_import", f"Imported {imported} students, {len(errors)} errors")
+                    
+                except Exception as e:
+                    flash(f"Import failed: {str(e)}", "error")
+                    log_action("bulk_import_error", str(e))
+                finally:
+                    conn.close()
 
         return redirect(url_for("manager_students"))
 
