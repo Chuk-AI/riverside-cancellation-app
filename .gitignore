@@ -31,3 +31,8 @@ backups/
 instance/
 
 .zip
+# Database
+cancellation_system.db
+*.db
+*.sqlite
+*.sqlite3
