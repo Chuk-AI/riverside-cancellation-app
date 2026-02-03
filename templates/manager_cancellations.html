@@ -830,23 +830,19 @@
                 </div>
                 {% endif %}
                 
-                <!-- Additional Details -->
-                {% if cancellation.sequential_lessons and cancellation.sequential_lessons|length > 0 %}
-                <div class="details-panel">
-                    <h6 class="mb-2">
-                        <i class="fas fa-list me-1"></i>
-                        Sequential Lessons
-                    </h6>
-                    <ul class="list-unstyled mb-0">
-                        {% for seq_lesson in cancellation.sequential_lessons %}
-                        <li class="small">
-                            <i class="fas fa-arrow-right me-1"></i>
-                            {{ seq_lesson.date|format_date }} at {{ seq_lesson.time|format_time }}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                {% endif %}
+{% if cancellation.sequential_lessons and cancellation.sequential_lessons|length > 0 %}
+<div class="details-panel">
+    <h6 class="mb-2">
+        <i class="fas fa-list me-1"></i>
+        Sequential Lessons
+    </h6>
+    <p class="small mb-0">
+        <i class="fas fa-calendar-check me-1"></i>
+        All lessons cancelled till <strong>{{ cancellation.sequential_lessons[-1].date|format_date }}</strong>
+        
+    </p>
+</div>
+{% endif %}
                 
                 {% if cancellation.reschedule_requested %}
                 <div class="details-panel">
@@ -2137,26 +2133,23 @@ function viewCancellationDetails(cancellationId) {
                         </div>
                         ` : ''}
                         
-                        <!-- Sequential Lessons (if exists) -->
-                        ${cancellation.sequential_lessons && cancellation.sequential_lessons.length > 0 ? `
-                        <div class="col-12 mb-3">
-                            <div class="card">
-                                <div class="card-header bg-secondary text-white">
-                                    <h6 class="mb-0"><i class="fas fa-list me-1"></i>Sequential Lessons</h6>
-                                </div>
-                                <div class="card-body">
-                                    <ul class="list-unstyled mb-0">
-                                        ${cancellation.sequential_lessons.map(lesson => `
-                                            <li class="mb-2">
-                                                <i class="fas fa-arrow-right me-2 text-primary"></i>
-                                                <strong>${formatDate(lesson.date)}</strong> at <strong>${formatTime(lesson.time)}</strong>
-                                            </li>
-                                        `).join('')}
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        ` : ''}
+<!-- Sequential Lessons (if exists) -->
+${cancellation.sequential_lessons && cancellation.sequential_lessons.length > 0 ? `
+<div class="col-12 mb-3">
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h6 class="mb-0"><i class="fas fa-list me-1"></i>Sequential Lessons</h6>
+        </div>
+        <div class="card-body">
+            <p class="mb-0">
+                <i class="fas fa-calendar-check me-2"></i>
+                All lessons cancelled till <strong>${formatDate(cancellation.sequential_lessons[cancellation.sequential_lessons.length - 1].date)}</strong>
+                (${cancellation.sequential_lessons.length} additional lesson${cancellation.sequential_lessons.length > 1 ? 's' : ''})
+            </p>
+        </div>
+    </div>
+</div>
+` : ''}
                         
                         <!-- Reschedule Request (if exists) -->
                         ${cancellation.reschedule_requested ? `

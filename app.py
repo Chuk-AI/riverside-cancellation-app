@@ -1895,7 +1895,7 @@ def client_dashboard():
 @app.route("/client/cancel", methods=["GET", "POST"])
 @login_required
 def client_cancel():
-    """Client cancellation form - UPDATED with cancellation note support"""
+    """Client cancellation form - UPDATED with cancellation note support and date range validation"""
     if session["user_role"] != "client":
         return redirect(url_for("dashboard"))
 
@@ -1929,6 +1929,25 @@ def client_cancel():
 
         # Get current time in Pacific timezone (timezone-aware)
         current_time = toronto_now()
+
+        # ========== NEW: Validate date is within allowed range ==========
+        lesson_date_obj = datetime.strptime(lesson_date, "%Y-%m-%d").date()
+        max_allowed_date = calculate_max_cancellation_date()
+        
+        if lesson_date_obj > max_allowed_date:
+            pacific_now = toronto_now()
+            today = pacific_now.date()
+            next_month_start = date(today.year, today.month + 1, 1) if today.month < 12 else date(today.year + 1, 1, 1)
+            days_until_next_month = (next_month_start - today).days
+            
+            if days_until_next_month <= 7:
+                error_msg = "Cancellations can only be submitted for the current month and next month (within 7 days of next month)."
+            else:
+                error_msg = "Cancellations can only be submitted for the current month."
+            
+            flash(error_msg, "error")
+            return redirect(url_for("client_cancel"))
+        # ========== END NEW VALIDATION ==========
 
         if lesson_datetime <= current_time:
             flash("Cannot cancel lessons that have already occurred", "error")
@@ -2082,6 +2101,7 @@ def client_cancel():
     cancellation_status = calculate_cancellation_status(client)
     cancellation_policy = get_membership_tier(client["membership_level"])
     pacific_today = toronto_now().date()
+    max_cancellation_date = calculate_max_cancellation_date()  # NEW LINE
 
     return render_template(
         "client_cancel.html",
@@ -2089,8 +2109,8 @@ def client_cancel():
         cancellation_status=cancellation_status,
         cancellation_policy=cancellation_policy,
         min_date=pacific_today.isoformat(),
+        max_date=max_cancellation_date.isoformat(),  # NEW LINE
     )
-
 
 # Backend Route Fix
 @app.route("/client/history")
@@ -4456,6 +4476,40 @@ def manager_cancellations():
         filtered_student_name=filtered_student_name,
     )
 
+def calculate_max_cancellation_date():
+    """
+    Calculate the maximum allowed date for cancellation submissions.
+    
+    Policy: Cancellations allowed for current month and next month 
+    only if next month is 7 or less days ahead.
+    
+    Returns:
+        date: Maximum allowed cancellation date
+    """
+    pacific_now = toronto_now()
+    today = pacific_now.date()
+    
+    # Get the first day of next month
+    if today.month == 12:
+        next_month_start = date(today.year + 1, 1, 1)
+    else:
+        next_month_start = date(today.year, today.month + 1, 1)
+    
+    # Calculate days until next month
+    days_until_next_month = (next_month_start - today).days
+    
+    # If next month is 7 or fewer days away, allow submissions for next month
+    if days_until_next_month <= 7:
+        # Allow up to the last day of next month
+        if next_month_start.month == 12:
+            max_date = date(next_month_start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            max_date = date(next_month_start.year, next_month_start.month + 1, 1) - timedelta(days=1)
+    else:
+        # Only allow current month - last day of current month
+        max_date = next_month_start - timedelta(days=1)
+    
+    return max_date
 
 # Add these helper functions to your app.py file in the UTILITY FUNCTIONS section
 def prepare_cancellations_for_json(cancellations):
@@ -8736,7 +8790,7 @@ def get_charge_reason(cancellation):
 
 
 def format_sequential_lessons(sequential_data):
-    """Format sequential lessons for email - FIXED"""
+    """Format sequential lessons for email - UPDATED to show summary"""
     if not sequential_data:
         return "No additional lessons"
 
@@ -8749,38 +8803,28 @@ def format_sequential_lessons(sequential_data):
         if not sequential_lessons:
             return "No additional lessons"
 
-        formatted_lessons = []
-        for lesson in sequential_lessons:
-            if isinstance(lesson, dict):
-                date_str = lesson.get("date", "")
-                time_str = lesson.get("time", "")
-            else:
-                # Handle other formats
-                continue
+        # Get the last lesson date
+        last_lesson = sequential_lessons[-1]
+        if isinstance(last_lesson, dict):
+            date_str = last_lesson.get("date", "")
+        else:
+            return "No additional lessons"
 
-            if date_str and time_str:
-                try:
-                    lesson_date = datetime.strptime(str(date_str), "%Y-%m-%d").strftime(
-                        "%B %d, %Y"
-                    )
-                    lesson_time = datetime.strptime(str(time_str), "%H:%M").strftime(
-                        "%I:%M %p"
-                    )
-                    formatted_lessons.append(f"{lesson_date} at {lesson_time}")
-                except:
-                    formatted_lessons.append(f"{date_str} at {time_str}")
+        if date_str:
+            try:
+                last_date = datetime.strptime(str(date_str), "%Y-%m-%d").strftime("%B %d, %Y")
+                count = len(sequential_lessons)
+                lesson_word = "lesson" if count == 1 else "lessons"
+                return f"All lessons cancelled till {last_date} ({count} additional {lesson_word})"
+            except:
+                return f"{len(sequential_lessons)} additional lessons"
 
-        return (
-            f"Additional lessons: {', '.join(formatted_lessons)}"
-            if formatted_lessons
-            else "No additional lessons"
-        )
+        return "No additional lessons"
 
     except Exception as e:
         if email_config.debug_mode:
             print(f"Error formatting sequential lessons: {e}")
         return "No additional lessons"
-
 
 def safe_dict_convert(row_or_dict):
     """Safely convert sqlite3.Row to dict, or return dict as-is"""
