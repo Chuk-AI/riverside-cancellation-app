@@ -1238,7 +1238,16 @@ def now_in_app_timezone():
 
 
 def localize_datetime(dt, from_tz=None):
-    """Convert a datetime to Pacific timezone (PST/PDT)"""
+    """
+    Convert a datetime to Pacific timezone (PST/PDT).
+    
+    Args:
+        dt: datetime object, string, or None
+        from_tz: Optional source timezone (if None and dt is naive, assumes Pacific)
+    
+    Returns:
+        Timezone-aware datetime in Pacific timezone, or None
+    """
     pacific_tz = pytz.timezone("America/Los_Angeles")
 
     if dt is None:
@@ -1248,18 +1257,23 @@ def localize_datetime(dt, from_tz=None):
     if isinstance(dt, str):
         try:
             if "T" in dt:
+                # ISO format with possible timezone
                 dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
             else:
+                # Assume "%Y-%m-%d %H:%M:%S" format from database (Pacific time)
                 dt = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
+                # Explicitly localize to Pacific since database stores Pacific times
+                return pacific_tz.localize(dt)
         except (ValueError, TypeError):
-            return dt
+            # If parsing fails, return None instead of the string
+            return None
 
-    # If datetime is naive, assume it's in UTC and convert to Pacific
+    # If datetime is naive, assume it's in Pacific timezone (our database default)
     if dt.tzinfo is None:
-        # Assume naive datetime is in UTC
-        dt = pytz.UTC.localize(dt)
+        dt = pacific_tz.localize(dt)
+        return dt
 
-    # Convert to Pacific timezone
+    # Convert to Pacific timezone if already timezone-aware
     return dt.astimezone(pacific_tz)
 
 
@@ -1356,6 +1370,7 @@ def get_monthly_cancellation_count(student_id, month=None, year=None):
         AND strftime('%m', created_at) = ? 
         AND strftime('%Y', created_at) = ?
         AND excluded = 0
+        AND charged = 0
     """,
         (student_id, f"{month:02d}", str(year)),
     ).fetchone()
@@ -1377,15 +1392,18 @@ def calculate_cancellation_status(student):
 
 def parse_lesson_datetime(lesson_date_str, lesson_time_str):
     """
-    Parse lesson date and time strings into a datetime object.
+    Parse lesson date and time strings into a timezone-aware datetime object in Pacific timezone.
     Handles both HH:MM and HH:MM:SS time formats.
+    Returns timezone-aware datetime in America/Los_Angeles timezone.
     """
+    pacific_tz = pytz.timezone("America/Los_Angeles")
+    
     try:
         # Parse date
         lesson_date = datetime.strptime(str(lesson_date_str), "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        # Fallback to today's date if parsing fails
-        lesson_date = datetime.now().date()
+        # Fallback to today's date in Pacific timezone if parsing fails
+        lesson_date = toronto_now().date()
 
     try:
         # Parse time - handle both HH:MM and HH:MM:SS formats
@@ -1401,18 +1419,33 @@ def parse_lesson_datetime(lesson_date_str, lesson_time_str):
         # Default to noon if parsing fails
         lesson_time = time(12, 0)
 
-    return datetime.combine(lesson_date, lesson_time)
+    # Combine date and time, then localize to Pacific timezone
+    naive_dt = datetime.combine(lesson_date, lesson_time)
+    return pacific_tz.localize(naive_dt)
 
 
 def will_be_charged(student, lesson_datetime):
-    """Check if a cancellation will be charged based on submission time vs deadline"""
+    """
+    Check if a cancellation will be charged based on submission time vs deadline.
+    All datetime comparisons are timezone-aware (Pacific timezone).
+    
+    Args:
+        student: Student record dictionary
+        lesson_datetime: Lesson datetime (will be converted to timezone-aware if needed)
+    
+    Returns:
+        tuple: (will_charge: bool, reason: str)
+    """
+    pacific_tz = pytz.timezone("America/Los_Angeles")
     tier = get_membership_tier(student["membership_level"])
     status = calculate_cancellation_status(student)
 
-    # Calculate deadline based on lesson date/time and membership tier
-    submission_time = toronto_now().replace(
-        tzinfo=None
-    )  # Convert to naive for comparison
+    # Ensure lesson_datetime is timezone-aware
+    if lesson_datetime.tzinfo is None:
+        lesson_datetime = pacific_tz.localize(lesson_datetime)
+    
+    # Get current time in Pacific timezone (timezone-aware)
+    submission_time = toronto_now()
 
     # For Gold members: 2 hours before lesson
     if tier["level"] == "Gold":
@@ -1420,10 +1453,12 @@ def will_be_charged(student, lesson_datetime):
         if submission_time > deadline:
             return True, "Notice submitted less than 2 hours before lesson time"
     else:
-        # For all other tiers: 6pm the day before
+        # For all other tiers: 6pm the day before (timezone-aware)
         lesson_date = lesson_datetime.date()
         previous_day = lesson_date - timedelta(days=1)
-        deadline = datetime.combine(previous_day, time(18, 0))  # 6pm previous day
+        # Create 6pm deadline in Pacific timezone
+        naive_deadline = datetime.combine(previous_day, time(18, 0))
+        deadline = pacific_tz.localize(naive_deadline)
 
         if submission_time > deadline:
             return True, "Notice submitted after 6pm the previous day"
@@ -1439,10 +1474,11 @@ def get_dashboard_stats():
     """Calculate dashboard statistics with new 5-box metrics and debugging"""
     conn = get_db()
 
-    # Today's date for calculations
-    today = datetime.now().date()
+    # Get current Pacific time (timezone-aware)
+    pacific_now = toronto_now()
+    today = pacific_now.date()
     yesterday = today - timedelta(days=1)
-    current_month = datetime.now().strftime("%Y-%m")
+    current_month = pacific_now.strftime("%Y-%m")
 
     try:
         print(f"DEBUG: Today is {today}, current month is {current_month}")
@@ -1492,7 +1528,7 @@ def get_dashboard_stats():
 
         month_start = f"{current_month}-01"
         next_month = (
-            (datetime.now().replace(day=1) + timedelta(days=32))
+            (pacific_now.replace(day=1) + timedelta(days=32))
             .replace(day=1)
             .strftime("%Y-%m-01")
         )
@@ -1832,14 +1868,11 @@ def client_dashboard():
                     time_str, "%H:%M:%S"
                 ).time()
 
-            cancellation_dict["created_at"] = datetime.strptime(
-                cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-            )
-            # Mark this as Pacific time for display functions
-            pacific_tz = pytz.timezone("America/Los_Angeles")
-            cancellation_dict["created_at"] = pacific_tz.localize(
-                cancellation_dict["created_at"]
-            )
+            # Use localize_datetime to handle both old and new timestamp formats
+            cancellation_dict["created_at"] = localize_datetime(cancellation["created_at"])
+            if cancellation_dict["created_at"] is None:
+                # Skip if parsing fails
+                continue
         except (ValueError, TypeError):
             # Skip problematic records
             continue
@@ -1854,7 +1887,7 @@ def client_dashboard():
         client=client,
         cancellation_status=cancellation_status,
         cancellation_policy=cancellation_policy,
-        current_month=datetime.now().strftime("%B %Y"),
+        current_month=toronto_now().strftime("%B %Y"),
         recent_cancellations=recent_cancellations,
     )
 
@@ -1888,16 +1921,14 @@ def client_cancel():
 
         # Validate main lesson
         try:
-            lesson_datetime = datetime.strptime(
-                f"{lesson_date} {lesson_time}", "%Y-%m-%d %H:%M"
-            )
+            # Parse and create timezone-aware datetime
+            lesson_datetime = parse_lesson_datetime(lesson_date, lesson_time)
         except ValueError:
             flash("Invalid date or time format", "error")
             return redirect(url_for("client_cancel"))
 
-        current_time = toronto_now().replace(
-            tzinfo=None
-        )  # Convert to naive for comparison
+        # Get current time in Pacific timezone (timezone-aware)
+        current_time = toronto_now()
 
         if lesson_datetime <= current_time:
             flash("Cannot cancel lessons that have already occurred", "error")
@@ -1909,6 +1940,7 @@ def client_cancel():
         # Determine deadline status for new database fields
         tier = get_membership_tier(client["membership_level"])
         deadline_hours = tier["deadline_hours"] if tier else 18
+        # Both times are now timezone-aware, so subtraction works correctly
         hours_until_lesson = (lesson_datetime - current_time).total_seconds() / 3600
         deadline_passed = hours_until_lesson < deadline_hours
 
@@ -1953,8 +1985,8 @@ def client_cancel():
                 deadline_passed,  # NEW
                 False,  # is_override starts as False
                 initial_status,  # Auto-approve free, or set as charged
-                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Pacific time
-                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),  # Use Pacific time
+                toronto_now().isoformat(),  # created_at with timezone
+                toronto_now().isoformat(),  # updated_at with timezone
             ),
         )
         cancellation_id = cursor.lastrowid
@@ -2049,13 +2081,14 @@ def client_cancel():
     # GET request - show form
     cancellation_status = calculate_cancellation_status(client)
     cancellation_policy = get_membership_tier(client["membership_level"])
+    pacific_today = toronto_now().date()
 
     return render_template(
         "client_cancel.html",
         client=client,
         cancellation_status=cancellation_status,
         cancellation_policy=cancellation_policy,
-        min_date=date.today().isoformat(),
+        min_date=pacific_today.isoformat(),
     )
 
 
@@ -2084,9 +2117,11 @@ def client_history():
     # Group by month
     cancellations_by_month = defaultdict(list)
     for cancellation in cancellations:
-        created_date = datetime.strptime(
-            cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-        )
+        # Use localize_datetime to handle both old and new timestamp formats
+        created_date = localize_datetime(cancellation["created_at"])
+        if created_date is None:
+            # Fallback if parsing fails
+            created_date = toronto_now()
         month_key = created_date.strftime("%Y-%m")
 
         # Parse sequential lessons if any
@@ -2161,7 +2196,7 @@ def client_history():
         client=client,
         cancellations=cancellations,
         cancellations_by_month=formatted_months,
-        current_month=datetime.now().strftime("%B %Y"),
+        current_month=toronto_now().strftime("%B %Y"),
         current_month_stats=current_month_stats,
         has_more_history=False,
     )
@@ -2200,15 +2235,11 @@ def manager_dashboard():
     for cancellation in recent_cancellations_raw:
         cancellation_dict = dict(cancellation)
 
-        # Convert created_at string to datetime and localize to Pacific timezone
-        cancellation_dict["created_at"] = datetime.strptime(
-            cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-        )
-        # Localize to Pacific timezone since database stores in Pacific time
-        pacific_tz = pytz.timezone("America/Los_Angeles")
-        cancellation_dict["created_at"] = pacific_tz.localize(
-            cancellation_dict["created_at"]
-        )
+        # Use localize_datetime to handle both old and new timestamp formats
+        cancellation_dict["created_at"] = localize_datetime(cancellation["created_at"])
+        if cancellation_dict["created_at"] is None:
+            # Fallback to current time if parsing fails
+            cancellation_dict["created_at"] = toronto_now()
 
         # Convert lesson_date string to date object
         cancellation_dict["lesson_date"] = datetime.strptime(
@@ -2255,12 +2286,11 @@ def manager_dashboard():
     pending_actions = []
     for action in pending_actions_raw:
         action_dict = dict(action)
-        action_dict["created_at"] = datetime.strptime(
-            action["created_at"], "%Y-%m-%d %H:%M:%S"
-        )
-        # Localize to Pacific timezone since database stores in Pacific time
-        pacific_tz = pytz.timezone("America/Los_Angeles")
-        action_dict["created_at"] = pacific_tz.localize(action_dict["created_at"])
+        # Use localize_datetime to handle both old and new timestamp formats
+        action_dict["created_at"] = localize_datetime(action["created_at"])
+        if action_dict["created_at"] is None:
+            action_dict["created_at"] = toronto_now()
+        
         action_dict["lesson_date"] = datetime.strptime(
             action["lesson_date"], "%Y-%m-%d"
         ).date()
@@ -2331,7 +2361,10 @@ def manager_dashboard():
         }.get(activity_type, "Cancellation")
 
         # Calculate time ago - use PST time for comparison
-        time_diff = toronto_now() - cancellation["created_at"]
+        created_at = localize_datetime(cancellation["created_at"])
+        if created_at is None:
+            created_at = toronto_now()  # Fallback
+        time_diff = toronto_now() - created_at
         if time_diff.days > 0:
             time_ago = f"{time_diff.days} day{'s' if time_diff.days != 1 else ''} ago"
         elif time_diff.seconds > 3600:
@@ -2653,7 +2686,7 @@ def manager_students():
     pagination = Pagination(page, per_page, total_students)
 
     # Calculate statistics for the template - Updated with new stats
-    current_month = datetime.now().strftime("%Y-%m")
+    current_month = toronto_now().strftime("%Y-%m")
 
     # Total students
     total_students_count = len(students)
@@ -2745,7 +2778,7 @@ def process_cancellation_dates(cancellation):
                 cancellation_dict["lesson_date"], "%Y-%m-%d"
             ).date()
         except (ValueError, TypeError):
-            cancellation_dict["lesson_date"] = datetime.now().date()
+            cancellation_dict["lesson_date"] = toronto_now().date()
 
     # Convert lesson_time string to time object (handle both HH:MM and HH:MM:SS)
     if isinstance(cancellation_dict.get("lesson_time"), str):
@@ -3555,9 +3588,11 @@ def process_all_pending():
                         f"{cancellation['lesson_date']} {cancellation['lesson_time']}",
                         "%Y-%m-%d %H:%M:%S",
                     )
-                    created_datetime = datetime.strptime(
-                        cancellation["created_at"], "%Y-%m-%d %H:%M:%S"
-                    )
+                    # Use localize_datetime to handle both formats
+                    created_datetime = localize_datetime(cancellation["created_at"])
+                    if created_datetime is None:
+                        created_datetime = toronto_now()
+                    
                     hours_diff = (
                         lesson_datetime - created_datetime
                     ).total_seconds() / 3600
@@ -3748,9 +3783,16 @@ def get_cancellation_details(cancellation_id):
                 "%Y-%m-%d %H:%M:%S",
             )
 
-        created_datetime = datetime.strptime(
-            cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
-        )
+        # Use localize_datetime to handle both old and new timestamp formats
+        created_datetime = localize_datetime(cancellation_dict["created_at"])
+        if created_datetime is None:
+            created_datetime = toronto_now()
+        
+        # Ensure lesson_datetime is timezone-aware
+        pacific_tz = pytz.timezone("America/Los_Angeles")
+        if lesson_datetime.tzinfo is None:
+            lesson_datetime = pacific_tz.localize(lesson_datetime)
+        
         hours_notice = (lesson_datetime - created_datetime).total_seconds() / 3600
 
         # Get monthly usage
@@ -4004,8 +4046,13 @@ def manager_cancellations():
             pacific_tz = pytz.timezone("America/Los_Angeles")
             lesson_datetime = pacific_tz.localize(lesson_datetime)
 
+            # Parse created_at to timezone-aware datetime
+            created_at = localize_datetime(cancellation["created_at"])
+            if created_at is None:
+                created_at = toronto_now()
+            
             hours_notice = (
-                lesson_datetime - cancellation["created_at"]
+                lesson_datetime - created_at
             ).total_seconds() / 3600
             cancellation["within_deadline"] = hours_notice >= tier["deadline_hours"]
         else:
@@ -4046,13 +4093,19 @@ def manager_cancellations():
 
         # Add urgency flags
         if cancellation.get("created_at"):
-            hours_since = (
-                toronto_now() - cancellation["created_at"]
-            ).total_seconds() / 3600
-            cancellation["is_recent"] = hours_since < 2
-            cancellation["is_urgent"] = (
-                hours_since > 24 and cancellation.get("status") == "pending"
-            )
+            # Parse created_at to timezone-aware datetime
+            created_at = localize_datetime(cancellation["created_at"])
+            if created_at:
+                hours_since = (
+                    toronto_now() - created_at
+                ).total_seconds() / 3600
+                cancellation["is_recent"] = hours_since < 2
+                cancellation["is_urgent"] = (
+                    hours_since > 24 and cancellation.get("status") == "pending"
+                )
+            else:
+                cancellation["is_recent"] = False
+                cancellation["is_urgent"] = False
         else:
             cancellation["is_recent"] = False
             cancellation["is_urgent"] = False
@@ -4745,7 +4798,7 @@ def manager_analytics():
                 )
 
                 # Create trend for current month with aggregated data
-                current_month = datetime.now()
+                current_month = toronto_now()
                 monthly_trends = [
                     {
                         "month": current_month.strftime("%b %Y"),
@@ -4759,7 +4812,7 @@ def manager_analytics():
                 print(f"Created synthetic monthly trend: {monthly_trends[0]}")
             else:
                 # Truly no data
-                current_month = datetime.now()
+                current_month = toronto_now()
                 monthly_trends = [
                     {
                         "month": current_month.strftime("%b %Y"),
@@ -4932,8 +4985,8 @@ def manager_analytics():
 
         fallback_trends = [
             {
-                "month": datetime.now().strftime("%b %Y"),
-                "month_short": datetime.now().strftime("%m/%y"),
+                "month": toronto_now().strftime("%b %Y"),
+                "month_short": toronto_now().strftime("%m/%y"),
                 "total_cancellations": 0,
                 "free_cancellations": 0,
                 "charged_cancellations": 0,
@@ -6302,7 +6355,7 @@ def send_template_test_enhanced(template_id):
                 This is a test email with sample data from template: <strong>{template_dict['name']}</strong><br>
                 Template ID: {template_id}<br>
                 Sent from: {email_config.from_email}<br>
-                Test sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                Test sent at: {toronto_now().strftime('%Y-%m-%d %H:%M:%S')}
             </p>
         </div>
         {body}
@@ -6357,7 +6410,7 @@ def preview_template_enhanced(template_id):
             "membership_tier": "Silver",
             "cancellation_status": "Free cancellation",
             "company_name": "Riverside Equestrian",
-            "current_date": datetime.now().strftime("%B %d, %Y"),
+            "current_date": toronto_now().strftime("%B %d, %Y"),
         }
 
         # Simple variable replacement
@@ -6584,7 +6637,7 @@ def senior_templates():
                             template_dict[date_field], "%Y-%m-%d %H:%M:%S"
                         )
                     except (ValueError, TypeError):
-                        template_dict[date_field] = datetime.now()
+                        template_dict[date_field] = toronto_now()
 
             template_list.append(template_dict)
 
@@ -6611,7 +6664,7 @@ def save_settings():
             for key, value in form_data.items():
                 conn.execute(
                     "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)",
-                    (key, str(value), datetime.now().isoformat()),
+                    (key, str(value), toronto_now().isoformat()),
                 )
 
         conn.commit()
@@ -6697,7 +6750,7 @@ def save_template():
                 data["priority"],
                 data["delay"],
                 data["includeAttachment"],
-                datetime.now().isoformat(),
+                toronto_now().isoformat(),
             ),
         )
 
@@ -6830,9 +6883,8 @@ def preview_cancellation():
         return jsonify({"error": "Missing date or time"}), 400
 
     try:
-        lesson_datetime = datetime.strptime(
-            f"{lesson_date} {lesson_time}", "%Y-%m-%d %H:%M"
-        )
+        # Parse and create timezone-aware datetime
+        lesson_datetime = parse_lesson_datetime(lesson_date, lesson_time)
     except ValueError:
         return jsonify({"error": "Invalid date or time format"}), 400
 
@@ -6879,13 +6931,23 @@ def inject_moment():
             return "Unknown"
 
         try:
-            # Parse the date string
+            # Parse the date string using localize_datetime to handle both formats
             if isinstance(date_str, str):
-                date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                date_obj = localize_datetime(date_str)
+                if date_obj is None:
+                    return str(date_str)
             else:
                 date_obj = date_str
+                # Ensure it's timezone-aware
+                if isinstance(date_obj, datetime) and date_obj.tzinfo is None:
+                    date_obj = localize_datetime(date_obj)
 
-            now = datetime.now()
+            now = toronto_now()
+            
+            # Make sure both are timezone-aware before comparison
+            if date_obj.tzinfo is None:
+                date_obj = localize_datetime(date_obj)
+            
             time_diff = now - date_obj
 
             total_seconds = int(time_diff.total_seconds())
@@ -6904,7 +6966,7 @@ def inject_moment():
             else:
                 return date_obj.strftime("%Y-%m-%d")
 
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
             return str(date_str)
 
     return {"moment": moment_func}
@@ -7212,7 +7274,7 @@ def export_cancellations_monthly_excel():
         conn = get_db()
 
         # Get current month and previous months data
-        current_date = datetime.now()
+        current_date = toronto_now()
         start_date = current_date.replace(day=1) - relativedelta(months=5)
 
         # Get cancellations data
@@ -7273,9 +7335,11 @@ def export_cancellations_monthly_excel():
         # Calculate monthly summaries
         monthly_data = {}
         for cancellation in cancellations:
-            month_key = datetime.fromisoformat(cancellation["created_at"]).strftime(
-                "%Y-%m"
-            )
+            # Use localize_datetime to handle both old and new timestamp formats
+            created_dt = localize_datetime(cancellation["created_at"])
+            if created_dt is None:
+                continue  # Skip if parsing fails
+            month_key = created_dt.strftime("%Y-%m")
             if month_key not in monthly_data:
                 monthly_data[month_key] = {
                     "total": 0,
@@ -7674,7 +7738,7 @@ def export_full_analytics():
         ws_summary.title = "Executive Summary"
 
         # Get overall statistics
-        current_month = datetime.now().replace(day=1)
+        current_month = toronto_now().replace(day=1)
         last_month = current_month - relativedelta(months=1)
 
         stats = {}
@@ -7924,7 +7988,7 @@ def get_cancellation_card(cancellation_id):
             return jsonify({"success": False, "message": "Cancellation not found"}), 404
 
         # Get student's current month cancellation count
-        current_month = datetime.now().replace(day=1)
+        current_month = toronto_now().replace(day=1)
         month_cancellations = conn.execute(
             """
             SELECT COUNT(*) as count
@@ -8513,9 +8577,12 @@ def process_template_variables(template_body, template_subject, variables):
 
 def get_template_variables(student=None, cancellation=None, extra_vars=None):
     """Generate template variables for your cancellation system - FIXED for sqlite3.Row"""
+    # Use Pacific timezone for all timestamps
+    pacific_now = toronto_now()
+    
     variables = {
-        "current_date": datetime.now().strftime("%B %d, %Y"),
-        "current_time": datetime.now().strftime("%I:%M %p"),
+        "current_date": pacific_now.strftime("%B %d, %Y"),
+        "current_time": pacific_now.strftime("%I:%M %p"),
         "company_name": "Riverside Equestrian",
         "contact_email": email_config.admin_email,
         "policy_url": "https://www.riversideequestrian.ca/cancellations",
@@ -8577,9 +8644,9 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
             try:
                 lesson_date = datetime.strptime(lesson_date_str, "%Y-%m-%d")
             except ValueError:
-                lesson_date = datetime.now()
+                lesson_date = toronto_now()
         else:
-            lesson_date = lesson_date_str or datetime.now()
+            lesson_date = lesson_date_str or toronto_now()
 
         lesson_time_str = cancellation_dict.get("lesson_time")
         if isinstance(lesson_time_str, str):
@@ -8589,10 +8656,22 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 else:
                     lesson_time = datetime.strptime(lesson_time_str, "%H:%M").time()
             except ValueError:
-                lesson_time = datetime.now().time()
+                lesson_time = toronto_now().time()
         else:
-            lesson_time = lesson_time_str or datetime.now().time()
+            lesson_time = lesson_time_str or toronto_now().time()
 
+        # Get submission time from created_at field in Pacific timezone
+        created_at = cancellation_dict.get("created_at")
+        if created_at:
+            # Parse the timestamp (handles both old and new formats)
+            submission_dt = localize_datetime(created_at)
+            if submission_dt is None:
+                submission_dt = toronto_now()
+            submission_time_str = submission_dt.strftime("%B %d, %Y at %I:%M %p")
+        else:
+            # Fallback to current Pacific time if no created_at
+            submission_time_str = toronto_now().strftime("%B %d, %Y at %I:%M %p")
+        
         variables.update(
             {
                 "lesson_date": lesson_date.strftime("%B %d, %Y"),
@@ -8604,7 +8683,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 ),
                 "will_be_charged": "Yes" if cancellation_dict.get("charged") else "No",
                 "charge_reason": get_charge_reason(cancellation_dict),
-                "submission_time": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+                "submission_time": submission_time_str,
                 "cancellation_id": str(cancellation_dict.get("id", "")),
             }
         )
@@ -9173,7 +9252,7 @@ def send_override_notification_emails(
         "override_action": override_action,
         "override_reason": override_reason,
         "override_by": manager_email,
-        "override_date": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+        "override_date": toronto_now().strftime("%B %d, %Y at %I:%M %p"),
     }
 
     # STEP 1: Send updated confirmation to CLIENT

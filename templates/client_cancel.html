@@ -496,138 +496,138 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
 </div>
 {% endblock %} {% block extra_js %}
 <script>
-  // Form validation - clear policy error when checkbox is checked
-  document.getElementById('policy_acknowledgment').addEventListener('change', function() {
-      // Remove error styling when checkbox is checked
-      if (this.checked) {
-          document.getElementById('policyCard').classList.remove('policy-card-error');
-          document.getElementById('policyError').classList.remove('show');
-      }
-  });
+    // Form validation - clear policy error when checkbox is checked
+    document.getElementById('policy_acknowledgment').addEventListener('change', function() {
+        // Remove error styling when checkbox is checked
+        if (this.checked) {
+            document.getElementById('policyCard').classList.remove('policy-card-error');
+            document.getElementById('policyError').classList.remove('show');
+        }
+    });
 
-  // Toggle additional lessons section
-  function toggleAdditionalSection() {
-      const section = document.getElementById('additionalSection');
-      const btn = document.getElementById('addAdditionalBtn');
+    // Toggle additional lessons section
+    function toggleAdditionalSection() {
+        const section = document.getElementById('additionalSection');
+        const btn = document.getElementById('addAdditionalBtn');
 
-      if (section.classList.contains('show')) {
-          section.classList.remove('show');
-          btn.innerHTML = '<i class="fas fa-plus me-2"></i>I have additional lessons to cancel as part of this cancellation notice';
-      } else {
-          section.classList.add('show');
-          btn.innerHTML = '<i class="fas fa-minus me-2"></i>Remove additional lessons';
-      }
-  }
+        if (section.classList.contains('show')) {
+            section.classList.remove('show');
+            btn.innerHTML = '<i class="fas fa-plus me-2"></i>I have additional lessons to cancel as part of this cancellation notice';
+        } else {
+            section.classList.add('show');
+            btn.innerHTML = '<i class="fas fa-minus me-2"></i>Remove additional lessons';
+        }
+    }
 
-  // Toggle reschedule preferences section
-  function toggleReschedulePreferences() {
-      const checkbox = document.getElementById('wants_reschedule');
-      const section = document.getElementById('reschedulePreferencesSection');
+    // Toggle reschedule preferences section
+    function toggleReschedulePreferences() {
+        const checkbox = document.getElementById('wants_reschedule');
+        const section = document.getElementById('reschedulePreferencesSection');
 
-      if (checkbox.checked) {
-          section.style.display = 'block';
-          section.style.animation = 'slideDown 0.3s ease';
-      } else {
-          section.style.display = 'none';
-          // Clear the text area when hiding
-          document.getElementById('reschedule_preferences').value = '';
-      }
-  }
+        if (checkbox.checked) {
+            section.style.display = 'block';
+            section.style.animation = 'slideDown 0.3s ease';
+        } else {
+            section.style.display = 'none';
+            // Clear the text area when hiding
+            document.getElementById('reschedule_preferences').value = '';
+        }
+    }
 
-  // FIXED Update status preview - Corrected calculation logic
-  function updateStatusPreview() {
-      const lessonDate = document.getElementById('lesson_date').value;
-      const lessonTime = document.getElementById('lesson_time').value;
-      const returnDate = document.getElementById('return_date').value;
-      const preview = document.getElementById('statusPreview');
+    // FIXED Update status preview - Corrected calculation logic
+    function updateStatusPreview() {
+        const lessonDate = document.getElementById('lesson_date').value;
+        const lessonTime = document.getElementById('lesson_time').value;
+        const returnDate = document.getElementById('return_date').value;
+        const preview = document.getElementById('statusPreview');
 
-      if (!lessonDate || !lessonTime) {
-          preview.innerHTML = `
-              <div class="text-center">
-                  <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
-                  <p class="mb-0">Enter lesson details above.  The cancellation outcome will display here.</p>
-              </div>
-          `;
-          preview.className = 'status-preview';
-          return;
-      }
+        if (!lessonDate || !lessonTime) {
+            preview.innerHTML = `
+                <div class="text-center">
+                    <i class="fas fa-info-circle fa-2x text-muted mb-2"></i>
+                    <p class="mb-0">Enter lesson details above.  The cancellation outcome will display here.</p>
+                </div>
+            `;
+            preview.className = 'status-preview';
+            return;
+        }
 
-      // Get current time and lesson datetime
-      const now = new Date();
-      const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
-      const hasFreeCancellations = {{ cancellation_status.remaining }} > 0;
+        // Get current time and lesson datetime
+        const now = new Date();
+        const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
+        const hasFreeCancellations = {{ cancellation_status.remaining }} > 0;
 
-      let willCharge = false;
-      let statusClass = 'free-cancellation';
-      let statusIcon = 'fas fa-check-circle text-success';
-      let statusText = '';
+        let willCharge = false;
+        let statusClass = 'free-cancellation';
+        let statusIcon = 'fas fa-check-circle text-success';
+        let statusText = '';
 
-      // Calculate additional lessons if return date is provided
-      let additionalLessonsText = '';
-      if (returnDate && returnDate > lessonDate) {
+        // Calculate additional lessons if return date is provided
+        let additionalLessonsText = '';
+        if (returnDate && returnDate > lessonDate) {
+            const lessonDateObj = new Date(lessonDate);
+            const returnDateObj = new Date(returnDate);
+            const daysDiff = Math.ceil((returnDateObj - lessonDateObj) / (1000 * 60 * 60 * 24));
+            if (daysDiff > 1) {
+                additionalLessonsText = `<br><small class="text-dark fw-semibold">Lessons are cancelled starting ${lessonDate}, and resume on ${returnDate} (approximately ${daysDiff} days).</small>`;
+
+            }
+        }
+
+        // FIXED: Correct deadline calculation based on membership type
+        {% if cancellation_policy.level == 'Gold' %}
+          // Gold: 2 hours before lesson time
+          const deadline = new Date(lessonDateTime.getTime() - (2 * 60 * 60 * 1000));
+          const isAfterDeadline = now > deadline;
+          const deadlineText = "2 hours before lesson time";
+        {% else %}
+          // All others: 6pm the day before lesson date
+          // Key fix: Create the deadline correctly
           const lessonDateObj = new Date(lessonDate);
-          const returnDateObj = new Date(returnDate);
-          const daysDiff = Math.ceil((returnDateObj - lessonDateObj) / (1000 * 60 * 60 * 24));
-          if (daysDiff > 1) {
-              additionalLessonsText = `<br><small class="text-dark fw-semibold">Lessons are cancelled starting ${lessonDate}, and resume on ${returnDate} (approximately ${daysDiff} days).</small>`;
+          const dayBeforeLesson = new Date(lessonDateObj);
+          dayBeforeLesson.setDate(dayBeforeLesson.getDate() - 1); // Go to day before
+          dayBeforeLesson.setHours(18, 0, 0, 0); // Set to 6pm on day before
 
-          }
-      }
+          const isAfterDeadline = now > dayBeforeLesson;
+          const deadlineText = "6pm the day before";
+        {% endif %}
 
-      // FIXED: Correct deadline calculation based on membership type
-      {% if cancellation_policy.level == 'Gold' %}
-        // Gold: 2 hours before lesson time
-        const deadline = new Date(lessonDateTime.getTime() - (2 * 60 * 60 * 1000));
-        const isAfterDeadline = now > deadline;
-        const deadlineText = "2 hours before lesson time";
-      {% else %}
-        // All others: 6pm the day before lesson date
-        // Key fix: Create the deadline correctly
-        const lessonDateObj = new Date(lessonDate);
-        const dayBeforeLesson = new Date(lessonDateObj);
-        dayBeforeLesson.setDate(dayBeforeLesson.getDate() - 1); // Go to day before
-        dayBeforeLesson.setHours(18, 0, 0, 0); // Set to 6pm on day before
+        // Check conditions for charging
+        if (isAfterDeadline) {
+            willCharge = true;
+            statusClass = 'will-charge';
+            statusIcon = 'fas fa-exclamation-triangle text-warning';
+            statusText = `This will not be a free cancellation: Notice will be received after the cancellation cutoff (${deadlineText}).`;
+        } else if (!hasFreeCancellations) {
+            willCharge = true;
+            statusClass = 'will-charge';
+            statusIcon = 'fas fa-times-circle text-danger';
+            statusText = 'This will not be a free cancellation: No more available free cancellation notices this month.';
+        } else if ({{ cancellation_status.used }} === {{ cancellation_status.limit - 1 }}) {
+            statusClass = 'warning';
+            statusIcon = 'fas fa-info-circle text-warning';
+            statusText = 'This is your last free cancellation notice. No more free cancellations available this month after this.';
+        } else {
+            statusText = 'This cancellation will be processed as a free cancellation notice.';
+        }
 
-        const isAfterDeadline = now > dayBeforeLesson;
-        const deadlineText = "6pm the day before";
-      {% endif %}
+        const chargesApplyText = willCharge ?
+          'Charges will apply as per the <a href="https://www.riversideequestrian.ca/cancellations" target="_blank">cancellation policy</a>.' : '';
 
-      // Check conditions for charging
-      if (isAfterDeadline) {
-          willCharge = true;
-          statusClass = 'will-charge';
-          statusIcon = 'fas fa-exclamation-triangle text-warning';
-          statusText = `This will not be a free cancellation: Notice will be received after the cancellation cutoff (${deadlineText}).`;
-      } else if (!hasFreeCancellations) {
-          willCharge = true;
-          statusClass = 'will-charge';
-          statusIcon = 'fas fa-times-circle text-danger';
-          statusText = 'This will not be a free cancellation: No more available free cancellation notices this month.';
-      } else if ({{ cancellation_status.used }} === {{ cancellation_status.limit - 1 }}) {
-          statusClass = 'warning';
-          statusIcon = 'fas fa-info-circle text-warning';
-          statusText = 'This is your last free cancellation notice. No more free cancellations available this month after this.';
-      } else {
-          statusText = 'This cancellation will be processed as a free cancellation notice.';
-      }
-
-      const chargesApplyText = willCharge ?
-        'Charges will apply as per the <a href="https://www.riversideequestrian.ca/cancellations" target="_blank">cancellation policy</a>.' : '';
-
-      preview.innerHTML = `
-          <div class="d-flex align-items-center">
-              <div class="me-3">
-                  <i class="${statusIcon} fa-2x"></i>
-              </div>
-              <div class="flex-grow-1">
-                  <h6 class="mb-1">Cancellation Result</h6>
-                  <p class="mb-0">${statusText}${additionalLessonsText}</p>
-                  ${willCharge ? `<small class="text-muted">${chargesApplyText}</small>` : ''}
-              </div>
-          </div>
-      `;
-      preview.className = `status-preview ${statusClass}`;
-  }
+        preview.innerHTML = `
+            <div class="d-flex align-items-center">
+                <div class="me-3">
+                    <i class="${statusIcon} fa-2x"></i>
+                </div>
+                <div class="flex-grow-1">
+                    <h6 class="mb-1">Cancellation Result</h6>
+                    <p class="mb-0">${statusText}${additionalLessonsText}</p>
+                    ${willCharge ? `<small class="text-muted">${chargesApplyText}</small>` : ''}
+                </div>
+            </div>
+        `;
+        preview.className = `status-preview ${statusClass}`;
+    }
 
   // Form submission handling
   document.getElementById('cancellationForm').addEventListener('submit', function(e) {
@@ -653,18 +653,10 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           if (!firstErrorField) firstErrorField = 'lesson_time';
       }
 
-      // Validate that lesson is in the future (only if both date and time are provided)
-      if (lessonDate && lessonTime) {
-          const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
-          const now = new Date();
-
-          if (lessonDateTime <= now) {
-              showFieldError('lesson_date', 'Cannot cancel lessons that have already occurred');
-              showFieldError('lesson_time', 'Lesson time is in the past');
-              hasErrors = true;
-              if (!firstErrorField) firstErrorField = 'lesson_date';
-          }
-      }
+      // NOTE: Past lesson validation removed from client-side
+      // The server handles this correctly with Pacific timezone awareness
+      // Client-side validation would incorrectly use browser's local timezone
+      // which fails for users in different timezones (e.g., China, Europe)
 
       // Check if policy acknowledgment is checked
       const policyCheckbox = document.getElementById('policy_acknowledgment');
@@ -707,82 +699,78 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       }
   });
 
-  // Show error on a specific field
-  function showFieldError(fieldId, message) {
-      const field = document.getElementById(fieldId);
-      const container = field.closest('.form-floating');
-      const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
-      const errorElement = document.getElementById(errorId);
+    // Show error on a specific field
+    function showFieldError(fieldId, message) {
+        const field = document.getElementById(fieldId);
+        const container = field.closest('.form-floating');
+        const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
+        const errorElement = document.getElementById(errorId);
 
-      // Add error styling to field
-      field.classList.add('field-error');
-      container.classList.add('has-error');
+        // Add error styling to field
+        field.classList.add('field-error');
+        container.classList.add('has-error');
 
-      // Show error message with custom text
-      if (errorElement) {
-          errorElement.querySelector('span').textContent = message;
-          errorElement.classList.add('show');
-      }
-  }
+        // Show error message with custom text
+        if (errorElement) {
+            errorElement.querySelector('span').textContent = message;
+            errorElement.classList.add('show');
+        }
+    }
 
-  // Clear error on a specific field
-  function clearFieldError(fieldId) {
-      const field = document.getElementById(fieldId);
-      const container = field.closest('.form-floating');
-      const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
-      const errorElement = document.getElementById(errorId);
+    // Clear error on a specific field
+    function clearFieldError(fieldId) {
+        const field = document.getElementById(fieldId);
+        const container = field.closest('.form-floating');
+        const errorId = fieldId === 'lesson_date' ? 'lessonDateError' : 'lessonTimeError';
+        const errorElement = document.getElementById(errorId);
 
-      // Remove error styling
-      field.classList.remove('field-error');
-      container.classList.remove('has-error');
+        // Remove error styling
+        field.classList.remove('field-error');
+        container.classList.remove('has-error');
 
-      // Hide error message
-      if (errorElement) {
-          errorElement.classList.remove('show');
-      }
-  }
+        // Hide error message
+        if (errorElement) {
+            errorElement.classList.remove('show');
+        }
+    }
 
-  // Clear all field errors
-  function clearAllFieldErrors() {
-      // Clear date and time field errors
-      clearFieldError('lesson_date');
-      clearFieldError('lesson_time');
+    // Clear all field errors
+    function clearAllFieldErrors() {
+        // Clear date and time field errors
+        clearFieldError('lesson_date');
+        clearFieldError('lesson_time');
 
-      // Clear policy error
-      document.getElementById('policyCard').classList.remove('policy-card-error');
-      document.getElementById('policyError').classList.remove('show');
-  }
+        // Clear policy error
+        document.getElementById('policyCard').classList.remove('policy-card-error');
+        document.getElementById('policyError').classList.remove('show');
+    }
 
-  // Auto-focus first input
-  document.addEventListener('DOMContentLoaded', function() {
-      document.getElementById('lesson_date').focus();
+    // Auto-focus first input
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('lesson_date').focus();
 
-      // Set minimum date to today
-      const today = new Date().toISOString().split('T')[0];
-      document.getElementById('lesson_date').min = today;
-      document.getElementById('return_date').min = today;
 
-      // Add input/focus listeners to clear errors when user interacts with fields
-      document.getElementById('lesson_date').addEventListener('focus', function() {
-          clearFieldError('lesson_date');
-      });
+        // Add input/focus listeners to clear errors when user interacts with fields
+        document.getElementById('lesson_date').addEventListener('focus', function() {
+            clearFieldError('lesson_date');
+        });
 
-      document.getElementById('lesson_time').addEventListener('focus', function() {
-          clearFieldError('lesson_time');
-      });
+        document.getElementById('lesson_time').addEventListener('focus', function() {
+            clearFieldError('lesson_time');
+        });
 
-      // Also clear errors on input for immediate feedback
-      document.getElementById('lesson_date').addEventListener('input', function() {
-          if (this.value) {
-              clearFieldError('lesson_date');
-          }
-      });
+        // Also clear errors on input for immediate feedback
+        document.getElementById('lesson_date').addEventListener('input', function() {
+            if (this.value) {
+                clearFieldError('lesson_date');
+            }
+        });
 
-      document.getElementById('lesson_time').addEventListener('input', function() {
-          if (this.value) {
-              clearFieldError('lesson_time');
-          }
-      });
-  });
+        document.getElementById('lesson_time').addEventListener('input', function() {
+            if (this.value) {
+                clearFieldError('lesson_time');
+            }
+        });
+    });
 </script>
 {% endblock %}
