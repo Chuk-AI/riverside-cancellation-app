@@ -471,6 +471,27 @@ def init_db():
                 "string",
             ),
             (
+                "manager_emails",
+                "managers@riversideequestrian.ca, stav@riversideequestrian.ca",
+                "Manager email addresses (comma-separated)",
+                "email",
+                "string",
+            ),
+            (
+                "client_email_notifications",
+                "true",
+                "Send email notifications to clients",
+                "email",
+                "boolean",
+            ),
+            (
+                "manager_email_notifications",
+                "true",
+                "Send email notifications to managers",
+                "email",
+                "boolean",
+            ),
+            (
                 "backup_retention_days",
                 "30",
                 "How long to keep backup files",
@@ -1980,6 +2001,11 @@ def client_cancel():
         # The 'charged' field indicates if it will be charged, but status is always pending initially
         initial_status = "pending"
 
+        # FIXED: Store created_at in Pacific timezone as a plain datetime string
+        # This prevents timezone confusion and ensures the submission time is fixed
+        pacific_now = toronto_now()
+        created_at_string = pacific_now.strftime("%Y-%m-%d %H:%M:%S")
+
         # Insert cancellation - UPDATED with new fields
         conn = get_db()
         cursor = conn.execute(
@@ -2004,8 +2030,8 @@ def client_cancel():
                 deadline_passed,  # NEW
                 False,  # is_override starts as False
                 initial_status,  # Auto-approve free, or set as charged
-                toronto_now().isoformat(),  # created_at with timezone
-                toronto_now().isoformat(),  # updated_at with timezone
+                created_at_string,  # FIXED: Store as Pacific time string - this NEVER changes
+                created_at_string,  # updated_at can change, but created_at stays fixed
             ),
         )
         cancellation_id = cursor.lastrowid
@@ -2777,19 +2803,25 @@ def process_cancellation_dates(cancellation):
         dict(cancellation) if hasattr(cancellation, "keys") else cancellation
     )
 
-    # Convert created_at string to datetime
+    # Convert created_at string to datetime - FIXED: Always use Pacific timezone
     if isinstance(cancellation_dict.get("created_at"), str):
         try:
-            cancellation_dict["created_at"] = datetime.strptime(
+            # Parse the datetime string
+            naive_dt = datetime.strptime(
                 cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
             )
             # Localize to Pacific timezone since database stores in Pacific time
             pacific_tz = pytz.timezone("America/Los_Angeles")
+            cancellation_dict["created_at"] = pacific_tz.localize(naive_dt)
+        except (ValueError, TypeError):
+            cancellation_dict["created_at"] = toronto_now()
+    elif isinstance(cancellation_dict.get("created_at"), datetime):
+        # If it's already a datetime object but naive, localize it
+        if cancellation_dict["created_at"].tzinfo is None:
+            pacific_tz = pytz.timezone("America/Los_Angeles")
             cancellation_dict["created_at"] = pacific_tz.localize(
                 cancellation_dict["created_at"]
             )
-        except (ValueError, TypeError):
-            cancellation_dict["created_at"] = toronto_now()
 
     # Convert lesson_date string to date object
     if isinstance(cancellation_dict.get("lesson_date"), str):
@@ -2817,11 +2849,12 @@ def process_cancellation_dates(cancellation):
                     "00:00", "%H:%M"
                 ).time()
 
-    # Process submitted date and time
+    # Process submitted date and time - FIXED: Store the original submission time
     if cancellation_dict.get("created_at"):
         created_at = cancellation_dict["created_at"]
+        # Store the actual submission date and time (these should never change)
         cancellation_dict["submitted_date"] = created_at.date()
-        cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p")
+        cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p PST")
 
         # Calculate time ago - use PST time for comparison
         now = toronto_now()  # Use PST time, not system time
@@ -3202,179 +3235,210 @@ def batch_process_cancellations():
     }
 
     try:
+        print(f"\n=== BATCH PROCESSING DEBUG ===")
+        print(f"Action: {action}")
+        print(f"Number of cancellations: {len(cancellation_ids)}")
+        
         processed_count = 0
 
         for cancellation_id in cancellation_ids:
-            # Get cancellation and student data
-            cancellation_data = conn.execute(
-                """
-                SELECT c.*, s.first_name, s.last_name, s.email, s.phone, s.membership_level,
-                       s.parent_first, s.parent_last
-                FROM cancellations c
-                JOIN students s ON c.student_id = s.id
-                WHERE c.id = ?
-                """,
-                (cancellation_id,),
-            ).fetchone()
+            try:
+                # Get cancellation and student data
+                cancellation_data = conn.execute(
+                    """
+                    SELECT c.*, s.first_name, s.last_name, s.email, s.phone, s.membership_level,
+                           s.parent_first, s.parent_last
+                    FROM cancellations c
+                    JOIN students s ON c.student_id = s.id
+                    WHERE c.id = ?
+                    """,
+                    (cancellation_id,),
+                ).fetchone()
 
-            if not cancellation_data:
-                continue
+                if not cancellation_data:
+                    print(f"Cancellation {cancellation_id} not found, skipping...")
+                    continue
 
-            # Prepare data
-            student_dict = {
-                "id": cancellation_data["student_id"],
-                "first_name": cancellation_data["first_name"],
-                "last_name": cancellation_data["last_name"],
-                "email": cancellation_data["email"],
-                "phone": cancellation_data["phone"],
-                "membership_level": cancellation_data["membership_level"],
-                "parent_first": cancellation_data["parent_first"],
-                "parent_last": cancellation_data["parent_last"],
-            }
+                # Convert Row to dict for easier access
+                cancellation_dict = dict(cancellation_data)
+                
+                print(f"Processing cancellation {cancellation_id}...")
 
-            # Get lesson datetime for policy check
-            lesson_datetime = parse_lesson_datetime(
-                cancellation_data["lesson_date"], cancellation_data["lesson_time"]
-            )
+                # Prepare data
+                student_dict = {
+                    "id": cancellation_dict["student_id"],
+                    "first_name": cancellation_dict["first_name"],
+                    "last_name": cancellation_dict["last_name"],
+                    "email": cancellation_dict["email"],
+                    "phone": cancellation_dict["phone"],
+                    "membership_level": cancellation_dict["membership_level"],
+                    "parent_first": cancellation_dict["parent_first"],
+                    "parent_last": cancellation_dict["parent_last"],
+                }
 
-            # Update database based on action
-            if action == "approve_policy":
-                # Check policy to determine if should be free or charged
-                should_be_charged, charge_reason = will_be_charged(
-                    student_dict, lesson_datetime
+                # Get lesson datetime for policy check
+                lesson_datetime = parse_lesson_datetime(
+                    cancellation_dict["lesson_date"], cancellation_dict["lesson_time"]
                 )
 
-                if should_be_charged:
-                    # Process as charged according to policy
-                    conn.execute(
-                        """UPDATE cancellations 
-                           SET charged = 1, status = 'charged', manager_notes = ?, 
-                               approved_by = ?, updated_at = ? 
-                           WHERE id = ?""",
-                        (
-                            f"Batch processed according to policy: {charge_reason}",
-                            session.get("user_email", "Unknown Manager"),
-                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                            cancellation_id,
-                        ),
+                # Update database based on action
+                if action == "approve_policy":
+                    # CRITICAL FIX: Use the STORED charge status that was calculated at submission time
+                    # DO NOT recalculate based on current time - that would be incorrect!
+                    # The 'charged' field was set correctly when the cancellation was submitted
+                    should_be_charged = bool(cancellation_dict["charged"])
+                    charge_reason = (
+                        cancellation_dict.get("manager_notes")
+                        or "Processed according to membership policy"
                     )
-                    updated_cancellation = dict(cancellation_data)
-                    updated_cancellation.update(
-                        {
-                            "charged": 1,
-                            "status": "charged",
-                            "approved_by": session.get("user_email", "Unknown Manager"),
-                        }
-                    )
-                else:
-                    # Process as free according to policy
+
+                    print(f"  should_be_charged={should_be_charged}")
+
+                    if should_be_charged:
+                        # Process as charged according to policy
+                        conn.execute(
+                            """UPDATE cancellations 
+                               SET charged = 1, status = 'charged', manager_notes = ?, 
+                                   approved_by = ?, updated_at = ? 
+                               WHERE id = ?""",
+                            (
+                                f"Batch processed according to policy: {charge_reason}",
+                                session.get("user_email", "Unknown Manager"),
+                                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                                cancellation_id,
+                            ),
+                        )
+                        print(f"  -> Set to CHARGED")
+                        updated_cancellation = dict(cancellation_dict)
+                        updated_cancellation.update(
+                            {
+                                "charged": 1,
+                                "status": "charged",
+                                "approved_by": session.get("user_email", "Unknown Manager"),
+                            }
+                        )
+                    else:
+                        # Process as free according to policy
+                        conn.execute(
+                            """UPDATE cancellations 
+                               SET status = 'approved', charged = 0, manager_notes = ?, 
+                                   approved_by = ?, updated_at = ? 
+                               WHERE id = ?""",
+                            (
+                                f"Batch processed according to policy: {charge_reason}",
+                                session.get("user_email", "Unknown Manager"),
+                                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                                cancellation_id,
+                            ),
+                        )
+                        print(f"  -> Set to APPROVED (free)")
+                        updated_cancellation = dict(cancellation_dict)
+                        updated_cancellation.update(
+                            {
+                                "charged": 0,
+                                "status": "approved",
+                                "approved_by": session.get("user_email", "Unknown Manager"),
+                            }
+                        )
+
+                elif action == "force_free":
                     conn.execute(
                         """UPDATE cancellations 
                            SET status = 'approved', charged = 0, manager_notes = ?, 
-                               approved_by = ?, updated_at = ? 
+                               is_override = 1, approved_by = ?, updated_at = ? 
                            WHERE id = ?""",
                         (
-                            f"Batch processed according to policy: {charge_reason}",
+                            f"Batch force free: {reason}",
                             session.get("user_email", "Unknown Manager"),
                             toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
                             cancellation_id,
                         ),
                     )
-                    updated_cancellation = dict(cancellation_data)
+                    print(f"  -> Forced to FREE (override)")
+                    updated_cancellation = dict(cancellation_dict)
                     updated_cancellation.update(
                         {
                             "charged": 0,
                             "status": "approved",
+                            "is_override": 1,
                             "approved_by": session.get("user_email", "Unknown Manager"),
                         }
                     )
 
-            elif action == "force_free":
-                conn.execute(
-                    """UPDATE cancellations 
-                       SET status = 'approved', charged = 0, manager_notes = ?, 
-                           is_override = 1, approved_by = ?, updated_at = ? 
-                       WHERE id = ?""",
-                    (
-                        f"Batch force free: {reason}",
+                elif action == "charge":
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET charged = 1, status = 'charged', manager_notes = ?, 
+                               is_override = 1, approved_by = ?, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            f"Batch charge: {reason}",
+                            session.get("user_email", "Unknown Manager"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_id,
+                        ),
+                    )
+                    print(f"  -> Forced to CHARGED (override)")
+                    updated_cancellation = dict(cancellation_dict)
+                    updated_cancellation.update(
+                        {
+                            "charged": 1,
+                            "status": "charged",
+                            "is_override": 1,
+                            "approved_by": session.get("user_email", "Unknown Manager"),
+                        }
+                    )
+
+                elif action == "exclude":
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET excluded = 1, exclusion_reason = ?, approved_by = ?, 
+                               is_override = 1, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            reason,
+                            session["user_email"],
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_id,
+                        ),
+                    )
+                    print(f"  -> EXCLUDED")
+                    updated_cancellation = dict(cancellation_dict)
+                    updated_cancellation.update({"excluded": 1, "is_override": 1})
+
+                # Send email notifications for each processed cancellation
+                # Only send override emails for force actions, not for approve_policy
+                if action in [
+                    "force_free",
+                    "charge",
+                ]:  # Don't send emails for approve_policy or exclusions
+                    email_results = send_override_notification_emails(
+                        student_dict,
+                        updated_cancellation,
+                        action,
+                        f"Batch {action}: {reason}",
                         session.get("user_email", "Unknown Manager"),
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                        cancellation_id,
-                    ),
-                )
-                updated_cancellation = dict(cancellation_data)
-                updated_cancellation.update(
-                    {
-                        "charged": 0,
-                        "status": "approved",
-                        "is_override": 1,
-                        "approved_by": session.get("user_email", "Unknown Manager"),
-                    }
-                )
+                    )
 
-            elif action == "charge":
-                conn.execute(
-                    """UPDATE cancellations 
-                       SET charged = 1, status = 'charged', manager_notes = ?, 
-                           is_override = 1, approved_by = ?, updated_at = ? 
-                       WHERE id = ?""",
-                    (
-                        f"Batch charge: {reason}",
-                        session.get("user_email", "Unknown Manager"),
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                        cancellation_id,
-                    ),
-                )
-                updated_cancellation = dict(cancellation_data)
-                updated_cancellation.update(
-                    {
-                        "charged": 1,
-                        "status": "charged",
-                        "is_override": 1,
-                        "approved_by": session.get("user_email", "Unknown Manager"),
-                    }
-                )
+                    # Track email results
+                    if email_results["client_email"].get("success"):
+                        email_summary["client_emails_sent"] += 1
+                    else:
+                        email_summary["client_emails_failed"] += 1
 
-            elif action == "exclude":
-                conn.execute(
-                    """UPDATE cancellations 
-                       SET excluded = 1, exclusion_reason = ?, approved_by = ?, 
-                           is_override = 1, updated_at = ? 
-                       WHERE id = ?""",
-                    (
-                        reason,
-                        session["user_email"],
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                        cancellation_id,
-                    ),
-                )
-                updated_cancellation = dict(cancellation_data)
-                updated_cancellation.update({"excluded": 1, "is_override": 1})
+                processed_count += 1
+                
+            except Exception as e:
+                print(f"ERROR processing cancellation {cancellation_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Continue with next cancellation even if one fails
+                continue
 
-            # Send email notifications for each processed cancellation
-            # Only send override emails for force actions, not for approve_policy
-            if action in [
-                "force_free",
-                "charge",
-            ]:  # Don't send emails for approve_policy or exclusions
-                email_results = send_override_notification_emails(
-                    student_dict,
-                    updated_cancellation,
-                    action,
-                    f"Batch {action}: {reason}",
-                    session.get("user_email", "Unknown Manager"),
-                )
-
-                # Track email results
-                if email_results["client_email"].get("success"):
-                    email_summary["client_emails_sent"] += 1
-                else:
-                    email_summary["client_emails_failed"] += 1
-
-            processed_count += 1
-
+        # Commit all changes at once
+        print(f"Committing {processed_count} updates...")
         conn.commit()
-        conn.close()
+        print(f"Commit successful!")
 
         # Send single manager notification about batch operation
         email_summary["manager_notifications_sent"] = 1  # Simplified for batch
@@ -3383,6 +3447,8 @@ def batch_process_cancellations():
             "batch_processing",
             f"Batch {action}: {processed_count} cancellations ({reason})",
         )
+
+        print(f"===================================\n")
 
         return jsonify(
             {
@@ -3393,8 +3459,13 @@ def batch_process_cancellations():
         )
 
     except Exception as e:
-        conn.close()
+        print(f"CRITICAL ERROR in batch_process: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        conn.rollback()  # Roll back on error
         return jsonify({"success": False, "message": str(e)})
+    finally:
+        conn.close()
 
 
 @app.route("/manager/api/cancellation/process-all-pending", methods=["POST"])
@@ -3402,9 +3473,9 @@ def batch_process_cancellations():
 @admin_required
 def process_all_pending_cancellations():
     """Process all pending cancellations according to policy"""
+    conn = get_db()
+    
     try:
-        conn = get_db()
-
         # Get all pending cancellations
         pending_cancellations = conn.execute(
             """
@@ -3416,69 +3487,91 @@ def process_all_pending_cancellations():
             """
         ).fetchall()
 
+        print(f"\n=== PROCESS ALL PENDING DEBUG ===")
+        print(f"Found {len(pending_cancellations)} pending cancellations")
+
         processed_count = 0
 
         for cancellation_data in pending_cancellations:
-            # Prepare student data
-            student_dict = {
-                "id": cancellation_data["student_id"],
-                "first_name": cancellation_data["first_name"],
-                "last_name": cancellation_data["last_name"],
-                "email": cancellation_data["email"],
-                "phone": cancellation_data["phone"],
-                "membership_level": cancellation_data["membership_level"],
-                "parent_first": cancellation_data["parent_first"],
-                "parent_last": cancellation_data["parent_last"],
-            }
+            try:
+                # Convert Row to dict for easier access
+                cancellation_dict = dict(cancellation_data)
+                
+                # Prepare student data
+                student_dict = {
+                    "id": cancellation_dict["student_id"],
+                    "first_name": cancellation_dict["first_name"],
+                    "last_name": cancellation_dict["last_name"],
+                    "email": cancellation_dict["email"],
+                    "phone": cancellation_dict["phone"],
+                    "membership_level": cancellation_dict["membership_level"],
+                    "parent_first": cancellation_dict["parent_first"],
+                    "parent_last": cancellation_dict["parent_last"],
+                }
 
-            # Get lesson datetime for policy check
-            lesson_datetime = parse_lesson_datetime(
-                cancellation_data["lesson_date"], cancellation_data["lesson_time"]
-            )
-
-            # Check policy to determine if should be free or charged
-            should_be_charged, charge_reason = will_be_charged(
-                student_dict, lesson_datetime
-            )
-
-            if should_be_charged:
-                # Process as charged according to policy
-                conn.execute(
-                    """UPDATE cancellations 
-                       SET charged = 1, status = 'charged', manager_notes = ?, 
-                           approved_by = ?, updated_at = ? 
-                       WHERE id = ?""",
-                    (
-                        f"Auto-processed according to policy: {charge_reason}",
-                        session.get("user_email", "System"),
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                        cancellation_data["id"],
-                    ),
-                )
-            else:
-                # Process as free according to policy
-                conn.execute(
-                    """UPDATE cancellations 
-                       SET status = 'approved', charged = 0, manager_notes = ?, 
-                           approved_by = ?, updated_at = ? 
-                       WHERE id = ?""",
-                    (
-                        f"Auto-processed according to policy: {charge_reason}",
-                        session.get("user_email", "System"),
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                        cancellation_data["id"],
-                    ),
+                # CRITICAL FIX: Use the STORED charge status that was calculated at submission time
+                # DO NOT recalculate based on current time - that would be incorrect!
+                # The 'charged' field was set correctly when the cancellation was submitted
+                should_be_charged = bool(cancellation_dict["charged"])
+                
+                # Get charge reason from stored data or create default message
+                charge_reason = (
+                    cancellation_dict.get("manager_notes")
+                    or "Processed according to membership policy"
                 )
 
-            processed_count += 1
+                print(f"Processing cancellation {cancellation_dict['id']}: should_be_charged={should_be_charged}")
 
+                if should_be_charged:
+                    # Process as charged according to policy
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET charged = 1, status = 'charged', manager_notes = ?, 
+                               approved_by = ?, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            f"Processed according to policy: {charge_reason}",
+                            session.get("user_email", "Unknown Manager"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_dict["id"],
+                        ),
+                    )
+                    print(f"  -> Set to CHARGED")
+                else:
+                    # Process as free according to policy
+                    conn.execute(
+                        """UPDATE cancellations 
+                           SET status = 'approved', charged = 0, manager_notes = ?, 
+                               approved_by = ?, updated_at = ? 
+                           WHERE id = ?""",
+                        (
+                            f"Processed according to policy: {charge_reason}",
+                            session.get("user_email", "Unknown Manager"),
+                            toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            cancellation_dict["id"],
+                        ),
+                    )
+                    print(f"  -> Set to APPROVED (free)")
+
+                processed_count += 1
+            except Exception as e:
+                print(f"ERROR processing cancellation {cancellation_data['id']}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Continue with next cancellation even if one fails
+                continue
+
+        # Commit all changes at once
+        print(f"Committing {processed_count} updates...")
         conn.commit()
-        conn.close()
-
+        print(f"Commit successful!")
+        
         log_action(
             "process_all_pending",
             f"Processed {processed_count} pending cancellations according to policy",
         )
+
+        print(f"===================================\n")
 
         return jsonify(
             {
@@ -3489,8 +3582,13 @@ def process_all_pending_cancellations():
         )
 
     except Exception as e:
-        conn.close()
+        print(f"CRITICAL ERROR in process_all_pending: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        conn.rollback()  # Roll back on error
         return jsonify({"success": False, "message": str(e)})
+    finally:
+        conn.close()
 
 
 @app.route("/manager/api/cancellation/revert", methods=["POST"])
@@ -4094,21 +4192,28 @@ def manager_cancellations():
         cancellation["error_report"] = cancellation.get("error_report", "")
         cancellation["approved_by"] = cancellation.get("approved_by", "")
 
-        # Add has_notes flag for Notes column
+        # Add has_notes flag for Notes column - FIXED: Better sequential lessons detection
         sequential_lessons_json = cancellation.get("sequential_lessons", "")
         has_sequential_lessons = False
         if sequential_lessons_json:
             try:
-                import json
-                sequential_data = json.loads(sequential_lessons_json)
-                has_sequential_lessons = len(sequential_data) > 0 if isinstance(sequential_data, list) else False
-            except:
+                # Handle both JSON string and already-parsed list
+                if isinstance(sequential_lessons_json, str):
+                    if sequential_lessons_json and sequential_lessons_json.strip() not in ['', '[]', 'null']:
+                        import json
+                        sequential_data = json.loads(sequential_lessons_json)
+                        has_sequential_lessons = isinstance(sequential_data, list) and len(sequential_data) > 0
+                elif isinstance(sequential_lessons_json, list):
+                    has_sequential_lessons = len(sequential_lessons_json) > 0
+            except Exception as e:
+                print(f"Error parsing sequential_lessons for cancellation {cancellation.get('id')}: {e}")
                 has_sequential_lessons = False
         
         cancellation["has_notes"] = (
             has_sequential_lessons 
             or bool(cancellation.get("error_report"))
             or bool(cancellation.get("reschedule_requested"))
+            or bool(cancellation.get("cancellation_note"))
         )
 
         # Add urgency flags
@@ -8436,6 +8541,80 @@ class EmailConfig:
 email_config = EmailConfig()
 
 # ===================================
+# EMAIL NOTIFICATION SETTINGS HELPERS
+# ===================================
+
+
+def get_notification_settings():
+    """
+    Get notification settings from database
+    Returns dict with settings or defaults if database unavailable
+    """
+    try:
+        conn = get_db()
+        settings = {}
+        settings_rows = conn.execute(
+            "SELECT key, value FROM system_settings WHERE key IN (?, ?, ?)",
+            ('client_email_notifications', 'manager_email_notifications', 'manager_emails')
+        ).fetchall()
+        
+        for setting in settings_rows:
+            settings[setting["key"]] = setting["value"]
+        
+        conn.close()
+        
+        # Return settings with defaults
+        return {
+            'client_enabled': settings.get('client_email_notifications', 'true') == 'true',
+            'manager_enabled': settings.get('manager_email_notifications', 'true') == 'true',
+            'manager_emails': [
+                email.strip() 
+                for email in settings.get('manager_emails', 'managers@riversideequestrian.ca').split(',')
+                if email.strip()
+            ]
+        }
+    except Exception as e:
+        # Fallback to defaults if database error
+        print(f"Warning: Could not load notification settings from database: {e}")
+        return {
+            'client_enabled': True,
+            'manager_enabled': True,
+            'manager_emails': ['managers@riversideequestrian.ca']
+        }
+
+
+def should_send_email(recipient_type):
+    """
+    Check if emails should be sent for the given recipient type
+    
+    Args:
+        recipient_type (str): 'client' or 'manager'
+        
+    Returns:
+        bool: True if emails should be sent, False otherwise
+    """
+    settings = get_notification_settings()
+    
+    if recipient_type == 'client':
+        return settings['client_enabled']
+    elif recipient_type == 'manager':
+        return settings['manager_enabled']
+    else:
+        return True  # Default to sending for unknown types
+
+
+def get_manager_emails_from_settings():
+    """
+    Get manager emails from database settings
+    
+    Returns:
+        list: List of manager email addresses
+    """
+    settings = get_notification_settings()
+    return settings['manager_emails']
+
+
+# ===================================
 # EMAIL SENDING FUNCTIONS
 # ===================================
 
@@ -8487,20 +8666,28 @@ def send_email(
     to_email, subject, body, template_type="client", attachments=None, template_id=None
 ):
     """
-    Enhanced email sending with Office 365 support
-
+    Enhanced email sending with Office 365 support and notification settings check
+    
     Args:
         to_email (str): Recipient email address
         subject (str): Email subject
         body (str): HTML email body
-        template_type (str): Type of email template
+        template_type (str): Type of email template ('client' or 'manager')
         attachments (list): List of file paths to attach
         template_id (str): Template ID for logging
-
+    
     Returns:
         dict: Result with success status and message
     """
-
+    
+    # NEW: Check if notifications are enabled for this recipient type
+    if not should_send_email(template_type):
+        message = f"Email notifications disabled for {template_type}s"
+        if email_config.debug_mode:
+            print(f"🔕 {message} - would send to {to_email}: {subject}")
+        log_email_attempt(to_email, subject, True, message, template_id)
+        return {"success": True, "message": message, "skipped": True}
+    
     if not email_config.send_emails:
         if email_config.debug_mode:
             print(f"Email sending disabled - would send to {to_email}: {subject}")
@@ -9225,7 +9412,7 @@ def send_appropriate_cancellation_email(student, cancellation):
 
 
 def send_manager_notification(student, cancellation):
-    """Send new cancellation notification to managers - FIXED for sqlite3.Row"""
+    """Send new cancellation notification to managers - uses settings for manager emails"""
     template = get_email_template("manager_notification")
     if not template:
         return {"success": False, "message": "Template not found"}
@@ -9254,16 +9441,34 @@ def send_manager_notification(student, cancellation):
         template["body"], template["subject"], variables
     )
 
+    # Get manager emails from settings instead of email_config
+    manager_emails = get_manager_emails_from_settings()
+    
+    if not manager_emails:
+        return {
+            "success": False,
+            "message": "No manager emails configured in settings"
+        }
+    
     # Send to all manager emails
     results = []
-    for manager_email in email_config.manager_emails:
+    for manager_email in manager_emails:
         result = send_email(
             manager_email, subject, body, "manager", template_id="manager_notification"
         )
         results.append(result)
 
-    # Return success if any email was sent successfully
-    success_count = sum(1 for r in results if r.get("success"))
+    # Return success if any email was sent successfully (excluding skipped)
+    success_count = sum(1 for r in results if r.get("success") and not r.get("skipped"))
+    skipped_count = sum(1 for r in results if r.get("skipped"))
+    
+    if skipped_count > 0:
+        return {
+            "success": True,
+            "message": f"Manager notifications disabled (would have sent to {len(manager_emails)} managers)",
+            "skipped": True
+        }
+    
     return {
         "success": success_count > 0,
         "message": f"Sent to {success_count}/{len(results)} managers",
@@ -9359,8 +9564,9 @@ def send_override_notification_emails(
             )
 
             # Send to all manager emails EXCEPT the one who made the override
+            all_manager_emails = get_manager_emails_from_settings()
             manager_emails = [
-                email for email in email_config.manager_emails if email != manager_email
+                email for email in all_manager_emails if email != manager_email
             ]
 
             if manager_emails:
@@ -9375,11 +9581,20 @@ def send_override_notification_emails(
                     )
                     manager_results.append(result)
 
-                success_count = sum(1 for r in manager_results if r.get("success"))
-                results["manager_notification"] = {
-                    "success": success_count > 0,
-                    "message": f"Sent override notification to {success_count}/{len(manager_results)} managers",
-                }
+                success_count = sum(1 for r in manager_results if r.get("success") and not r.get("skipped"))
+                skipped_count = sum(1 for r in manager_results if r.get("skipped"))
+                
+                if skipped_count > 0:
+                    results["manager_notification"] = {
+                        "success": True,
+                        "message": f"Manager notifications disabled (would have sent to {len(manager_emails)} managers)",
+                        "skipped": True
+                    }
+                else:
+                    results["manager_notification"] = {
+                        "success": success_count > 0,
+                        "message": f"Sent override notification to {success_count}/{len(manager_results)} managers",
+                    }
 
                 print(
                     f"📧 Manager override notifications sent to {success_count}/{len(manager_results)} managers"
@@ -9434,7 +9649,9 @@ def test_email_configuration():
                 "server": email_config.smtp_server,
                 "port": email_config.smtp_port,
                 "from_email": email_config.from_email,
-                "manager_emails": email_config.manager_emails,
+                "manager_emails": get_manager_emails_from_settings(),
+                "client_notifications_enabled": should_send_email("client"),
+                "manager_notifications_enabled": should_send_email("manager"),
             },
         }
 

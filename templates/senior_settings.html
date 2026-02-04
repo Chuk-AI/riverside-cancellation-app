@@ -117,7 +117,8 @@ Equestrian{% endblock %} {% block content %}
                 type="email"
                 class="form-control"
                 id="emailFrom"
-                value="noreply@riversideequestrian.ca"
+                name="email_from_address"
+                value="{{ settings.get('email_from_address', 'noreply@riversideequestrian.ca') }}"
               />
             </div>
 
@@ -129,7 +130,8 @@ Equestrian{% endblock %} {% block content %}
                 type="text"
                 class="form-control"
                 id="emailFromName"
-                value="Riverside Equestrian"
+                name="email_from_name"
+                value="{{ settings.get('email_from_name', 'Riverside Equestrian') }}"
               />
             </div>
 
@@ -140,10 +142,10 @@ Equestrian{% endblock %} {% block content %}
               <textarea
                 class="form-control"
                 id="managerEmails"
+                name="manager_emails"
                 rows="3"
                 placeholder="Enter email addresses separated by commas"
-              >
-managers@riversideequestrian.ca, stav@riversideequestrian.ca</textarea
+              >{{ settings.get('manager_emails', 'managers@riversideequestrian.ca, stav@riversideequestrian.ca') }}</textarea
               >
             </div>
 
@@ -152,7 +154,8 @@ managers@riversideequestrian.ca, stav@riversideequestrian.ca</textarea
                 class="form-check-input"
                 type="checkbox"
                 id="clientEmailNotifications"
-                checked
+                name="client_email_notifications"
+                {% if settings.get('client_email_notifications', 'true') == 'true' %}checked{% endif %}
               />
               <label class="form-check-label" for="clientEmailNotifications">
                 Send email notifications to clients
@@ -164,7 +167,8 @@ managers@riversideequestrian.ca, stav@riversideequestrian.ca</textarea
                 class="form-check-input"
                 type="checkbox"
                 id="managerEmailNotifications"
-                checked
+                name="manager_email_notifications"
+                {% if settings.get('manager_email_notifications', 'true') == 'true' %}checked{% endif %}
               />
               <label class="form-check-label" for="managerEmailNotifications">
                 Send email notifications to managers
@@ -742,7 +746,23 @@ Additional lessons can be included in this cancellation notice, as long as the l
     forms.forEach((formId) => {
       const form = document.getElementById(formId);
       const formData = new FormData(form);
-      allSettings[formId] = Object.fromEntries(formData);
+      const formDataObj = {};
+      
+      // Handle regular form fields
+      formData.forEach((value, key) => {
+        formDataObj[key] = value;
+      });
+      
+      // Explicitly handle checkboxes (unchecked boxes don't appear in FormData)
+      const checkboxes = form.querySelectorAll('input[type="checkbox"]');
+      checkboxes.forEach((checkbox) => {
+        const key = checkbox.name || checkbox.id;
+        if (key) {
+          formDataObj[key] = checkbox.checked ? 'true' : 'false';
+        }
+      });
+      
+      allSettings[formId] = formDataObj;
     });
 
     // Send to server
@@ -761,6 +781,7 @@ Additional lessons can be included in this cancellation notice, as long as the l
           bootstrap.Modal.getInstance(
             document.getElementById("confirmationModal")
           ).hide();
+          location.reload(); // Reload to show updated values
         } else {
           alert("Error saving settings: " + data.error);
         }

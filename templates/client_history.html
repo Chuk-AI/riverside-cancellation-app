@@ -280,17 +280,14 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 cancellation.sequential_lessons|length > 0 %}
                 <div class="mt-2">
                   <small class="text-muted">
-                    <strong>Sequential lessons included:</strong>
+                    <strong>Additional consecutive lessons cancelled:</strong>
+                    {%- set last_lesson = cancellation.sequential_lessons[-1]
+                    -%} All lessons through {{ last_lesson.date.strftime('%B %d,
+                    %Y') }} ({{ cancellation.sequential_lessons|length }}
+                    additional lesson{%- if
+                    cancellation.sequential_lessons|length != 1 -%}s{%- endif
+                    -%}).
                   </small>
-                  <ul class="list-unstyled ms-3 mb-0">
-                    {% for seq_lesson in cancellation.sequential_lessons %}
-                    <li class="small">
-                      <i class="fas fa-arrow-right me-1"></i>
-                      {{ seq_lesson.date.strftime('%B %d, %Y') }} at {{
-                      seq_lesson.time.strftime('%I:%M %p') }}
-                    </li>
-                    {% endfor %}
-                  </ul>
                 </div>
                 {% endif %} {% if cancellation.reschedule_requested %}
                 <div class="mt-2">
@@ -411,7 +408,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           const threeMonthsAgo = new Date(
             now.getFullYear(),
             now.getMonth() - 3,
-            1
+            1,
           );
           show = groupDate >= threeMonthsAgo;
           break;
@@ -428,7 +425,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
   function exportHistory() {
     const data = [];
     const cancellationItems = document.querySelectorAll(
-      '.cancellation-item:not([style*="display: none"])'
+      '.cancellation-item:not([style*="display: none"])',
     );
 
     cancellationItems.forEach((item) => {

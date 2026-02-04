@@ -553,8 +553,12 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
               return;
           }
 
-          // Get current time and lesson datetime
-          const now = new Date();
+          // Get current time IN PACIFIC TIMEZONE (not user's local timezone)
+          // This ensures the preview matches what the backend will actually process
+          const userNow = new Date();
+          const pacificTimeString = userNow.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+          const now = new Date(pacificTimeString);
+
           const lessonDateTime = new Date(lessonDate + 'T' + lessonTime);
           const hasFreeCancellations = {{ cancellation_status.remaining }} > 0;
 
