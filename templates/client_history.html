@@ -280,13 +280,8 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
                 cancellation.sequential_lessons|length > 0 %}
                 <div class="mt-2">
                   <small class="text-muted">
-                    <strong>Additional consecutive lessons cancelled:</strong>
-                    {%- set last_lesson = cancellation.sequential_lessons[-1]
-                    -%} All lessons through {{ last_lesson.date.strftime('%B %d,
-                    %Y') }} ({{ cancellation.sequential_lessons|length }}
-                    additional lesson{%- if
-                    cancellation.sequential_lessons|length != 1 -%}s{%- endif
-                    -%}).
+                    <strong><i class="fas fa-calendar-times me-1"></i></strong>
+                    {{ cancellation.sequential_lessons_formatted }}
                   </small>
                 </div>
                 {% endif %} {% if cancellation.reschedule_requested %}

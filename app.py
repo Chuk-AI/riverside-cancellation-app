@@ -2200,6 +2200,14 @@ def client_history():
             cancellation["lesson_date"], "%Y-%m-%d"
         ).date()
 
+        # Add formatted sequential lessons message
+        if sequential_lessons:
+            cancellation_dict["sequential_lessons_formatted"] = format_sequential_lessons(
+                sequential_lessons, cancellation["lesson_date"]
+            )
+        else:
+            cancellation_dict["sequential_lessons_formatted"] = "No additional lessons are cancelled"
+
         # Fix: Handle both HH:MM and HH:MM:SS time formats
         lesson_time_str = cancellation["lesson_time"]
         try:
@@ -4215,6 +4223,22 @@ def manager_cancellations():
             or bool(cancellation.get("reschedule_requested"))
             or bool(cancellation.get("cancellation_note"))
         )
+
+        # Add formatted sequential lessons message
+        if has_sequential_lessons:
+            try:
+                if isinstance(sequential_lessons_json, str):
+                    sequential_data = json.loads(sequential_lessons_json) if sequential_lessons_json.strip() not in ['', '[]', 'null'] else []
+                else:
+                    sequential_data = sequential_lessons_json
+                
+                cancellation["sequential_lessons_formatted"] = format_sequential_lessons(
+                    sequential_data, cancellation.get("lesson_date")
+                )
+            except:
+                cancellation["sequential_lessons_formatted"] = "No additional lessons are cancelled"
+        else:
+            cancellation["sequential_lessons_formatted"] = "No additional lessons are cancelled"
 
         # Add urgency flags
         if cancellation.get("created_at"):
@@ -8931,12 +8955,13 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
 
         # Sequential lessons
         sequential_lessons = cancellation_dict.get("sequential_lessons")
+        lesson_date_for_seq = cancellation_dict.get("lesson_date")
         if sequential_lessons:
             variables["sequential_lessons"] = format_sequential_lessons(
-                sequential_lessons
+                sequential_lessons, lesson_date_for_seq
             )
         else:
-            variables["sequential_lessons"] = "No additional lessons"
+            variables["sequential_lessons"] = "No additional lessons are cancelled"
 
         # Reschedule info
         variables.update(
@@ -8976,10 +9001,10 @@ def get_charge_reason(cancellation):
     return "Late cancellation or monthly limit exceeded"
 
 
-def format_sequential_lessons(sequential_data):
-    """Format sequential lessons for email - UPDATED to show summary"""
+def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
+    """Format sequential lessons for email and view history"""
     if not sequential_data:
-        return "No additional lessons"
+        return "No additional lessons are cancelled"
 
     try:
         if isinstance(sequential_data, str):
@@ -8988,25 +9013,38 @@ def format_sequential_lessons(sequential_data):
             sequential_lessons = sequential_data
 
         if not sequential_lessons:
-            return "No additional lessons"
+            return "No additional lessons are cancelled"
 
-        # Get the last lesson date
+        # Get the last lesson date and add one day to get the return date
         last_lesson = sequential_lessons[-1]
         if isinstance(last_lesson, dict):
             date_str = last_lesson.get("date", "")
         else:
-            return "No additional lessons"
+            return "No additional lessons are cancelled"
 
         if date_str:
             try:
-                last_date = datetime.strptime(str(date_str), "%Y-%m-%d").strftime("%B %d, %Y")
-                count = len(sequential_lessons)
-                lesson_word = "lesson" if count == 1 else "lessons"
-                return f"All lessons cancelled till {last_date} ({count} additional {lesson_word})"
+                # Parse the last cancelled lesson date
+                last_cancelled_date = datetime.strptime(str(date_str), "%Y-%m-%d")
+                # Add one day to get the return date
+                return_date_obj = last_cancelled_date + timedelta(days=1)
+                return_date = return_date_obj.strftime("%B %d, %Y")
+                
+                # If cancelled_lesson_date is provided, show the full message
+                if cancelled_lesson_date:
+                    if isinstance(cancelled_lesson_date, str):
+                        cancelled_date = datetime.strptime(cancelled_lesson_date, "%Y-%m-%d").strftime("%B %d, %Y")
+                    else:
+                        cancelled_date = cancelled_lesson_date.strftime("%B %d, %Y")
+                    
+                    return f"All lessons are cancelled from {cancelled_date} until the return date of {return_date}"
+                else:
+                    # Fallback if cancelled date is not provided
+                    return f"All lessons are cancelled until the return date of {return_date}"
             except:
-                return f"{len(sequential_lessons)} additional lessons"
+                return "No additional lessons are cancelled"
 
-        return "No additional lessons"
+        return "No additional lessons are cancelled"
 
     except Exception as e:
         if email_config.debug_mode:

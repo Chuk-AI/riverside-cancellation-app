@@ -833,13 +833,11 @@
 {% if cancellation.sequential_lessons and cancellation.sequential_lessons|length > 0 %}
 <div class="details-panel">
     <h6 class="mb-2">
-        <i class="fas fa-list me-1"></i>
+        <i class="fas fa-calendar-times me-1"></i>
         Sequential Lessons
     </h6>
     <p class="small mb-0">
-        <i class="fas fa-calendar-check me-1"></i>
-        All lessons cancelled till <strong>{{ cancellation.sequential_lessons[-1].date|format_date }}</strong>
-        
+        {{ cancellation.sequential_lessons_formatted }}
     </p>
 </div>
 {% endif %}
@@ -2011,6 +2009,31 @@ function formatDateTime(dateTimeString) {
     }
 }
 
+function getSequentialLessonsMessage(cancelledLessonDate, sequentialLessons) {
+    if (!sequentialLessons || sequentialLessons.length === 0) {
+        return 'No additional lessons are cancelled';
+    }
+    
+    try {
+        // Get the last sequential lesson date
+        const lastLesson = sequentialLessons[sequentialLessons.length - 1];
+        const lastLessonDate = new Date(lastLesson.date);
+        
+        // Add one day to get the return date
+        const returnDate = new Date(lastLessonDate);
+        returnDate.setDate(returnDate.getDate() + 1);
+        
+        // Format the cancelled lesson date
+        const cancelledDate = formatDate(cancelledLessonDate);
+        const returnDateFormatted = formatDate(returnDate.toISOString().split('T')[0]);
+        
+        return `All lessons are cancelled from <strong>${cancelledDate}</strong> until the return date of <strong>${returnDateFormatted}</strong>`;
+    } catch (error) {
+        console.error('Error formatting sequential lessons:', error);
+        return 'No additional lessons are cancelled';
+    }
+}
+
 // Complete cancellation details function
 function viewCancellationDetails(cancellationId) {
     const modal = new bootstrap.Modal(document.getElementById('cancellationDetailsModal'));
@@ -2142,9 +2165,8 @@ ${cancellation.sequential_lessons && cancellation.sequential_lessons.length > 0 
         </div>
         <div class="card-body">
             <p class="mb-0">
-                <i class="fas fa-calendar-check me-2"></i>
-                All lessons cancelled till <strong>${formatDate(cancellation.sequential_lessons[cancellation.sequential_lessons.length - 1].date)}</strong>
-                (${cancellation.sequential_lessons.length} additional lesson${cancellation.sequential_lessons.length > 1 ? 's' : ''})
+                <i class="fas fa-calendar-times me-2"></i>
+                ${getSequentialLessonsMessage(cancellation.lesson_date, cancellation.sequential_lessons)}
             </p>
         </div>
     </div>
