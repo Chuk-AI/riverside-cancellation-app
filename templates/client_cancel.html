@@ -791,22 +791,6 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
       submitBtn.innerHTML =
         '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
       submitBtn.disabled = true;
-
-      // Show confirmation dialog for charged cancellations
-      const preview = document.getElementById("statusPreview");
-      if (preview.classList.contains("will-charge")) {
-        if (
-          !confirm(
-            "This cancellation will result in charges. Are you sure you want to proceed?",
-          )
-        ) {
-          e.preventDefault();
-          submitBtn.innerHTML =
-            '<i class="fas fa-paper-plane me-2"></i>Submit Cancellation Notice';
-          submitBtn.disabled = false;
-          return;
-        }
-      }
     });
 
   // Show error on a specific field
