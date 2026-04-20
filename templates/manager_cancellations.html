@@ -152,6 +152,23 @@
         border-radius: 0.5rem;
         padding: 1rem;
         margin-top: 1rem;
+        display: block !important;
+        visibility: visible !important;
+    }
+    
+    /* Ensure override buttons are always visible and enabled */
+    .override-controls button {
+        display: inline-block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    
+    .override-controls .btn {
+        display: inline-block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
     }
     
     .batch-actions {
@@ -422,7 +439,79 @@
     .clickable-cancellation:hover::after {
         opacity: 1;
     }
-</style>
+
+    /* ========== Manager Submission Features ========== */
+    .cancellation-card[data-is-manager-submission="1"]::before {
+        background: #06b6d4 !important;
+    }
+    
+    .manager-submission-badge {
+        background: #cffafe;
+        border-left: 4px solid #06b6d4;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+    
+    .manager-submission-badge strong {
+        color: #0e7490;
+    }
+    
+    .manager-submission-badge .detail {
+        font-size: 0.85rem;
+        color: #0c5460;
+        margin-top: 0.25rem;
+    }
+    
+    .submit-cancellation-btn {
+        background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .submit-cancellation-btn:hover {
+        background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+    }
+    
+    .manager-submission-filter {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    .filter-chip {
+        padding: 0.4rem 0.8rem;
+        border-radius: 2rem;
+        font-size: 0.85rem;
+        border: 1px solid #e5e7eb;
+        background: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .filter-chip:hover {
+        border-color: #06b6d4;
+        color: #06b6d4;
+    }
+    
+    .filter-chip.active {
+        background: #06b6d4;
+        color: white;
+        border-color: #06b6d4;
+    }
+
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -562,6 +651,9 @@
                 Quick Actions
             </h6>
             <div class="d-flex gap-2 flex-wrap">
+                <a href="{{ url_for('manager_submit_cancellation') }}" class="btn btn-sm submit-cancellation-btn">
+                    <i class="fas fa-user-tie"></i>Submit for Student
+                </a>
                 <button class="btn btn-sm btn-primary" onclick="processAllPending()">
                     <i class="fas fa-check-double me-1"></i>
                     Process All Pending
@@ -657,7 +749,7 @@
                 <option value="today" {{ 'selected' if request.args.get('date_range') == 'today' else '' }}>Today</option>
                 <option value="yesterday" {{ 'selected' if request.args.get('date_range') == 'yesterday' else '' }}>Yesterday</option>
                 <option value="7days" {{ 'selected' if request.args.get('date_range', '7days') == '7days' else '' }}>7 Days</option>
-                <option value="month" {{ 'selected' if request.args.get('date_range') == 'month' else '' }}>This Month</option>
+                <option value="month" {{ 'selected' if request.args.get('date_range') == 'month' else '' }}>Last 30 Days</option>
                 <option value="all" {{ 'selected' if request.args.get('date_range') == 'all' else '' }}>All Time</option>
                 <option value="custom" {{ 'selected' if request.args.get('date_range') == 'custom' else '' }}>Custom Range</option>
             </select>
@@ -708,6 +800,15 @@
                 <option value="lesson_date" {{ 'selected' if request.args.get('sort') == 'lesson_date' else '' }}>Lesson Date</option>
                 <option value="student" {{ 'selected' if request.args.get('sort') == 'student' else '' }}>Student Name</option>
                 <option value="status" {{ 'selected' if request.args.get('sort') == 'status' else '' }}>Status</option>
+            </select>
+        </div>
+        
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold">Submission Type</label>
+            <select class="form-select form-select-sm" id="submissionTypeFilter" onchange="applyFilters()">
+                <option value="">All Submissions</option>
+                <option value="student">Student Submitted</option>
+                <option value="manager">Manager Submitted</option>
             </select>
         </div>
         
@@ -765,6 +866,51 @@
                     <input class="form-check-input" type="checkbox" value="{{ cancellation.id }}" 
                            onchange="updateBatchSelection()">
                 </div>
+                
+                
+                <!-- Manager Submission Information - Shows 3 Dates -->
+                {% if cancellation.is_manager_submission %}
+                <div style="background: #cffafe; border-left: 4px solid #06b6d4; padding: 1rem; margin: 1rem 0; border-radius: 0.5rem;">
+                    <div style="margin-bottom: 1rem;">
+                        <i class="fas fa-user-tie me-2" style="color: #0e7490; font-weight: bold;"></i>
+                        <strong style="color: #0e7490; font-size: 1.1rem;">Submitted by Manager: {{ cancellation.manager_name }}</strong>
+                    </div>
+                    
+                    <!-- 3 IMPORTANT DATES -->
+                    <div style="background: white; padding: 1rem; border-radius: 0.4rem; margin-bottom: 0.75rem;">
+                        <!-- Date 1: Lesson Date -->
+                        <div style="padding: 0.5rem 0; border-bottom: 1px solid #e0e0e0;">
+                            <i class="fas fa-calendar" style="color: #06b6d4; width: 25px;"></i>
+                            <strong>Lesson Date:</strong>
+                            <span style="float: right; font-weight: bold;">{{ cancellation.lesson_date }}</span>
+                        </div>
+                        
+                        <!-- Date 2: Submission Date (for policy counting) -->
+                        <div style="padding: 0.5rem 0; border-bottom: 1px solid #e0e0e0; margin-top: 0.5rem;">
+                            <i class="fas fa-tasks" style="color: #06b6d4; width: 25px;"></i>
+                            <strong>Submission Date (for policy):</strong>
+                            <span style="float: right; font-weight: bold;">{{ cancellation.manual_submission_date }}</span>
+                        </div>
+                        
+                        <!-- Date 3: Actual Submission Timestamp (audit trail) -->
+                        <div style="padding: 0.5rem 0; margin-top: 0.5rem;">
+                            <i class="fas fa-history" style="color: #06b6d4; width: 25px;"></i>
+                            <strong>Submitted At (audit trail):</strong>
+                            <span style="float: right; font-weight: bold;">{{ cancellation.actual_submission_timestamp }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Manager Notes -->
+                    {% if cancellation.manager_notes %}
+                    <div style="background: #fffbeb; padding: 0.75rem; border-left: 3px solid #f59e0b; border-radius: 0.3rem; margin-top: 0.75rem;">
+                        <i class="fas fa-sticky-note me-2" style="color: #f59e0b;"></i>
+                        <strong>Manager Notes:</strong>
+                        <div style="margin-top: 0.5rem; font-style: italic;">{{ cancellation.manager_notes }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
                 
                 <!-- Header -->
                 <div class="d-flex justify-content-between align-items-start mb-3">
@@ -893,8 +1039,8 @@
                 <!-- Action Buttons -->
 
                 <!-- Manager Override Controls -->
-                <!-- Always show override controls for manager flexibility -->
-                <div class="override-controls">
+                <!-- ALWAYS show override controls for manager flexibility - regardless of approval status -->
+                <div class="override-controls" style="display: block !important;">
                     <h6 class="mb-3">
                         <i class="fas fa-user-shield me-1"></i>
                         Manager Override Actions
@@ -2079,7 +2225,11 @@ function viewCancellationDetails(cancellationId) {
                                 <div class="card-body">
                                     <p><strong>Date:</strong> ${formatDate(cancellation.lesson_date)}</p>
                                     <p><strong>Time:</strong> ${formatTime(cancellation.lesson_time)}</p>
-                                    <p><strong>Submitted:</strong> ${formatDateTime(cancellation.created_at)}</p>
+                                    <p><strong>Submitted:</strong> ${
+                                        cancellation.is_manager_submission 
+                                            ? formatDateTime(cancellation.manual_submission_date) 
+                                            : formatDateTime(cancellation.created_at)
+                                    }</p>
                                     <p><strong>Hours Notice:</strong> ${policy.hours_notice} hours</p>
                                     <p><strong>Status:</strong> 
                                         <span class="badge ${getStatusBadgeClass(cancellation)}">
@@ -2361,7 +2511,11 @@ function viewStudentDetails(studentId, studentName, membershipLevel) {
                                             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
                                                 <div>
                                                     <strong>${formatDate(c.lesson_date)}</strong> at ${formatTime(c.lesson_time)}
-                                                    <br><small class="text-muted">Submitted: ${formatDate(c.created_at)}</small>
+                                                    <br><small class="text-muted">Submitted: ${
+                                                        c.is_manager_submission 
+                                                            ? formatDateTime(c.manual_submission_date) 
+                                                            : formatDateTime(c.created_at)
+                                                    }</small>
                                                 </div>
                                                 <div>
                                                     <span class="badge ${c.charged ? 'bg-warning' : (c.excluded ? 'bg-info' : 'bg-success')}">
@@ -2548,5 +2702,44 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
-</script>
+
+    
+    // ========== Manager Submission Filtering ==========
+    function filterBySubmissionType(type) {
+        const items = document.querySelectorAll('.cancellation-item-wrapper');
+        let visibleCount = 0;
+        
+        items.forEach(item => {
+            const card = item.querySelector('[data-is-manager-submission]');
+            if (!card) return;
+            
+            const isManagerSubmission = card.getAttribute('data-is-manager-submission') === '1';
+            
+            let show = true;
+            if (type === 'manager') {
+                show = isManagerSubmission;
+            } else if (type === 'student') {
+                show = !isManagerSubmission;
+            } else if (type === 'all' || type === '') {
+                show = true;
+            }
+            
+            item.style.display = show ? 'block' : 'none';
+            if (show) visibleCount++;
+        });
+        
+        console.log('Visible cancellations:', visibleCount);
+    }
+    
+    // Connect filter to event listener
+    document.addEventListener('DOMContentLoaded', function() {
+        const submissionFilter = document.getElementById('submissionTypeFilter');
+        if (submissionFilter) {
+            submissionFilter.addEventListener('change', function() {
+                filterBySubmissionType(this.value || 'all');
+            });
+        }
+    });
+
+    </script>
 {% endblock %}

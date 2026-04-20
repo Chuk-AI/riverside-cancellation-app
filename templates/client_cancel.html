@@ -5,19 +5,6 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     max-width: 800px;
     margin: 0 auto;
   }
-  /* Make "Additional lessons" toggle button text darker + clearer */
-  #addAdditionalBtn.btn-outline-info {
-    color: #0f172a; /* dark text */
-    border-color: #0ea5e9; /* keep a nice blue border */
-    font-weight: 600;
-  }
-
-  #addAdditionalBtn.btn-outline-info:hover,
-  #addAdditionalBtn.btn-outline-info:focus {
-    color: #ffffff;
-    background-color: #0ea5e9;
-    border-color: #0ea5e9;
-  }
 
   .status-preview {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -41,6 +28,40 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
   .status-preview.warning {
     background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
     border-color: #fcd34d;
+  }
+
+  /* Additional Lessons Button - PROMINENT */
+  #addAdditionalBtn {
+    display: block;
+    width: 100%;
+    padding: 1.25rem 1.5rem;
+    margin: 1.5rem 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    border: 3px solid #0284c7;
+    color: white !important;
+    border-radius: 0.75rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+  }
+
+  #addAdditionalBtn:hover {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    border-color: #0369a1;
+    box-shadow: 0 6px 16px rgba(14, 165, 233, 0.4);
+    transform: translateY(-2px);
+  }
+
+  #addAdditionalBtn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+  }
+
+  #addAdditionalBtn i {
+    font-size: 1.3rem;
   }
 
   .additional-lessons-section {
@@ -159,6 +180,32 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
 
   .field-error-message i {
     font-size: 0.75rem;
+  }
+
+  /* Warning message for additional lessons fields */
+  .additional-lesson-warning {
+    background-color: #fef3c7;
+    border: 2px solid #f59e0b;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-weight: 500;
+    color: #92400e;
+  }
+
+  .additional-lesson-warning i {
+    font-size: 1rem;
+    margin-top: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  /* Additional lessons text lines with styling */
+  .additional-lessons-text-line {
+    margin: 0.5rem 0;
+    line-height: 1.5;
   }
 </style>
 {% endblock %} {% block content %}
@@ -337,16 +384,16 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         </div>
 
         <!-- Additional Lessons Button -->
-        <div class="text-center mb-3">
+        <div class="text-center">
           <button
             type="button"
-            class="btn btn-outline-info"
+            class="btn"
             id="addAdditionalBtn"
             onclick="toggleAdditionalSection()"
           >
             <i class="fas fa-plus me-2"></i>
-            I have additional lessons to cancel as part of this cancellation
-            notice
+            CLICK HERE</n>
+            To Cancel More Lessons
           </button>
         </div>
 
@@ -354,6 +401,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         <div class="additional-lessons-section" id="additionalSection">
           <div class="alert alert-info">
             <i class="fas fa-info-circle me-2"></i>
+
             You can include additional lessons in this cancellation notice as
             long as they are sequential.
           </div>
@@ -372,9 +420,17 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
               return?
             </label>
           </div>
-          <small class="text-muted">
+          <div class="additional-lessons-text-line" style="color: #000000">
             All lessons between your cancelled lesson and the return date will
             be included in this cancellation notice.
+          </div>
+          <div class="additional-lessons-text-line" style="color: #9ca3af">
+            Do not submit another lesson cancellation if it is already included
+            in the date range above.
+          </div>
+          <small class="text-muted">
+            If cancelling until further notice, enter your return date as
+            2050-01-01.
           </small>
         </div>
       </div>
@@ -418,6 +474,13 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
           id="reschedulePreferencesSection"
           style="display: none"
         >
+          <div class="additional-lesson-warning">
+            <i class="fas fa-exclamation-circle"></i>
+            <span
+              >Do not enter additional cancelled lessons in this box. See the
+              section at the top "to cancel more lessons".</span
+            >
+          </div>
           <div class="form-floating">
             <textarea
               class="form-control"
@@ -448,6 +511,13 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         </h5>
       </div>
       <div class="card-body">
+        <div class="additional-lesson-warning">
+          <i class="fas fa-exclamation-circle"></i>
+          <span
+            >Do not enter additional cancelled lessons in this box. See the
+            section at the top "to cancel more lessons".</span
+          >
+        </div>
         <div class="form-floating">
           <textarea
             class="form-control"
@@ -518,7 +588,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
     if (section.classList.contains("show")) {
       section.classList.remove("show");
       btn.innerHTML =
-        '<i class="fas fa-plus me-2"></i>I have additional lessons to cancel as part of this cancellation notice';
+        '<i class="fas fa-plus me-2"></i>CLICK HERE To Cancel More Lessons';
     } else {
       section.classList.add("show");
       btn.innerHTML =
@@ -618,7 +688,7 @@ session.user_name }} - Riverside Equestrian{% endblock %} {% block extra_css %}
         if (willCharge) {
           statusClass = "will-charge";
           statusIcon = "fas fa-exclamation-triangle text-warning";
-          statusText = `This will not be a free cancellation: ${reason}`;
+          statusText = `This will not be a free cancellation: ${reason}. Remember to still submit this cancellation below.`;
         } else if (data.current_status.used === data.current_status.limit - 1) {
           statusClass = "warning";
           statusIcon = "fas fa-info-circle text-warning";

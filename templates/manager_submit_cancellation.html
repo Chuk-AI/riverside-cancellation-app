@@ -1,0 +1,1412 @@
+{% extends "base.html" %} {% block title %}Submit Cancellation for Student -
+Manager Portal{% endblock %} {% block extra_css %}
+<style>
+  .manager-submission-form {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .form-section {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .form-section h3 {
+    color: #1e293b;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #e2e8f0;
+  }
+
+  .status-preview {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid #dee2e6;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    transition: all 0.3s ease;
+  }
+
+  .status-preview.will-charge {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fca5a5;
+  }
+
+  .status-preview.free-cancellation {
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    border-color: #86efac;
+  }
+
+  .status-preview.manager-submission {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-color: #7dd3fc;
+  }
+
+  .student-info-card {
+    background: #f8fafc;
+    border-left: 4px solid #3b82f6;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .student-info-card .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.25rem 0;
+    font-size: 0.95rem;
+  }
+
+  .student-info-card .info-label {
+    font-weight: 600;
+    color: #475569;
+  }
+
+  .student-info-card .info-value {
+    color: #1e293b;
+  }
+
+  .policy-info-alert {
+    background: #f0fdf4;
+    border-left: 4px solid #10b981;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .policy-info-alert.warning {
+    background: #fffbeb;
+    border-left-color: #f59e0b;
+  }
+
+  .policy-info-alert.danger {
+    background: #fef2f2;
+    border-left-color: #ef4444;
+  }
+
+  .submission-date-group {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #f9fafb;
+    border-radius: 0.5rem;
+  }
+
+  .date-option {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
+  }
+
+  .date-option input[type="radio"]:checked + .date-option-content {
+    background: #f0f9ff;
+    border-color: #3b82f6;
+  }
+
+  .date-option-content {
+    margin-left: 0.5rem;
+  }
+
+  .notification-options {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin: 1rem 0;
+  }
+
+  .notification-options .option-group {
+    margin: 0.75rem 0;
+  }
+
+  .notification-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+  }
+
+  .notification-options .granular-controls {
+    margin-left: 1.5rem;
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: white;
+    border-left: 2px solid #fcd34d;
+    border-radius: 0.25rem;
+    display: none;
+  }
+
+  .notification-options .granular-controls.show {
+    display: block;
+  }
+
+  .manager-notes-section {
+    margin-top: 1rem;
+  }
+
+  .manager-notes-section textarea {
+    min-height: 100px;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    font-family: inherit;
+    font-size: 0.95rem;
+  }
+
+  .form-footer {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .form-footer button {
+    flex: 1;
+  }
+
+  .confirmation-badge {
+    display: inline-block;
+    background: #10b981;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .audit-info {
+    background: #e0e7ff;
+    border-left: 4px solid #6366f1;
+    padding: 0.75rem;
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+    margin-top: 1rem;
+  }
+
+  .loading-spinner {
+    display: none;
+    text-align: center;
+    padding: 1rem;
+  }
+
+  .loading-spinner.show {
+    display: block;
+  }
+
+  .student-search-results {
+    position: absolute;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    max-height: 300px;
+    overflow-y: auto;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    display: none;
+  }
+
+  .student-search-results.show {
+    display: block;
+  }
+
+  .search-result-item {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .search-result-item:hover {
+    background: #f3f4f6;
+  }
+
+  .search-result-item.selected {
+    background: #dbeafe;
+  }
+
+  .student-search-wrapper {
+    position: relative;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .form-section {
+      padding: 1rem;
+    }
+
+    .form-footer {
+      flex-direction: column;
+    }
+
+    .student-info-card .info-row {
+      flex-direction: column;
+      margin-bottom: 0.5rem;
+    }
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container mt-4">
+  <div class="row mb-4">
+    <div class="col-md-8">
+      <h1>
+        <i class="fas fa-user-tie me-2"></i>Submit Cancellation for Student
+        <span class="confirmation-badge" style="display: none" id="successBadge"
+          >✓ Ready</span
+        >
+      </h1>
+      <p class="text-muted">
+        Submit a lesson cancellation on behalf of a student. This allows you to
+        manage historical cancellations and future submissions.
+      </p>
+    </div>
+    <div class="col-md-4 text-md-end">
+      <a
+        href="{{ url_for('manager_cancellations') }}"
+        class="btn btn-outline-secondary"
+      >
+        <i class="fas fa-arrow-left me-2"></i>Back to Cancellations
+      </a>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <i class="fas fa-exclamation-circle me-2"></i>
+    <strong>Error:</strong> {{ error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+
+  <form
+    id="managerSubmissionForm"
+    method="POST"
+    class="manager-submission-form"
+  >
+    <!-- Student Selection Section -->
+    <div class="form-section">
+      <h3><i class="fas fa-user me-2"></i>1. Select Student</h3>
+
+      <div class="student-search-wrapper">
+        <label for="studentSearch" class="form-label fw-semibold"
+          >Search for Student</label
+        >
+        <div class="input-group input-group-lg">
+          <input
+            type="text"
+            class="form-control"
+            id="studentSearch"
+            placeholder="Search by name, email, parent name, or phone..."
+            autocomplete="off"
+            required
+          />
+          <button
+            class="btn btn-outline-secondary"
+            type="button"
+            onclick="clearStudentSelection()"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <!-- Hidden input to store selected student ID -->
+        <input
+          type="hidden"
+          id="selectedStudentId"
+          name="student_id"
+          required
+        />
+
+        <!-- Search results dropdown -->
+        <div class="student-search-results" id="searchResults"></div>
+        <div class="loading-spinner" id="searchSpinner">
+          <div class="spinner-border spinner-border-sm" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Selected student info card (hidden until selected) -->
+      <div id="selectedStudentInfo" style="display: none">
+        <div class="student-info-card">
+          <div class="info-row">
+            <span class="info-label">Student:</span>
+            <span class="info-value" id="studentNameDisplay"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Email:</span>
+            <span class="info-value" id="studentEmailDisplay"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Membership Level:</span>
+            <span class="info-value" id="studentMembershipDisplay"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Phone:</span>
+            <span class="info-value" id="studentPhoneDisplay"></span>
+          </div>
+        </div>
+
+        <!-- Student policy info -->
+        <div id="policyInfoContainer"></div>
+      </div>
+    </div>
+
+    <!-- Lesson Details Section -->
+    <div class="form-section" id="lessonDetailsSection" style="display: none">
+      <h3><i class="fas fa-calendar-alt me-2"></i>2. Lesson Details</h3>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label for="lessonDate" class="form-label fw-semibold"
+            >Lesson Date</label
+          >
+          <input
+            type="date"
+            class="form-control form-control-lg"
+            id="lessonDate"
+            name="lesson_date"
+            required
+            onchange="updateConfirmationPreview()"
+          />
+          <small class="form-text text-muted"
+            >Can be any date in past or future</small
+          >
+        </div>
+
+        <div class="col-md-6 mb-3">
+          <label for="lessonTime" class="form-label fw-semibold"
+            >Lesson Time</label
+          >
+          <input
+            type="time"
+            class="form-control form-control-lg"
+            id="lessonTime"
+            name="lesson_time"
+            required
+            onchange="updateConfirmationPreview()"
+          />
+        </div>
+      </div>
+
+      <!-- Sequential lessons option with return date -->
+      <div class="form-check mt-3">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id="hasSequentialLessons"
+          name="has_sequential"
+          onchange="toggleSequentialLessons()"
+        />
+        <label class="form-check-label" for="hasSequentialLessons">
+          This is a sequential lesson (cancel multiple lessons at once)
+        </label>
+      </div>
+
+      <!-- Sequential lessons details (hidden by default) -->
+      <div
+        id="sequentialSection"
+        style="
+          display: none;
+          margin-top: 1rem;
+          padding: 1rem;
+          background: #f9fafb;
+          border-radius: 0.5rem;
+        "
+      >
+        <div class="alert alert-info">
+          <i class="fas fa-info-circle me-2"></i>
+          <div style="color: #1f2937; font-weight: 500">
+            All lessons between the cancelled lesson and the return date will be
+            included in this cancellation.
+          </div>
+          <div style="color: #9ca3af; margin-top: 0.5rem">
+            Do not submit another lesson cancellation if it is already included
+            in the date range above.
+          </div>
+        </div>
+
+        <label for="returnDate" class="form-label fw-semibold mt-3"
+          ><i class="fas fa-calendar me-1"></i>What lesson date will they
+          return?</label
+        >
+        <input
+          type="date"
+          class="form-control form-control-lg"
+          id="returnDate"
+          name="return_date"
+          onchange="updateConfirmationPreview()"
+        />
+        <small class="form-text text-muted"
+          >If cancelling until further notice, enter return date as
+          2050-01-01.</small
+        >
+      </div>
+    </div>
+
+    <!-- Submission Date & Time Section (Manager Only Feature) -->
+    <div class="form-section" id="submissionDateSection" style="display: none">
+      <h3>
+        <i class="fas fa-clock me-2"></i>3. Submission Date & Time (for Policy
+        Tracking)
+      </h3>
+      <p class="text-muted small mb-3">
+        Select the date AND time this cancellation should be recorded as
+        submitted. This determines which month's limit it counts toward and is
+        displayed as the submission time.
+      </p>
+
+      <div class="submission-date-group">
+        <!-- Option 1: Today (Now) -->
+        <div class="form-check">
+          <input
+            class="form-check-input"
+            type="radio"
+            id="submissionToday"
+            name="submission_date_option"
+            value="today"
+            checked
+            onchange="onSubmissionDateChange()"
+          />
+          <label
+            class="form-check-label"
+            for="submissionToday"
+            style="cursor: pointer"
+          >
+            <strong>Submit Today (Current Time)</strong>
+            <span id="todayDateDisplay" class="text-muted small ms-2"></span>
+          </label>
+        </div>
+
+        <!-- Option 2: Custom Date & Time -->
+        <div class="form-check mt-2">
+          <input
+            class="form-check-input"
+            type="radio"
+            id="submissionCustom"
+            name="submission_date_option"
+            value="custom"
+            onchange="onSubmissionDateChange()"
+          />
+          <label
+            class="form-check-label"
+            for="submissionCustom"
+            style="cursor: pointer"
+          >
+            <strong>Custom Date & Time (Historical or Future)</strong>
+          </label>
+        </div>
+
+        <!-- Custom date & time picker (hidden until selected) -->
+        <div
+          id="customDatePicker"
+          style="
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f0f9ff;
+            border: 2px solid #0ea5e9;
+            border-radius: 0.5rem;
+          "
+        >
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="customSubmissionDate" class="form-label fw-semibold">
+                <i class="fas fa-calendar me-1"></i>Date
+              </label>
+              <input
+                type="date"
+                class="form-control form-control-lg"
+                id="customSubmissionDate"
+                name="custom_submission_date"
+                onchange="onSubmissionDateChange()"
+              />
+            </div>
+            <div class="col-md-6">
+              <label for="customSubmissionTime" class="form-label fw-semibold">
+                <i class="fas fa-clock me-1"></i>Time
+              </label>
+              <input
+                type="time"
+                class="form-control form-control-lg"
+                id="customSubmissionTime"
+                name="custom_submission_time"
+                onchange="onSubmissionDateChange()"
+              />
+            </div>
+          </div>
+          <small class="form-text text-muted mt-2 d-block">
+            <i class="fas fa-info-circle me-1"></i>
+            This cancellation will be shown as submitted on the date and time
+            you select. This determines the policy limit month.
+          </small>
+        </div>
+      </div>
+
+      <!-- Policy impact preview -->
+      <div
+        id="policyImpactPreview"
+        class="status-preview manager-submission"
+        style="display: none"
+      >
+        <strong><i class="fas fa-info-circle me-2"></i>Policy Impact</strong>
+        <p class="mb-0 mt-2">
+          This submission will count toward: <strong id="impactMonth"></strong>
+          <br />
+          <span id="impactDetails"></span>
+        </p>
+      </div>
+    </div>
+
+    <!-- Notification Options Section -->
+    <div class="form-section" id="notificationSection" style="display: none">
+      <h3><i class="fas fa-bell me-2"></i>4. Notification Settings</h3>
+      <p class="text-muted small mb-3">
+        Choose whether to send notifications about this submission.
+      </p>
+
+      <div class="notification-options">
+        <div class="option-group">
+          <label for="suppressAllNotifications">
+            <input
+              type="checkbox"
+              id="suppressAllNotifications"
+              name="suppress_all_notifications"
+              value="1"
+              onchange="toggleGranularNotifications()"
+            />
+            <strong>Suppress All Notifications</strong>
+            <span class="text-muted small"
+              >(Don't send any emails about this submission)</span
+            >
+          </label>
+        </div>
+
+        <!-- Granular notification controls (hidden by default) -->
+        <div class="granular-controls" id="granularControls">
+          <div class="option-group">
+            <label for="suppressManagerNotification">
+              <input
+                type="checkbox"
+                id="suppressManagerNotification"
+                name="suppress_manager_notification"
+                value="1"
+              />
+              <strong>Don't Notify Managers</strong>
+            </label>
+          </div>
+          <div class="option-group">
+            <label for="suppressStudentNotification">
+              <input
+                type="checkbox"
+                id="suppressStudentNotification"
+                name="suppress_student_notification"
+                value="1"
+              />
+              <strong>Don't Notify Student</strong>
+            </label>
+          </div>
+        </div>
+
+        <small class="form-text text-muted d-block mt-2">
+          <i class="fas fa-exclamation-triangle me-1"></i>
+          Note: System administrators will always be able to see this submission
+          in their logs.
+        </small>
+      </div>
+    </div>
+
+    <!-- Book Additional Lessons Section -->
+    <div class="form-section" id="rescheduleSection" style="display: none">
+      <h3>
+        <i class="fas fa-calendar-plus me-2"></i>5. Book Additional Lessons
+        (Optional)
+      </h3>
+      <p class="text-muted small mb-3">
+        Would the student like to reschedule or book additional lessons?
+      </p>
+
+      <div class="form-check mb-3">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id="wantsReschedule"
+          name="wants_reschedule"
+          onchange="toggleReschedulePreferences()"
+        />
+        <label class="form-check-label" for="wantsReschedule">
+          <strong>Student would like to book additional lessons</strong>
+        </label>
+      </div>
+
+      <!-- Reschedule Preferences (hidden by default) -->
+      <div
+        id="reschedulePreferencesDiv"
+        style="display: none; margin-top: 1rem"
+      >
+        <div
+          style="
+            background: #fef3c7;
+            border: 2px solid #f59e0b;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            font-weight: 500;
+            color: #92400e;
+          "
+        >
+          <i class="fas fa-exclamation-circle" style="margin-top: 0.25rem"></i>
+          <span
+            >Do not enter additional cancelled lessons here. Use the sequential
+            lessons option above to cancel multiple lessons.</span
+          >
+        </div>
+
+        <label for="reschedulePreferences" class="form-label fw-semibold">
+          <i class="fas fa-calendar-alt me-1"></i>Preferred Dates and Times
+        </label>
+        <textarea
+          class="form-control"
+          id="reschedulePreferences"
+          name="reschedule_preferences"
+          style="min-height: 100px"
+          placeholder="e.g., 'Tuesdays and Thursdays at 10 AM' or 'Weekends preferred'"
+        ></textarea>
+        <small class="form-text text-muted d-block mt-2">
+          The student's preferences will be reviewed and they will be contacted
+          regarding available times.
+        </small>
+      </div>
+    </div>
+
+    <!-- Manager Notes Section -->
+    <div class="form-section" id="managerNotesSection" style="display: none">
+      <h3><i class="fas fa-sticky-note me-2"></i>6. Manager Notes</h3>
+      <p class="text-muted small mb-3">
+        Add a note explaining why this cancellation is being submitted by a
+        manager.
+      </p>
+
+      <div class="manager-notes-section">
+        <label for="managerNotes" class="form-label fw-semibold">Notes</label>
+        <textarea
+          id="managerNotes"
+          name="manager_notes"
+          class="form-control"
+          placeholder="e.g., 'Student requested this be backdated to reflect their actual cancellation date', 'Correcting historical record', etc."
+        ></textarea>
+        <small class="form-text text-muted d-block mt-1"
+          >These notes will be visible to other managers and in the audit
+          log.</small
+        >
+      </div>
+    </div>
+
+    <!-- Final Confirmation -->
+    <div class="form-section" id="confirmationSection" style="display: none">
+      <h3><i class="fas fa-check-circle me-2"></i>Review & Submit</h3>
+
+      <div class="status-preview manager-submission">
+        <strong>Submission Summary:</strong>
+        <ul class="mb-0 mt-2" style="font-size: 0.95rem">
+          <li>
+            <strong>Student:</strong> <span id="confirmStudentName"></span>
+          </li>
+          <li>
+            <strong>Lesson Date:</strong> <span id="confirmLessonDate"></span> @
+            <span id="confirmLessonTime"></span>
+          </li>
+          <li id="confirmReturnDateRow" style="display: none">
+            <strong>Return Date:</strong> <span id="confirmReturnDate"></span>
+          </li>
+          <li>
+            <strong>Submission Date:</strong>
+            <span id="confirmSubmissionDate"></span>
+          </li>
+          <li>
+            <strong>Submitted By:</strong> <span id="confirmManagerName"></span>
+          </li>
+          <li>
+            <strong>Submitted At:</strong>
+            <span id="confirmSubmissionTime"></span>
+          </li>
+          <li id="confirmRescheduleRow" style="display: none">
+            <strong>Student Booking Request:</strong>
+            <span id="confirmRescheduleText"></span>
+          </li>
+          <li id="confirmNotifications" style="display: none">
+            <strong>Notifications:</strong>
+            <span id="confirmNotificationsText"></span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="audit-info">
+        <i class="fas fa-lock me-2"></i>
+        <strong>Audit Trail:</strong> This submission will be recorded with a
+        timestamp showing it was submitted by a manager. The student will be
+        able to see this in their cancellation history.
+      </div>
+    </div>
+
+    <!-- Form Footer - Buttons -->
+    <div class="form-footer" id="formFooter" style="display: none">
+      <button
+        type="button"
+        class="btn btn-outline-secondary btn-lg"
+        onclick="resetForm()"
+      >
+        <i class="fas fa-redo me-2"></i>Clear Form
+      </button>
+      <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+        <i class="fas fa-paper-plane me-2"></i>Submit Cancellation
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="d-none">
+  <div
+    style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5000;
+    "
+  >
+    <div
+      style="
+        background: white;
+        padding: 2rem;
+        border-radius: 0.75rem;
+        text-align: center;
+      "
+    >
+      <div class="spinner-border mb-3" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p>Submitting cancellation...</p>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // =====================================
+  // Manager Submission Form JavaScript
+  // =====================================
+
+  const form = document.getElementById("managerSubmissionForm");
+  let selectedStudent = null;
+  let todayDate = new Date();
+
+  // Initialize today's date display
+  document.addEventListener("DOMContentLoaded", function () {
+    const today = formatDate(todayDate);
+    document.getElementById("todayDateDisplay").textContent = `(${today})`;
+
+    // Setup event listeners for student search
+    const studentSearchEl = document.getElementById("studentSearch");
+    if (studentSearchEl) {
+      studentSearchEl.addEventListener("input", handleStudentSearch);
+    }
+
+    // Setup event listeners for lesson/policy updates
+    const lessonDateEl = document.getElementById("lessonDate");
+    if (lessonDateEl) {
+      lessonDateEl.addEventListener("change", updatePolicyImpact);
+      lessonDateEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const lessonTimeEl = document.getElementById("lessonTime");
+    if (lessonTimeEl) {
+      lessonTimeEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const returnDateEl = document.getElementById("returnDate");
+    if (returnDateEl) {
+      returnDateEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const customSubDateEl = document.getElementById("customSubmissionDate");
+    if (customSubDateEl) {
+      customSubDateEl.addEventListener("change", updatePolicyImpact);
+      customSubDateEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const customSubTimeEl = document.getElementById("customSubmissionTime");
+    if (customSubTimeEl) {
+      customSubTimeEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    // Reschedule listeners
+    const wantsRescheduleEl = document.getElementById("wantsReschedule");
+    if (wantsRescheduleEl) {
+      wantsRescheduleEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const reschedulePrefsEl = document.getElementById("reschedulePreferences");
+    if (reschedulePrefsEl) {
+      reschedulePrefsEl.addEventListener("input", updateConfirmationPreview);
+    }
+
+    // Notification listeners
+    const suppressAllEl = document.getElementById("suppressAllNotifications");
+    if (suppressAllEl) {
+      suppressAllEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const suppressManagerEl = document.getElementById(
+      "suppressManagerNotification",
+    );
+    if (suppressManagerEl) {
+      suppressManagerEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const suppressStudentEl = document.getElementById(
+      "suppressStudentNotification",
+    );
+    if (suppressStudentEl) {
+      suppressStudentEl.addEventListener("change", updateConfirmationPreview);
+    }
+
+    const submissionCustomEl = document.getElementById("submissionCustom");
+    if (submissionCustomEl) {
+      submissionCustomEl.addEventListener("change", updateConfirmationPreview);
+    }
+  });
+
+  // =====================================
+  // Student Search Functionality
+  // =====================================
+
+  async function handleStudentSearch(event) {
+    const query = event.target.value.trim();
+    const resultsDiv = document.getElementById("searchResults");
+    const spinner = document.getElementById("searchSpinner");
+
+    if (query.length < 2) {
+      resultsDiv.classList.remove("show");
+      return;
+    }
+
+    spinner.classList.add("show");
+
+    try {
+      const response = await fetch(
+        `/manager/api/student-search?q=${encodeURIComponent(query)}`,
+      );
+      const data = await response.json();
+
+      resultsDiv.innerHTML = "";
+
+      // Check if response is an error
+      if (!response.ok || (data.error && !Array.isArray(data))) {
+        resultsDiv.innerHTML = `<div class="search-result-item text-danger">Error: ${data.error || "Failed to search"}</div>`;
+        resultsDiv.classList.add("show");
+        return;
+      }
+
+      // results should be an array
+      const results = Array.isArray(data) ? data : [];
+
+      if (results.length === 0) {
+        resultsDiv.innerHTML =
+          '<div class="search-result-item">No students found</div>';
+      } else {
+        results.forEach((student) => {
+          const div = document.createElement("div");
+          div.className = "search-result-item";
+
+          // Safely access properties with defaults
+          const name = student.name || "Unknown Student";
+          const email = student.email || "No email";
+          const membership = student.membership || "Standard";
+          const phone = student.phone || "";
+          const parentFirst = student.parent_first || "";
+          const parentLast = student.parent_last || "";
+          const parentName =
+            parentFirst || parentLast
+              ? `${parentFirst} ${parentLast}`.trim()
+              : "";
+
+          let detailsHtml = `<div><strong>${name}</strong></div>`;
+          if (email !== "No email") {
+            detailsHtml += `<div class="text-muted small">${email}</div>`;
+          }
+          if (phone) {
+            detailsHtml += `<div class="text-muted small">☎ ${phone}</div>`;
+          }
+          if (parentName) {
+            detailsHtml += `<div class="text-muted small">👤 Parent: ${parentName}</div>`;
+          }
+          detailsHtml += `<div class="text-muted small">${membership}</div>`;
+
+          div.innerHTML = detailsHtml;
+          div.onclick = () => selectStudent(student);
+          resultsDiv.appendChild(div);
+        });
+      }
+
+      resultsDiv.classList.add("show");
+    } catch (error) {
+      console.error("Search error:", error);
+      resultsDiv.innerHTML =
+        '<div class="search-result-item text-danger">Error loading students</div>';
+      resultsDiv.classList.add("show");
+    } finally {
+      spinner.classList.remove("show");
+    }
+  }
+
+  function selectStudent(student) {
+    selectedStudent = student;
+
+    // Update search input with the name returned from API
+    document.getElementById("studentSearch").value =
+      student.name || `${student.first_name || ""} ${student.last_name || ""}`;
+    document.getElementById("selectedStudentId").value = student.id;
+
+    // Hide search results
+    document.getElementById("searchResults").classList.remove("show");
+
+    // Display student info card - use correct field names from API
+    const displayName =
+      student.name || `${student.first_name || ""} ${student.last_name || ""}`;
+    document.getElementById("studentNameDisplay").textContent = displayName;
+    document.getElementById("studentEmailDisplay").textContent =
+      student.email || "No email";
+    document.getElementById("studentMembershipDisplay").textContent =
+      student.membership || student.membership_level || "Standard";
+    document.getElementById("studentPhoneDisplay").textContent =
+      student.phone || "Not provided";
+    document.getElementById("selectedStudentInfo").style.display = "block";
+
+    // Show remaining form sections
+    document.getElementById("lessonDetailsSection").style.display = "block";
+    document.getElementById("submissionDateSection").style.display = "block";
+    document.getElementById("notificationSection").style.display = "block";
+    document.getElementById("rescheduleSection").style.display = "block";
+    document.getElementById("managerNotesSection").style.display = "block";
+    document.getElementById("confirmationSection").style.display = "block";
+    document.getElementById("formFooter").style.display = "flex";
+
+    // Load policy info
+    loadPolicyInfo(student.id);
+  }
+
+  function clearStudentSelection() {
+    selectedStudent = null;
+    document.getElementById("studentSearch").value = "";
+    document.getElementById("selectedStudentId").value = "";
+    document.getElementById("selectedStudentInfo").style.display = "none";
+    document.getElementById("lessonDetailsSection").style.display = "none";
+    document.getElementById("submissionDateSection").style.display = "none";
+    document.getElementById("notificationSection").style.display = "none";
+    document.getElementById("rescheduleSection").style.display = "none";
+    document.getElementById("managerNotesSection").style.display = "none";
+    document.getElementById("confirmationSection").style.display = "none";
+    document.getElementById("formFooter").style.display = "none";
+  }
+
+  // =====================================
+  // Policy Information
+  // =====================================
+
+  async function loadPolicyInfo(studentId) {
+    try {
+      const response = await fetch(
+        `/manager/api/student-policy-info/${studentId}`,
+      );
+      const data = await response.json();
+
+      const container = document.getElementById("policyInfoContainer");
+
+      // Determine the alert class based on remaining free cancellations
+      let alertClass = "";
+      if (data.remaining_free === 0) {
+        alertClass = "danger";
+      } else if (data.remaining_free < 2) {
+        alertClass = "warning";
+      }
+
+      container.innerHTML = `
+            <div class="policy-info-alert ${alertClass}">
+                <strong><i class="fas fa-info-circle me-2"></i>Current Month Policy</strong>
+                <div class="mt-2">
+                    <div><strong>Membership Level:</strong> ${data.membership_level}</div>
+                    <div><strong>Free Notices Per Month:</strong> ${data.free_notices_per_month}</div>
+                    <div><strong>Deadline:</strong> ${data.deadline_display}</div>
+                    <div><strong>This Month's Submissions:</strong> ${data.current_month_count} / ${data.free_notices_per_month}</div>
+                    
+                </div>
+            </div>
+        `;
+    } catch (error) {
+      console.error("Error loading policy info:", error);
+    }
+  }
+
+  // =====================================
+  // Form Interactions
+  // =====================================
+
+  function toggleSequentialLessons() {
+    const sequentialSection = document.getElementById("sequentialSection");
+    const isChecked = document.getElementById("hasSequentialLessons").checked;
+    sequentialSection.style.display = isChecked ? "block" : "none";
+  }
+
+  function onSubmissionDateChange() {
+    const isCustom = document.getElementById("submissionCustom").checked;
+    const customPicker = document.getElementById("customDatePicker");
+    customPicker.style.display = isCustom ? "block" : "none";
+    updatePolicyImpact();
+  }
+
+  function toggleGranularNotifications() {
+    const isChecked = document.getElementById(
+      "suppressAllNotifications",
+    ).checked;
+    const granularControls = document.getElementById("granularControls");
+    granularControls.classList.toggle("show", !isChecked);
+  }
+
+  function toggleReschedulePreferences() {
+    const isChecked = document.getElementById("wantsReschedule").checked;
+    const rescheduleDiv = document.getElementById("reschedulePreferencesDiv");
+    rescheduleDiv.style.display = isChecked ? "block" : "none";
+  }
+
+  async function updatePolicyImpact() {
+    if (!selectedStudent) return;
+
+    const lessonDate = document.getElementById("lessonDate").value;
+    if (!lessonDate) return;
+
+    const isCustom = document.getElementById("submissionCustom").checked;
+    const submissionDate = isCustom
+      ? document.getElementById("customSubmissionDate").value
+      : formatDate(todayDate);
+
+    if (!submissionDate) return;
+
+    try {
+      const response = await fetch(
+        `/manager/api/policy-impact?student_id=${selectedStudent.id}&submission_date=${submissionDate}`,
+      );
+      const data = await response.json();
+
+      const preview = document.getElementById("policyImpactPreview");
+      document.getElementById("impactMonth").textContent = data.month_display;
+      document.getElementById("impactDetails").textContent = data.impact_text;
+      preview.style.display = "block";
+    } catch (error) {
+      console.error("Error updating policy impact:", error);
+    }
+  }
+
+  function updateConfirmationPreview() {
+    if (!selectedStudent) return;
+
+    const lessonDateEl = document.getElementById("lessonDate");
+    const lessonTimeEl = document.getElementById("lessonTime");
+    const returnDateEl = document.getElementById("returnDate");
+    const wantsRescheduleEl = document.getElementById("wantsReschedule");
+    const reschedulePreferencesEl = document.getElementById(
+      "reschedulePreferences",
+    );
+
+    const lessonDate = lessonDateEl ? lessonDateEl.value : "";
+    const lessonTime = lessonTimeEl ? lessonTimeEl.value : "";
+    const returnDate = returnDateEl ? returnDateEl.value : "";
+    const wantsReschedule = wantsRescheduleEl
+      ? wantsRescheduleEl.checked
+      : false;
+    const reschedulePreferences = reschedulePreferencesEl
+      ? reschedulePreferencesEl.value
+      : "";
+
+    // Update basic fields
+    const confirmStudentName = document.getElementById("confirmStudentName");
+    if (confirmStudentName) {
+      confirmStudentName.textContent =
+        selectedStudent.name ||
+        `${selectedStudent.first_name || ""} ${selectedStudent.last_name || ""}`;
+    }
+
+    const confirmLessonDate = document.getElementById("confirmLessonDate");
+    if (confirmLessonDate && lessonDate) {
+      const date = new Date(lessonDate + "T00:00:00");
+      confirmLessonDate.textContent = date.toLocaleDateString();
+    }
+
+    const confirmLessonTime = document.getElementById("confirmLessonTime");
+    if (confirmLessonTime) {
+      confirmLessonTime.textContent = lessonTime || "--";
+    }
+
+    // Show/hide return date row
+    const returnDateRow = document.getElementById("confirmReturnDateRow");
+    const confirmReturnDate = document.getElementById("confirmReturnDate");
+    if (returnDateRow && confirmReturnDate) {
+      if (returnDate) {
+        const returnDateObj = new Date(returnDate + "T00:00:00");
+        confirmReturnDate.textContent = returnDateObj.toLocaleDateString();
+        returnDateRow.style.display = "block";
+      } else {
+        returnDateRow.style.display = "none";
+      }
+    }
+
+    // Show/hide reschedule row
+    const rescheduleRow = document.getElementById("confirmRescheduleRow");
+    const confirmRescheduleText = document.getElementById(
+      "confirmRescheduleText",
+    );
+    if (rescheduleRow && confirmRescheduleText) {
+      if (wantsReschedule && reschedulePreferences) {
+        confirmRescheduleText.textContent = reschedulePreferences;
+        rescheduleRow.style.display = "block";
+      } else {
+        rescheduleRow.style.display = "none";
+      }
+    }
+
+    // Update submission date/time
+    const submissionCustomEl = document.getElementById("submissionCustom");
+    const isCustom = submissionCustomEl ? submissionCustomEl.checked : false;
+
+    const confirmSubmissionDate = document.getElementById(
+      "confirmSubmissionDate",
+    );
+    const confirmSubmissionTime = document.getElementById(
+      "confirmSubmissionTime",
+    );
+
+    if (isCustom) {
+      const customDateEl = document.getElementById("customSubmissionDate");
+      const customTimeEl = document.getElementById("customSubmissionTime");
+      const customDate = customDateEl ? customDateEl.value : "";
+      const customTime = customTimeEl ? customTimeEl.value : "00:00";
+      if (customDate && confirmSubmissionDate && confirmSubmissionTime) {
+        const dateObj = new Date(customDate + "T00:00:00");
+        confirmSubmissionDate.textContent = dateObj.toLocaleDateString();
+        confirmSubmissionTime.textContent = customTime;
+      }
+    } else {
+      if (confirmSubmissionDate && confirmSubmissionTime) {
+        confirmSubmissionDate.textContent = formatDate(todayDate);
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, "0");
+        const minutes = String(now.getMinutes()).padStart(2, "0");
+        confirmSubmissionTime.textContent = `${hours}:${minutes}`;
+      }
+    }
+
+    // Update manager name (if available from session)
+    const confirmManagerName = document.getElementById("confirmManagerName");
+    if (confirmManagerName) {
+      confirmManagerName.textContent = "{{ session.user_name }}" || "Manager";
+    }
+
+    // Update notifications
+    const suppressAllEl = document.getElementById("suppressAllNotifications");
+    const suppressManagerEl = document.getElementById(
+      "suppressManagerNotification",
+    );
+    const suppressStudentEl = document.getElementById(
+      "suppressStudentNotification",
+    );
+    const confirmNotifications = document.getElementById(
+      "confirmNotifications",
+    );
+    const confirmNotificationsText = document.getElementById(
+      "confirmNotificationsText",
+    );
+
+    const suppressAll = suppressAllEl ? suppressAllEl.checked : false;
+    const suppressManager = suppressManagerEl
+      ? suppressManagerEl.checked
+      : false;
+    const suppressStudent = suppressStudentEl
+      ? suppressStudentEl.checked
+      : false;
+
+    if (confirmNotifications && confirmNotificationsText) {
+      if (suppressAll || suppressManager || suppressStudent) {
+        let notifText = [];
+        if (suppressAll) {
+          notifText.push("All notifications suppressed");
+        } else {
+          if (suppressManager)
+            notifText.push("Manager notifications suppressed");
+          if (suppressStudent)
+            notifText.push("Student notifications suppressed");
+        }
+        confirmNotificationsText.textContent = notifText.join(", ");
+        confirmNotifications.style.display = "block";
+      } else {
+        confirmNotifications.style.display = "none";
+      }
+    }
+  }
+
+  function resetForm() {
+    form.reset();
+    clearStudentSelection();
+    document.getElementById("successBadge").style.display = "none";
+  }
+
+  // =====================================
+  // Form Submission
+  // =====================================
+
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+
+    if (!selectedStudent) {
+      alert("Please select a student");
+      return;
+    }
+
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    loadingOverlay.classList.remove("d-none");
+
+    const formData = new FormData(form);
+
+    // Add calculated values
+    let submissionDateTime;
+
+    if (document.getElementById("submissionCustom").checked) {
+      // Custom date & time selected
+      const customDate = document.getElementById("customSubmissionDate").value;
+      const customTime =
+        document.getElementById("customSubmissionTime").value || "00:00";
+      submissionDateTime = `${customDate} ${customTime}`;
+    } else {
+      // Use today + current time
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const hours = String(now.getHours()).padStart(2, "0");
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      submissionDateTime = `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+
+    console.log("DEBUG: Form submission");
+    console.log(
+      "  Student ID:",
+      document.getElementById("selectedStudentId").value,
+    );
+    console.log("  Lesson Date:", document.getElementById("lessonDate").value);
+    console.log("  Lesson Time:", document.getElementById("lessonTime").value);
+    console.log("  Submission Date & Time:", submissionDateTime);
+
+    formData.set("submission_date_time", submissionDateTime);
+    formData.set(
+      "suppress_notifications",
+      document.getElementById("suppressAllNotifications").checked ? 1 : 0,
+    );
+    formData.set(
+      "suppress_to_manager",
+      document.getElementById("suppressManagerNotification").checked ? 1 : 0,
+    );
+    formData.set(
+      "suppress_to_student",
+      document.getElementById("suppressStudentNotification").checked ? 1 : 0,
+    );
+
+    // Add return_date if sequential lessons are enabled
+    const returnDate = document.getElementById("returnDate").value;
+    if (returnDate) {
+      formData.set("return_date", returnDate);
+    }
+
+    // Add reschedule preferences if requested
+    const wantsReschedule = document.getElementById("wantsReschedule").checked;
+    if (wantsReschedule) {
+      formData.set("wants_reschedule", 1);
+      const reschedulePreferences = document.getElementById(
+        "reschedulePreferences",
+      ).value;
+      if (reschedulePreferences) {
+        formData.set("reschedule_preferences", reschedulePreferences);
+      }
+    } else {
+      formData.set("wants_reschedule", 0);
+      formData.set("reschedule_preferences", "");
+    }
+
+    console.log("DEBUG: FormData being sent:");
+    for (let [key, value] of formData.entries()) {
+      console.log(`  ${key}: ${value}`);
+    }
+
+    try {
+      const response = await fetch("/manager/submit-cancellation", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      console.log("DEBUG: Response:", result);
+
+      if (result.success) {
+        document.getElementById("successBadge").style.display = "inline-block";
+        alert("Cancellation submitted successfully!");
+        setTimeout(() => {
+          window.location.href = '{{ url_for("manager_cancellations") }}';
+        }, 1500);
+      } else {
+        alert("Error: " + result.message);
+      }
+    } catch (error) {
+      console.error("Submission error:", error);
+      alert("An error occurred while submitting the cancellation.");
+    } finally {
+      loadingOverlay.classList.add("d-none");
+    }
+  });
+
+  // =====================================
+  // Utility Functions
+  // =====================================
+
+  function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatTimeForDisplay(timeStr) {
+    if (!timeStr) return "";
+    const [hours, minutes] = timeStr.split(":");
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  }
+</script>
+{% endblock %}

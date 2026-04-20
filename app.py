@@ -90,6 +90,9 @@ def init_db():
                 email TEXT UNIQUE NOT NULL,
                 phone TEXT,
                 membership_level TEXT NOT NULL DEFAULT 'Bronze',
+                welcome_free_used BOOLEAN DEFAULT 0,
+                welcome_package_date_started TIMESTAMP NULL,
+                welcome_package_upgrade_date TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -161,6 +164,17 @@ def init_db():
                 status TEXT DEFAULT 'pending',
                 deadline_passed BOOLEAN DEFAULT 0,        -- NEW COLUMN
                 is_override BOOLEAN DEFAULT 0,            -- NEW COLUMN
+                submitted_by TEXT,                        -- 'student' or 'manager'
+                submission_method TEXT,                   -- 'client_portal', 'manager_portal'
+                actual_submission_timestamp TIMESTAMP,    -- When submission was actually made
+                manual_submission_date TIMESTAMP,         -- Policy submission date (for manager submissions)
+                manager_submitted_by INTEGER,             -- User ID of manager who submitted
+                is_manager_submission BOOLEAN DEFAULT 0,  -- 1 if submitted by manager, 0 if student
+                suppress_notifications BOOLEAN DEFAULT 0, -- Don't send notifications if 1
+                status_details TEXT,                      -- e.g., "1 of 2 used this month"
+                excluded_notification_suppressed BOOLEAN DEFAULT 0,  -- Suppress exclusion notifications
+                override_notification_suppressed BOOLEAN DEFAULT 0,  -- Suppress override notifications
+                same_day_after_time BOOLEAN DEFAULT 0,   -- Cancelled after lesson time, same day
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
@@ -168,6 +182,32 @@ def init_db():
         """
         )
         print("✓ Cancellations table created")
+
+        # Package history table for tracking Welcome Package upgrades
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS package_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                old_package TEXT,
+                new_package TEXT,
+                change_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                welcome_free_used_at_upgrade BOOLEAN DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+            )
+        """
+        )
+        print("✓ Package history table created")
+        
+        # Create indexes for package_history
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_package_history_student ON package_history(student_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_package_history_date ON package_history(change_date)"
+        )
 
         # System settings table (unchanged)
         conn.execute(
@@ -206,6 +246,57 @@ def init_db():
         """
         )
         print("✓ Email templates table created")
+
+        # Email triggers table - NEW
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_triggers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                category TEXT DEFAULT 'cancellation',
+                event_condition TEXT,
+                active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """
+        )
+        print("✓ Email triggers table created")
+
+        # Email trigger mappings table - NEW
+        # IMPORTANT: Unique constraint is (trigger_id, recipient_type) only
+        # This means: ONE template per trigger per recipient
+        # Prevents multiple emails to same recipient from same trigger
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_trigger_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trigger_id TEXT NOT NULL,
+                template_id TEXT NOT NULL,
+                recipient_type TEXT NOT NULL,
+                enabled BOOLEAN DEFAULT 1,
+                priority INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (trigger_id) REFERENCES email_triggers(id),
+                FOREIGN KEY (template_id) REFERENCES email_templates(id),
+                UNIQUE(trigger_id, recipient_type)
+            )
+        """
+        )
+        print("✓ Email trigger mappings table created")
+        
+        # Create indexes for trigger mappings
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trigger_mappings_trigger ON email_trigger_mappings(trigger_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trigger_mappings_template ON email_trigger_mappings(template_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trigger_mappings_recipient ON email_trigger_mappings(recipient_type)"
+        )
 
         # System logs table (unchanged)
         conn.execute(
@@ -577,7 +668,63 @@ def init_db():
             )
         print("✓ Default email templates inserted")
 
-        # Insert sample admin users (unchanged)
+        # Insert default email triggers - NEW
+        email_triggers = [
+            ("free_cancellation_triggered", "Free Cancellation", "Sent when a cancellation is approved at no charge", "cancellation", "cancellation.charged == False"),
+            ("charged_cancellation_triggered", "Charged Cancellation", "Sent when a cancellation incurs a charge", "cancellation", "cancellation.charged == True"),
+            ("manager_new_cancellation", "New Cancellation Notification", "Sent to managers when a new cancellation is submitted", "cancellation", "cancellation.submitted == True"),
+            ("client_submission_confirmation", "Client Submission Confirmation", "Sent to client confirming receipt of cancellation", "cancellation", "cancellation.submission_confirmed == True"),
+            ("manager_override_applied", "Manager Override Applied", "Sent when a manager overrides a cancellation", "override", "cancellation.override == True"),
+            ("lesson_excluded_student", "Lesson Excluded - Student Notification", "Sent to student when lesson is marked as excluded", "exclusion", "cancellation.excluded == True && recipient == student"),
+            ("lesson_excluded_manager", "Lesson Excluded - Manager Notification", "Sent to manager when lesson is marked as excluded", "exclusion", "cancellation.excluded == True && recipient == manager"),
+            ("override_to_charged_student", "Override to Charged - Student", "Sent to student when override changes status to charged", "override", "override.new_status == charged && recipient == student"),
+            ("override_to_charged_manager", "Override to Charged - Manager", "Sent to manager when override changes status to charged", "override", "override.new_status == charged && recipient == manager"),
+            ("override_to_free_student", "Override to Free - Student", "Sent to student when override changes status to free", "override", "override.new_status == free && recipient == student"),
+            ("override_to_free_manager", "Override to Free - Manager", "Sent to manager when override changes status to free", "override", "override.new_status == free && recipient == manager"),
+            ("manager_submits_cancellation_student", "Manager Submits Cancellation - Student", "Sent to student when manager submits cancellation on their behalf", "submission", "submission.submitted_by == manager && recipient == student"),
+            ("manager_submits_cancellation_manager", "Manager Submits Cancellation - Manager", "Notification to managers when another manager submits cancellation", "submission", "submission.submitted_by == manager && recipient == manager"),
+        ]
+
+        for trigger in email_triggers:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO email_triggers 
+                (id, name, description, category, event_condition)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                trigger,
+            )
+        print("✓ Default email triggers inserted")
+
+        # Insert default trigger-to-template mappings - NEW
+        # CORRECTED: recipient_type is 'student' or 'manager' (not 'client')
+        # IMPORTANT: Unique constraint ensures only ONE template per (trigger, recipient_type)
+        trigger_mappings = [
+            ("free_cancellation_triggered", "free_cancellation", "student", 1, 0),
+            ("charged_cancellation_triggered", "cancellation_charged", "student", 1, 0),
+            ("manager_new_cancellation", "manager_notification", "manager", 1, 0),
+            ("client_submission_confirmation", "client_confirmation", "student", 1, 0),
+            ("manager_override_applied", "manager_override_notification", "manager", 1, 0),
+            ("lesson_excluded_student", "lesson_excluded_student", "student", 1, 0),
+            ("lesson_excluded_manager", "lesson_excluded_manager", "manager", 1, 0),
+            ("override_to_charged_student", "override_excluded_to_charged_student", "student", 1, 0),
+            ("override_to_charged_manager", "override_excluded_to_charged_manager", "manager", 1, 0),
+            ("override_to_free_student", "override_excluded_to_free_student", "student", 1, 0),
+            ("override_to_free_manager", "override_excluded_to_free_manager", "manager", 1, 0),
+            ("manager_submits_cancellation_student", "manager_submits_cancellation_student", "student", 1, 0),
+            ("manager_submits_cancellation_manager", "manager_submits_cancellation_manager", "manager", 1, 0),
+        ]
+
+        for mapping in trigger_mappings:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO email_trigger_mappings 
+                (trigger_id, template_id, recipient_type, enabled, priority)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                mapping,
+            )
+        print("✓ Default email trigger mappings inserted")
         from werkzeug.security import generate_password_hash
 
         admin_password_hash = generate_password_hash("admin123")
@@ -1261,11 +1408,11 @@ def now_in_app_timezone():
 def localize_datetime(dt, from_tz=None):
     """
     Convert a datetime to Pacific timezone (PST/PDT).
-    
+
     Args:
         dt: datetime object, string, or None
         from_tz: Optional source timezone (if None and dt is naive, assumes Pacific)
-    
+
     Returns:
         Timezone-aware datetime in Pacific timezone, or None
     """
@@ -1376,7 +1523,12 @@ def get_membership_tier(level):
 
 
 def get_monthly_cancellation_count(student_id, month=None, year=None):
-    """Get cancellation count for a student in a specific month"""
+    """Get cancellation count for a student in a specific month (based on lesson date)
+    
+    Returns count of free (non-charged) cancellations for the month.
+    Counts based on the lesson_date month, not submission date.
+    This ensures quota resets based on lesson month.
+    """
     current_time = toronto_now()
     if not month:
         month = current_time.month
@@ -1384,17 +1536,208 @@ def get_monthly_cancellation_count(student_id, month=None, year=None):
         year = current_time.year
 
     conn = get_db()
+    # Count free cancellations based on LESSON DATE month, not submission date
     count = conn.execute(
         """
         SELECT COUNT(*) as count FROM cancellations 
         WHERE student_id = ? 
-        AND strftime('%m', created_at) = ? 
-        AND strftime('%Y', created_at) = ?
+        AND strftime('%m', lesson_date) = ? 
+        AND strftime('%Y', lesson_date) = ?
         AND excluded = 0
         AND charged = 0
     """,
         (student_id, f"{month:02d}", str(year)),
     ).fetchone()
+    conn.close()
+    return count["count"] if count else 0
+
+
+def has_used_welcome_free(student_id):
+    """Check if student has used their lifetime Welcome Package free cancellation"""
+    conn = get_db()
+    result = conn.execute(
+        "SELECT welcome_free_used FROM students WHERE id = ?",
+        (student_id,)
+    ).fetchone()
+    conn.close()
+    return bool(result["welcome_free_used"]) if result else False
+
+
+def mark_welcome_free_used(student_id):
+    """Mark that a student has used their Welcome Package free cancellation"""
+    conn = get_db()
+    conn.execute(
+        "UPDATE students SET welcome_free_used = 1 WHERE id = ?",
+        (student_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def track_package_upgrade(student_id, old_package, new_package, welcome_free_used_at_upgrade, conn=None):
+    """Record when a student upgrades their package"""
+    close_conn = False
+    if conn is None:
+        conn = get_db()
+        close_conn = True
+    
+    try:
+        current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        conn.execute(
+            """
+            INSERT INTO package_history 
+            (student_id, old_package, new_package, change_date, welcome_free_used_at_upgrade)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (student_id, old_package, new_package, current_time, int(welcome_free_used_at_upgrade))
+        )
+        
+        # Only commit if we opened the connection
+        if close_conn:
+            conn.commit()
+    finally:
+        if close_conn and conn:
+            conn.close()
+
+
+def record_welcome_package_start(student_id, conn=None):
+    """Record when a student starts on Welcome Package"""
+    close_conn = False
+    if conn is None:
+        conn = get_db()
+        close_conn = True
+    
+    try:
+        current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        conn.execute(
+            """
+            UPDATE students 
+            SET welcome_package_date_started = ?
+            WHERE id = ? AND welcome_package_date_started IS NULL
+            """,
+            (current_time, student_id)
+        )
+        
+        # Only commit if we opened the connection
+        if close_conn:
+            conn.commit()
+    finally:
+        if close_conn and conn:
+            conn.close()
+
+
+def get_welcome_upgrade_month_carryover(student_id):
+    """
+    Get how many free cancellations from Welcome Package should count toward 
+    the new package's monthly limit when upgrading mid-month.
+    
+    Returns the count of free cancellations in the month of upgrade that were 
+    granted under the Welcome Package.
+    Uses lesson_date to determine the month.
+    """
+    conn = get_db()
+    current_time = toronto_now()
+    
+    # Get the most recent package upgrade from Welcome Package
+    upgrade_record = conn.execute(
+        """
+        SELECT change_date, welcome_free_used_at_upgrade
+        FROM package_history
+        WHERE student_id = ? AND old_package = 'Welcome Package'
+        ORDER BY change_date DESC
+        LIMIT 1
+        """,
+        (student_id,)
+    ).fetchone()
+    
+    if not upgrade_record:
+        conn.close()
+        return 0
+    
+    upgrade_time = upgrade_record["change_date"]
+    
+    # Parse the upgrade date
+    try:
+        if isinstance(upgrade_time, str):
+            upgrade_datetime = datetime.strptime(upgrade_time, "%Y-%m-%d %H:%M:%S")
+        else:
+            upgrade_datetime = upgrade_time
+    except:
+        conn.close()
+        return 0
+    
+    # Check if upgrade happened this month and if free was used
+    if (upgrade_datetime.month == current_time.month and 
+        upgrade_datetime.year == current_time.year and 
+        upgrade_record["welcome_free_used_at_upgrade"]):
+        
+        # Count free cancellations in this month while on Welcome Package
+        # Use lesson_date to determine the month
+        count = conn.execute(
+            """
+            SELECT COUNT(*) as count FROM cancellations
+            WHERE student_id = ?
+            AND DATE(created_at) <= DATE(?)
+            AND charged = 0
+            AND excluded = 0
+            AND strftime('%m', lesson_date) = ?
+            AND strftime('%Y', lesson_date) = ?
+            """,
+            (student_id, upgrade_time, f"{current_time.month:02d}", str(current_time.year))
+        ).fetchone()
+        
+        conn.close()
+        return count["count"] if count else 0
+    
+    conn.close()
+    return 0
+
+
+def get_free_cancellation_count_with_welcome_logic(student_id, month=None, year=None):
+    """
+    Get free cancellation count for the month, accounting for Welcome Package logic.
+    Counts are based on lesson_date month to ensure quota resets by lesson month.
+    
+    - If student is on Welcome Package: only count if they haven't used their 1 lifetime free
+    - If student upgraded from Welcome Package this month: adjust the count to include carryover
+    """
+    conn = get_db()
+    current_time = toronto_now()
+    
+    if not month:
+        month = current_time.month
+    if not year:
+        year = current_time.year
+    
+    student = conn.execute(
+        "SELECT membership_level, welcome_free_used FROM students WHERE id = ?",
+        (student_id,)
+    ).fetchone()
+    
+    if not student:
+        conn.close()
+        return 0
+    
+    # If still on Welcome Package, return 1 if not used, 0 if used
+    if student["membership_level"] == "Welcome Package":
+        conn.close()
+        return 0 if student["welcome_free_used"] else 1
+    
+    # For other packages, get normal monthly count based on lesson_date
+    count = conn.execute(
+        """
+        SELECT COUNT(*) as count FROM cancellations 
+        WHERE student_id = ? 
+        AND strftime('%m', lesson_date) = ? 
+        AND strftime('%Y', lesson_date) = ?
+        AND excluded = 0
+        AND charged = 0
+    """,
+        (student_id, f"{month:02d}", str(year)),
+    ).fetchone()
+    
     conn.close()
     return count["count"] if count else 0
 
@@ -1411,6 +1754,114 @@ def calculate_cancellation_status(student):
     }
 
 
+def will_be_charged(student, lesson_datetime, submission_datetime=None):
+    """
+    Check if a cancellation will be charged based on:
+    1. Same-day after-time (always charged)
+    2. Welcome Package status (1 lifetime free if not used)
+    3. Deadline (deadline_hours before lesson)
+    4. Monthly limit (free_notices per month, based on LESSON month)
+    5. Welcome Package upgrade carryover (if upgraded this month, use both old and new allowances)
+    
+    Args:
+        student: Student record dictionary
+        lesson_datetime: Lesson datetime (timezone-aware, Pacific)
+        submission_datetime: When the cancellation was submitted (timezone-aware, Pacific)
+                            If None, uses current time
+    
+    Returns:
+        tuple: (will_charge: bool, reason: str)
+    """
+    pacific_tz = pytz.timezone("America/Los_Angeles")
+    
+    # Get submission time (default to now if not provided)
+    if submission_datetime is None:
+        submission_datetime = toronto_now()
+    
+    # Ensure datetimes are timezone-aware
+    if lesson_datetime.tzinfo is None:
+        lesson_datetime = pacific_tz.localize(lesson_datetime)
+    if submission_datetime.tzinfo is None:
+        submission_datetime = pacific_tz.localize(submission_datetime)
+    
+    # ===== SAME-DAY AFTER-TIME CHECK =====
+    # If lesson time has passed on the same day, always charge
+    if submission_datetime.date() == lesson_datetime.date() and submission_datetime >= lesson_datetime:
+        return True, "Cancelled on same day after lesson time (same-day surcharge applies)"
+    
+    # Get membership tier
+    tier = get_membership_tier(student["membership_level"])
+    if not tier:
+        return False, "Student membership not found"
+    
+    # ===== WELCOME PACKAGE SPECIAL LOGIC =====
+    if student["membership_level"] == "Welcome Package":
+        # Welcome Package: 1 lifetime free (not monthly)
+        welcome_free_used = bool(student["welcome_free_used"]) if student["welcome_free_used"] is not None else False
+        
+        if welcome_free_used:
+            # Already used their lifetime free → CHARGE
+            return True, "Welcome Package free cancellation already used (lifetime limit)"
+        else:
+            # Haven't used it yet → FREE (this time)
+            return False, "Welcome Package - first free cancellation"
+    
+    # ===== REGULAR MEMBERSHIP LOGIC =====
+    
+    # 1. CHECK DEADLINE
+    # Calculate hours between submission and lesson
+    hours_notice = (lesson_datetime - submission_datetime).total_seconds() / 3600
+    deadline_hours = tier["deadline_hours"]
+    
+    if hours_notice < deadline_hours:
+        # Submitted after deadline → CHARGE
+        return True, f"Notice submitted after deadline ({hours_notice:.1f} hours, need {deadline_hours})"
+    
+    # 2. CHECK MONTHLY LIMIT (based on lesson month, not submission month)
+    lesson_month = lesson_datetime.month
+    lesson_year = lesson_datetime.year
+    
+    # Count free cancellations used this month (for the lesson month)
+    monthly_count = get_monthly_cancellation_count(student["id"], lesson_month, lesson_year)
+    free_notices = tier["free_notices"]
+    
+    # 3. HANDLE WELCOME PACKAGE UPGRADE CARRYOVER
+    # If student upgraded from Welcome Package in the same month as the lesson
+    # and used their Welcome Package free, they get an extra free cancellation
+    welcome_carryover = 0
+    
+    conn = get_db()
+    # Check if student upgraded from Welcome Package in the LESSON month
+    upgrade_record = conn.execute(
+        """
+        SELECT change_date, welcome_free_used_at_upgrade
+        FROM package_history
+        WHERE student_id = ? AND old_package = 'Welcome Package'
+        AND strftime('%m', change_date) = ?
+        AND strftime('%Y', change_date) = ?
+        ORDER BY change_date DESC
+        LIMIT 1
+        """,
+        (student["id"], f"{lesson_month:02d}", str(lesson_year))
+    ).fetchone()
+    conn.close()
+    
+    if upgrade_record and upgrade_record["welcome_free_used_at_upgrade"]:
+        # Student used their Welcome Package free before upgrading in the lesson month
+        # They get 1 carryover free from the Welcome Package
+        welcome_carryover = 1
+    
+    # Adjust the limit to account for Welcome Package carryover
+    adjusted_free_limit = free_notices + welcome_carryover
+    
+    if monthly_count >= adjusted_free_limit:
+        # Exceeded monthly limit → CHARGE
+        return True, f"Monthly free cancellation limit exceeded ({monthly_count}/{adjusted_free_limit} used)"
+    
+    # 4. ALL CHECKS PASSED → FREE
+    return False, f"Free cancellation ({monthly_count + 1}/{adjusted_free_limit} used this month)"
+
+
 def parse_lesson_datetime(lesson_date_str, lesson_time_str):
     """
     Parse lesson date and time strings into a timezone-aware datetime object in Pacific timezone.
@@ -1418,7 +1869,7 @@ def parse_lesson_datetime(lesson_date_str, lesson_time_str):
     Returns timezone-aware datetime in America/Los_Angeles timezone.
     """
     pacific_tz = pytz.timezone("America/Los_Angeles")
-    
+
     try:
         # Parse date
         lesson_date = datetime.strptime(str(lesson_date_str), "%Y-%m-%d").date()
@@ -1443,52 +1894,6 @@ def parse_lesson_datetime(lesson_date_str, lesson_time_str):
     # Combine date and time, then localize to Pacific timezone
     naive_dt = datetime.combine(lesson_date, lesson_time)
     return pacific_tz.localize(naive_dt)
-
-
-def will_be_charged(student, lesson_datetime):
-    """
-    Check if a cancellation will be charged based on submission time vs deadline.
-    All datetime comparisons are timezone-aware (Pacific timezone).
-    
-    Args:
-        student: Student record dictionary
-        lesson_datetime: Lesson datetime (will be converted to timezone-aware if needed)
-    
-    Returns:
-        tuple: (will_charge: bool, reason: str)
-    """
-    pacific_tz = pytz.timezone("America/Los_Angeles")
-    tier = get_membership_tier(student["membership_level"])
-    status = calculate_cancellation_status(student)
-
-    # Ensure lesson_datetime is timezone-aware
-    if lesson_datetime.tzinfo is None:
-        lesson_datetime = pacific_tz.localize(lesson_datetime)
-    
-    # Get current time in Pacific timezone (timezone-aware)
-    submission_time = toronto_now()
-
-    # For Gold members: 2 hours before lesson
-    if tier["level"] == "Gold":
-        deadline = lesson_datetime - timedelta(hours=2)
-        if submission_time > deadline:
-            return True, "Notice submitted less than 2 hours before lesson time"
-    else:
-        # For all other tiers: 6pm the day before (timezone-aware)
-        lesson_date = lesson_datetime.date()
-        previous_day = lesson_date - timedelta(days=1)
-        # Create 6pm deadline in Pacific timezone
-        naive_deadline = datetime.combine(previous_day, time(18, 0))
-        deadline = pacific_tz.localize(naive_deadline)
-
-        if submission_time > deadline:
-            return True, "Notice submitted after 6pm the previous day"
-
-    # Check monthly limit
-    if status["remaining"] <= 0:
-        return True, "No more available free cancellation notices this month"
-
-    return False, "This cancellation will be processed as a free cancellation notice"
 
 
 def get_dashboard_stats():
@@ -1748,6 +2153,237 @@ def get_dashboard_stats():
 
 
 # ===================================
+# NEW: STATUS DETAILS & EXCLUSION/OVERRIDE HELPER FUNCTIONS
+# ===================================
+
+def get_cancellation_status_details(student_id, month=None, year=None):
+    """
+    Get cancellation usage details for a student in a month
+    Returns a string like "1 of 2 used this month" or "None"
+    """
+    current_time = toronto_now()
+    if not month:
+        month = current_time.month
+    if not year:
+        year = current_time.year
+    
+    conn = get_db()
+    
+    # Get membership info
+    student = conn.execute(
+        "SELECT membership_level FROM students WHERE id = ?", (student_id,)
+    ).fetchone()
+    
+    if not student:
+        conn.close()
+        return "None"
+    
+    # Get membership tier to find free notices allowed
+    tier = conn.execute(
+        "SELECT free_notices FROM membership_tiers WHERE level = ?",
+        (student["membership_level"],)
+    ).fetchone()
+    
+    free_notices_allowed = tier["free_notices"] if tier else 1
+    
+    # Get count of free cancellations this month (not charged, not excluded)
+    count = conn.execute(
+        """
+        SELECT COUNT(*) as count FROM cancellations 
+        WHERE student_id = ? 
+        AND strftime('%m', 
+            CASE 
+                WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                THEN manual_submission_date
+                ELSE created_at
+            END
+        ) = ? 
+        AND strftime('%Y', 
+            CASE 
+                WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                THEN manual_submission_date
+                ELSE created_at
+            END
+        ) = ?
+        AND excluded = 0
+        AND charged = 0
+    """,
+        (student_id, f"{month:02d}", str(year)),
+    ).fetchone()
+    
+    count_value = count["count"] if count else 0
+    conn.close()
+    
+    if free_notices_allowed == 0:
+        return "None"
+    
+    return f"{count_value} of {free_notices_allowed} used this month"
+
+
+def send_exclusion_notification(cancellation_id, recipient_type="student"):
+    """
+    Send notification when a cancellation is marked as excluded
+    recipient_type: 'student' or 'manager'
+    USES TRIGGER SYSTEM - respects trigger-to-template mappings
+    """
+    try:
+        conn = get_db()
+        cancellation = conn.execute(
+            """
+            SELECT c.*, s.id, s.first_name, s.last_name, s.email, s.parent_first, s.parent_last, 
+                   s.phone, s.membership_level
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.id = ?
+            """,
+            (cancellation_id,)
+        ).fetchone()
+        
+        if not cancellation:
+            print(f"ERROR: Cancellation {cancellation_id} not found")
+            conn.close()
+            return False
+        
+        # Convert to dict
+        if hasattr(cancellation, "keys"):
+            cancellation_dict = dict(cancellation)
+        else:
+            cancellation_dict = cancellation
+        
+        # Build student dict for get_template_variables - MUST include id!
+        student_dict = {
+            "id": cancellation_dict.get("student_id"),
+            "first_name": cancellation_dict.get("first_name"),
+            "last_name": cancellation_dict.get("last_name"),
+            "email": cancellation_dict.get("email"),
+            "phone": cancellation_dict.get("phone", ""),
+            "parent_first": cancellation_dict.get("parent_first", ""),
+            "parent_last": cancellation_dict.get("parent_last", ""),
+            "membership_level": cancellation_dict.get("membership_level"),
+        }
+        
+        print(f"DEBUG: Student dict prepared with id={student_dict.get('id')}")
+        
+        # Calculate status details for variables
+        status = calculate_cancellation_status(student_dict)
+        tier = get_membership_tier(student_dict.get("membership_level"))
+        allowed = 1
+        if tier:
+            tier_dict = dict(tier) if hasattr(tier, "keys") else tier
+            allowed = tier_dict.get("free_notices", 1)
+        
+        exclusion_info = {
+            "exclusion_reason": cancellation_dict.get("exclusion_reason", "Policy exclusion"),
+            "status_details": f"{status['used']} free cancellation(s) used this month",
+            "used_cancellations": str(status["used"]),
+            "allowed_cancellations": str(allowed),
+        }
+        
+        # DETERMINE THE CORRECT TRIGGER BASED ON RECIPIENT TYPE
+        if recipient_type == "student":
+            trigger_id = "lesson_excluded_student"
+        else:  # manager
+            trigger_id = "lesson_excluded_manager"
+        
+        print(f"DEBUG: Using trigger: {trigger_id}")
+        
+        # USE TRIGGER SYSTEM to send email
+        conn.close()
+        result = send_email_by_trigger(
+            trigger_id,
+            student_dict,
+            cancellation_dict,
+            recipient_type=recipient_type,
+            extra_vars=exclusion_info
+        )
+        
+        print(f"DEBUG: Exclusion email result: {result}")
+        return result.get("success", False) if isinstance(result, dict) else result
+        
+    except Exception as e:
+        print(f"ERROR: Exception in send_exclusion_notification: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def send_override_notification(cancellation_id, new_status, recipient_type="student"):
+    """
+    DEPRECATED: Use send_override_notification_emails() instead.
+    This function is kept for backward compatibility but is no longer used internally.
+    
+    Send notification when an excluded cancellation is overridden
+    new_status: 'free' or 'charged'
+    recipient_type: 'student' or 'manager'
+    """
+    print("⚠️ WARNING: send_override_notification() is deprecated. Use send_override_notification_emails() instead.")
+    try:
+        conn = get_db()
+        cancellation = conn.execute(
+            """
+            SELECT c.*, s.first_name, s.last_name, s.email,
+                   (SELECT email FROM admin_users WHERE id = c.manager_submitted_by LIMIT 1) as manager_email
+            FROM cancellations c
+            JOIN students s ON c.student_id = s.id
+            WHERE c.id = ?
+            """,
+            (cancellation_id,)
+        ).fetchone()
+        
+        conn.close()
+        
+        if not cancellation:
+            return False
+        
+        # Get template
+        template_id = f"override_excluded_to_{new_status}_{recipient_type}"
+        template = get_email_template(template_id)
+        if not template:
+            return False
+        
+        # Prepare variables
+        variables = {
+            "STUDENT_NAME": f"{cancellation['first_name']} {cancellation['last_name']}",
+            "LESSON_DATE": cancellation["lesson_date"],
+            "LESSON_TIME": format_time_for_email(cancellation["lesson_time"]),
+            "OVERRIDE_FROM_STATUS": "Excluded",
+            "OVERRIDE_TO_STATUS": "Free" if new_status == "free" else "Charged",
+            "CHARGE_AMOUNT": "$0" if new_status == "free" else "Full lesson cost",
+        }
+        
+        # Render template
+        subject = render_template_string(template["subject"], **variables)
+        body = render_template_string(template["body"], **variables)
+        
+        # Send email
+        to_email = cancellation["email"] if recipient_type == "student" else (cancellation["manager_email"] if cancellation["manager_email"] else None)
+        if to_email:
+            return send_email(to_email, subject, body, template_type=recipient_type)
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error sending override notification: {str(e)}")
+        return False
+
+
+def format_time_for_email(time_str):
+    """Format time string to readable format for emails"""
+    try:
+        if isinstance(time_str, str):
+            parts = time_str.split(":")
+            hour = int(parts[0])
+            minute = parts[1]
+            ampm = "PM" if hour >= 12 else "AM"
+            display_hour = hour % 12 if hour % 12 != 0 else 12
+            return f"{display_hour}:{minute} {ampm}"
+        return str(time_str)
+    except:
+        return str(time_str)
+
+
+
+# ===================================
 # AUTHENTICATION ROUTES
 # ===================================
 
@@ -1890,7 +2526,9 @@ def client_dashboard():
                 ).time()
 
             # Use localize_datetime to handle both old and new timestamp formats
-            cancellation_dict["created_at"] = localize_datetime(cancellation["created_at"])
+            cancellation_dict["created_at"] = localize_datetime(
+                cancellation["created_at"]
+            )
             if cancellation_dict["created_at"] is None:
                 # Skip if parsing fails
                 continue
@@ -1954,28 +2592,44 @@ def client_cancel():
         # ========== NEW: Validate date is within allowed range ==========
         lesson_date_obj = datetime.strptime(lesson_date, "%Y-%m-%d").date()
         max_allowed_date = calculate_max_cancellation_date()
-        
+
         if lesson_date_obj > max_allowed_date:
             pacific_now = toronto_now()
             today = pacific_now.date()
-            next_month_start = date(today.year, today.month + 1, 1) if today.month < 12 else date(today.year + 1, 1, 1)
+            next_month_start = (
+                date(today.year, today.month + 1, 1)
+                if today.month < 12
+                else date(today.year + 1, 1, 1)
+            )
             days_until_next_month = (next_month_start - today).days
-            
+
             if days_until_next_month <= 7:
                 error_msg = "Cancellations can only be submitted for the current month and next month (within 7 days of next month)."
             else:
                 error_msg = "Cancellations can only be submitted for the current month."
-            
+
             flash(error_msg, "error")
             return redirect(url_for("client_cancel"))
         # ========== END NEW VALIDATION ==========
 
+# Check if lesson has already occurred
         if lesson_datetime <= current_time:
-            flash("Cannot cancel lessons that have already occurred", "error")
-            return redirect(url_for("client_cancel"))
-
-        # Check if will be charged
-        will_charge, charge_reason = will_be_charged(client, lesson_datetime)
+            # Lesson time has passed - allow ONLY if it's the same day
+            lesson_date_obj_compare = lesson_datetime.date()
+            current_date_obj = current_time.date()
+            
+            if lesson_date_obj_compare != current_date_obj:
+                # Lesson is from a past day (not today) - reject it
+                flash("Cannot cancel lessons that have already occurred", "error")
+                return redirect(url_for("client_cancel"))
+            
+            # If we reach here: lesson has passed BUT it's still the same day
+            # These must be charged (no free cancellations for same-day past lessons)
+            will_charge = True
+            charge_reason = "Same-day cancellation after lesson time (charged)"
+        else:
+            # Lesson hasn't occurred yet - use normal charge logic
+            will_charge, charge_reason = will_be_charged(client, lesson_datetime)
 
         # Determine deadline status for new database fields
         tier = get_membership_tier(client["membership_level"])
@@ -2014,8 +2668,10 @@ def client_cancel():
             (student_id, lesson_date, lesson_time, sequential_lessons,
              reschedule_requested, reschedule_preferences, error_report, 
              cancellation_note, charged, deadline_passed, is_override, 
-             status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             status, created_at, updated_at, submitted_by, submission_method,
+             actual_submission_timestamp, is_manager_submission, suppress_notifications)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'student', 'client_portal',
+                    CURRENT_TIMESTAMP, 0, 0)
         """,
             (
                 session["user_id"],
@@ -2035,6 +2691,14 @@ def client_cancel():
             ),
         )
         cancellation_id = cursor.lastrowid
+        
+        # NEW: Mark welcome_free_used if this is a Welcome Package free cancellation
+        if client["membership_level"] == "Welcome Package" and not will_charge:
+            conn.execute(
+                "UPDATE students SET welcome_free_used = 1 WHERE id = ?",
+                (session["user_id"],)
+            )
+        
         conn.commit()
         conn.close()
 
@@ -2138,6 +2802,7 @@ def client_cancel():
         max_date=max_cancellation_date.isoformat(),  # NEW LINE
     )
 
+
 # Backend Route Fix
 @app.route("/client/history")
 @login_required
@@ -2202,11 +2867,15 @@ def client_history():
 
         # Add formatted sequential lessons message
         if sequential_lessons:
-            cancellation_dict["sequential_lessons_formatted"] = format_sequential_lessons(
-                sequential_lessons, cancellation["lesson_date"]
+            cancellation_dict["sequential_lessons_formatted"] = (
+                format_sequential_lessons(
+                    sequential_lessons, cancellation["lesson_date"]
+                )
             )
         else:
-            cancellation_dict["sequential_lessons_formatted"] = "No additional lessons are cancelled"
+            cancellation_dict["sequential_lessons_formatted"] = (
+                "No additional lessons are cancelled"
+            )
 
         # Fix: Handle both HH:MM and HH:MM:SS time formats
         lesson_time_str = cancellation["lesson_time"]
@@ -2344,7 +3013,7 @@ def manager_dashboard():
         action_dict["created_at"] = localize_datetime(action["created_at"])
         if action_dict["created_at"] is None:
             action_dict["created_at"] = toronto_now()
-        
+
         action_dict["lesson_date"] = datetime.strptime(
             action["lesson_date"], "%Y-%m-%d"
         ).date()
@@ -2469,10 +3138,14 @@ def manager_students():
             # Add single student
             conn = get_db()
             try:
+                current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+                membership_level = request.form["membership_level"]
+                welcome_start_date = current_time if membership_level == "Welcome Package" else None
+                
                 conn.execute(
                     """INSERT INTO students 
-                       (first_name, last_name, parent_first, parent_last, email, phone, membership_level, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (first_name, last_name, parent_first, parent_last, email, phone, membership_level, welcome_package_date_started, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         request.form["first_name"],
                         request.form["last_name"],
@@ -2480,10 +3153,17 @@ def manager_students():
                         request.form.get("parent_last", ""),
                         request.form["email"],
                         request.form.get("phone", ""),
-                        request.form["membership_level"],
-                        toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                        membership_level,
+                        welcome_start_date,
+                        current_time,
                     ),
                 )
+                
+                # Record in package history if Welcome Package
+                if membership_level == "Welcome Package":
+                    student_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    track_package_upgrade(student_id, "None", "Welcome Package", False, conn)
+                
                 conn.commit()
                 conn.close()
                 flash("Student added successfully!", "success")
@@ -2495,37 +3175,39 @@ def manager_students():
             # Handle bulk import from CSV file or pasted data
             csv_data = None
             default_membership = request.form.get("default_membership", "Bronze")
-            
+
             # Check if file was uploaded
-            if 'csv_file' in request.files and request.files['csv_file'].filename:
-                file = request.files['csv_file']
-                csv_data = file.read().decode('utf-8')
+            if "csv_file" in request.files and request.files["csv_file"].filename:
+                file = request.files["csv_file"]
+                csv_data = file.read().decode("utf-8")
             # Otherwise check for pasted data
-            elif request.form.get('paste_data'):
-                csv_data = request.form.get('paste_data')
-            
+            elif request.form.get("paste_data"):
+                csv_data = request.form.get("paste_data")
+
             if not csv_data:
                 flash("No data provided for import", "error")
             else:
                 # Get database connection
                 conn = get_db()
-                
+
                 try:
                     # Parse CSV data
                     csv_reader = csv.reader(io.StringIO(csv_data))
                     imported = 0
                     errors = []
-                    
+
                     for row_num, row in enumerate(csv_reader, 1):
                         # Skip empty rows
                         if not row or all(not cell.strip() for cell in row):
                             continue
-                        
+
                         # Check minimum required columns (at least email is needed)
                         if len(row) < 5:
-                            errors.append(f"Row {row_num}: Insufficient data (need at least: First Name, Last Name, Parent First, Parent Last, Email)")
+                            errors.append(
+                                f"Row {row_num}: Insufficient data (need at least: First Name, Last Name, Parent First, Parent Last, Email)"
+                            )
                             continue
-                        
+
                         try:
                             # Get values with defaults for optional fields
                             first_name = row[0].strip() if len(row) > 0 else ""
@@ -2534,8 +3216,10 @@ def manager_students():
                             parent_last = row[3].strip() if len(row) > 3 else ""
                             email = row[4].strip() if len(row) > 4 else ""
                             phone = row[5].strip() if len(row) > 5 else ""
-                            membership = row[6].strip() if len(row) > 6 else default_membership
-                            
+                            membership = (
+                                row[6].strip() if len(row) > 6 else default_membership
+                            )
+
                             # Validate required fields
                             if not email:
                                 errors.append(f"Row {row_num}: Email is required")
@@ -2546,39 +3230,65 @@ def manager_students():
                             if not last_name:
                                 errors.append(f"Row {row_num}: Last name is required")
                                 continue
-                            
+
                             # Insert into database
+                            current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+                            welcome_start_date = current_time if membership == "Welcome Package" else None
+                            
                             conn.execute(
                                 """INSERT INTO students 
-                                   (first_name, last_name, parent_first, parent_last, email, phone, membership_level, created_at)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                                (first_name, last_name, parent_first, parent_last, email, phone, membership, 
-                                 toronto_now().strftime("%Y-%m-%d %H:%M:%S"))
+                                   (first_name, last_name, parent_first, parent_last, email, phone, membership_level, welcome_package_date_started, created_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (
+                                    first_name,
+                                    last_name,
+                                    parent_first,
+                                    parent_last,
+                                    email,
+                                    phone,
+                                    membership,
+                                    welcome_start_date,
+                                    current_time,
+                                ),
                             )
                             imported += 1
-                            
+
                         except sqlite3.IntegrityError as e:
                             if "UNIQUE constraint failed: students.email" in str(e):
-                                errors.append(f"Row {row_num}: Email '{email}' already exists")
+                                errors.append(
+                                    f"Row {row_num}: Email '{email}' already exists"
+                                )
                             else:
-                                errors.append(f"Row {row_num}: Database error - {str(e)}")
+                                errors.append(
+                                    f"Row {row_num}: Database error - {str(e)}"
+                                )
                         except Exception as e:
                             errors.append(f"Row {row_num}: {str(e)}")
-                    
+
                     # Commit all successful imports
                     conn.commit()
-                    
+
                     # Show results
                     if imported > 0:
-                        flash(f"Successfully imported {imported} student(s)!", "success")
+                        flash(
+                            f"Successfully imported {imported} student(s)!", "success"
+                        )
                     if errors:
-                        error_message = f"{len(errors)} error(s) occurred:<br>" + "<br>".join(errors[:10])
+                        error_message = (
+                            f"{len(errors)} error(s) occurred:<br>"
+                            + "<br>".join(errors[:10])
+                        )
                         if len(errors) > 10:
-                            error_message += f"<br>... and {len(errors) - 10} more errors"
+                            error_message += (
+                                f"<br>... and {len(errors) - 10} more errors"
+                            )
                         flash(error_message, "warning")
-                    
-                    log_action("bulk_import", f"Imported {imported} students, {len(errors)} errors")
-                    
+
+                    log_action(
+                        "bulk_import",
+                        f"Imported {imported} students, {len(errors)} errors",
+                    )
+
                 except Exception as e:
                     flash(f"Import failed: {str(e)}", "error")
                     log_action("bulk_import_error", str(e))
@@ -2631,8 +3341,20 @@ def manager_students():
     students_query = f"""
         SELECT s.*,
                COUNT(c.id) as total_cancellations,
-               SUM(CASE WHEN strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as cancellations_this_month,
-               SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used_this_month,
+               SUM(CASE WHEN strftime('%Y-%m', 
+                   CASE 
+                       WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                       THEN c.manual_submission_date
+                       ELSE c.created_at
+                   END
+               ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as cancellations_this_month,
+               SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', 
+                   CASE 
+                       WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                       THEN c.manual_submission_date
+                       ELSE c.created_at
+                   END
+               ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used_this_month,
                MAX(c.created_at) as last_cancellation_date
         FROM students s
         LEFT JOIN cancellations c ON s.id = c.student_id
@@ -2857,16 +3579,89 @@ def process_cancellation_dates(cancellation):
                     "00:00", "%H:%M"
                 ).time()
 
-    # Process submitted date and time - FIXED: Store the original submission time
-    if cancellation_dict.get("created_at"):
+    # Convert actual_submission_timestamp string to datetime (for manager submissions)
+    if isinstance(cancellation_dict.get("actual_submission_timestamp"), str):
+        try:
+            naive_dt = datetime.strptime(
+                cancellation_dict["actual_submission_timestamp"], "%Y-%m-%d %H:%M:%S"
+            )
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            cancellation_dict["actual_submission_timestamp"] = pacific_tz.localize(naive_dt)
+        except (ValueError, TypeError):
+            cancellation_dict["actual_submission_timestamp"] = cancellation_dict.get("created_at")
+
+    # Convert manual_submission_date string to datetime (for manager submissions)
+    if isinstance(cancellation_dict.get("manual_submission_date"), str):
+        try:
+            # Try format without seconds first (format from manager form: "2026-04-20 14:30")
+            try:
+                naive_dt = datetime.strptime(
+                    cancellation_dict["manual_submission_date"], "%Y-%m-%d %H:%M"
+                )
+            except ValueError:
+                # Fallback to format with seconds if first fails
+                naive_dt = datetime.strptime(
+                    cancellation_dict["manual_submission_date"], "%Y-%m-%d %H:%M:%S"
+                )
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            cancellation_dict["manual_submission_date"] = pacific_tz.localize(naive_dt)
+        except (ValueError, TypeError):
+            cancellation_dict["manual_submission_date"] = None
+
+    # Process submitted date and time - CRITICAL FIX: Always set submitted_date, preferring policy date for managers
+    # Determine which date to use based on submission type
+    
+    # Check if this is a manager submission
+    is_manager_sub = cancellation_dict.get("is_manager_submission") == 1 or cancellation_dict.get("is_manager_submission") == True
+    
+    # Initialize defaults
+    cancellation_dict["submitted_date"] = None
+    cancellation_dict["submitted_time"] = None
+    cancellation_dict["is_policy_submitted_date"] = False
+    reference_datetime = None
+    
+    if is_manager_sub:
+        # This IS a manager submission - try to use policy date FIRST
+        policy_date = cancellation_dict.get("manual_submission_date")
+        
+        if policy_date and isinstance(policy_date, datetime):
+            # Policy date exists and is a proper datetime object - USE IT
+            cancellation_dict["submitted_date"] = policy_date.date()
+            cancellation_dict["submitted_time"] = policy_date.strftime("%I:%M %p PST")
+            reference_datetime = policy_date
+            cancellation_dict["is_policy_submitted_date"] = True
+        elif cancellation_dict.get("created_at"):
+            # Fallback to created_at if policy date is missing or invalid
+            created_at = cancellation_dict["created_at"]
+            cancellation_dict["submitted_date"] = created_at.date()
+            cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p PST")
+            reference_datetime = created_at
+            cancellation_dict["is_policy_submitted_date"] = False
+        else:
+            # Emergency fallback - use current time
+            cancellation_dict["submitted_date"] = toronto_now().date()
+            cancellation_dict["submitted_time"] = toronto_now().strftime("%I:%M %p PST")
+            reference_datetime = toronto_now()
+            cancellation_dict["is_policy_submitted_date"] = False
+            
+    elif cancellation_dict.get("created_at"):
+        # For student submissions, use actual submission timestamp
         created_at = cancellation_dict["created_at"]
-        # Store the actual submission date and time (these should never change)
         cancellation_dict["submitted_date"] = created_at.date()
         cancellation_dict["submitted_time"] = created_at.strftime("%I:%M %p PST")
+        reference_datetime = created_at
+        cancellation_dict["is_policy_submitted_date"] = False
+    else:
+        # Emergency fallback for student
+        cancellation_dict["submitted_date"] = toronto_now().date()
+        cancellation_dict["submitted_time"] = toronto_now().strftime("%I:%M %p PST")
+        reference_datetime = toronto_now()
+        cancellation_dict["is_policy_submitted_date"] = False
 
-        # Calculate time ago - use PST time for comparison
+    # Calculate time ago using the appropriate reference date
+    if reference_datetime:
         now = toronto_now()  # Use PST time, not system time
-        time_diff = now - created_at
+        time_diff = now - reference_datetime
         if time_diff.days > 0:
             cancellation_dict["time_ago"] = (
                 f"{time_diff.days} day{'s' if time_diff.days != 1 else ''} ago"
@@ -2999,14 +3794,40 @@ def process_cancellation():
 
         # Update database based on action
         if action == "approve_policy":
-            # Use the ORIGINAL charge status that was calculated when submitted
-            # Don't recalculate based on current time!
-            should_be_charged = bool(cancellation_dict["charged"])
-            charge_reason = (
-                cancellation_dict.get("manager_notes")
-                or "Processed according to membership policy"
+            # Use the unified will_be_charged function for both student and manager submissions
+            # The key difference: managers specify submission_datetime via manual_submission_date
+            
+            pacific_tz = pytz.timezone("America/Los_Angeles")
+            
+            # Determine which submission datetime to use
+            if cancellation_dict["is_manager_submission"] and cancellation_dict["manual_submission_date"]:
+                # Manager submission: use the policy submission date they specified
+                try:
+                    submission_datetime = datetime.strptime(
+                        cancellation_dict["manual_submission_date"], "%Y-%m-%d %H:%M:%S"
+                    )
+                    if submission_datetime.tzinfo is None:
+                        submission_datetime = pacific_tz.localize(submission_datetime)
+                except:
+                    submission_datetime = None
+            else:
+                # Student submission: use when they actually submitted
+                try:
+                    submission_datetime = datetime.strptime(
+                        cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
+                    )
+                    if submission_datetime.tzinfo is None:
+                        submission_datetime = pacific_tz.localize(submission_datetime)
+                except:
+                    submission_datetime = None
+            
+            # Call the unified will_be_charged function
+            should_be_charged, charge_reason = will_be_charged(
+                student_dict, 
+                lesson_datetime,
+                submission_datetime
             )
-
+            
             print(f"Should be charged: {should_be_charged}")
             print(f"Charge reason: {charge_reason}")
             print(f"Manager email: {session.get('user_email', 'Unknown Manager')}")
@@ -3040,6 +3861,11 @@ def process_cancellation():
             else:
                 # Process as free according to policy
                 print(f"Executing UPDATE for FREE cancellation...")
+                
+                # If Welcome Package, mark the free as used
+                if cancellation_dict["membership_level"] == "Welcome Package":
+                    mark_welcome_free_used(cancellation_dict["student_id"])
+                
                 conn.execute(
                     """UPDATE cancellations 
                        SET status = 'approved', charged = 0, manager_notes = ?, 
@@ -3068,7 +3894,7 @@ def process_cancellation():
             # Force as free (override policy)
             conn.execute(
                 """UPDATE cancellations 
-                   SET status = 'approved', charged = 0, manager_notes = ?, 
+                   SET excluded = 0, status = 'approved', charged = 0, manager_notes = ?, 
                        is_override = 1, approved_by = ?, updated_at = ? 
                    WHERE id = ?""",
                 (
@@ -3096,7 +3922,7 @@ def process_cancellation():
             # Force as charged (override policy)
             conn.execute(
                 """UPDATE cancellations 
-                   SET charged = 1, status = 'charged', manager_notes = ?, 
+                   SET excluded = 0, charged = 1, status = 'charged', manager_notes = ?, 
                        is_override = 1, approved_by = ?, updated_at = ? 
                    WHERE id = ?""",
                 (
@@ -3246,7 +4072,7 @@ def batch_process_cancellations():
         print(f"\n=== BATCH PROCESSING DEBUG ===")
         print(f"Action: {action}")
         print(f"Number of cancellations: {len(cancellation_ids)}")
-        
+
         processed_count = 0
 
         for cancellation_id in cancellation_ids:
@@ -3269,7 +4095,7 @@ def batch_process_cancellations():
 
                 # Convert Row to dict for easier access
                 cancellation_dict = dict(cancellation_data)
-                
+
                 print(f"Processing cancellation {cancellation_id}...")
 
                 # Prepare data
@@ -3291,16 +4117,53 @@ def batch_process_cancellations():
 
                 # Update database based on action
                 if action == "approve_policy":
-                    # CRITICAL FIX: Use the STORED charge status that was calculated at submission time
-                    # DO NOT recalculate based on current time - that would be incorrect!
-                    # The 'charged' field was set correctly when the cancellation was submitted
-                    should_be_charged = bool(cancellation_dict["charged"])
-                    charge_reason = (
-                        cancellation_dict.get("manager_notes")
-                        or "Processed according to membership policy"
-                    )
+                    # CRITICAL FIX: Calculate charge status based on actual policy, not stored value
+                    # Get membership tier info
+                    tier = get_membership_tier(cancellation_dict["membership_level"])
+                    
+                    # Calculate hours notice using manual_submission_date for manager submissions
+                    try:
+                        if cancellation_dict["is_manager_submission"] and cancellation_dict["manual_submission_date"]:
+                            created_datetime = datetime.strptime(
+                                cancellation_dict["manual_submission_date"], "%Y-%m-%d %H:%M:%S"
+                            )
+                        else:
+                            created_datetime = datetime.strptime(
+                                cancellation_dict["created_at"], "%Y-%m-%d %H:%M:%S"
+                            )
+                        
+                        # Make datetimes timezone-aware
+                        pacific_tz = pytz.timezone("America/Los_Angeles")
+                        if lesson_datetime.tzinfo is None:
+                            lesson_datetime = pacific_tz.localize(lesson_datetime)
+                        if created_datetime.tzinfo is None:
+                            created_datetime = pacific_tz.localize(created_datetime)
+                        
+                        hours_notice = (lesson_datetime - created_datetime).total_seconds() / 3600
+                        deadline_passed = hours_notice < tier["deadline_hours"]
+                    except:
+                        deadline_passed = False
+                    
+                    # Determine if should be charged based on policy
+                    should_be_charged = False
+                    charge_reason = "Processed according to policy"
+                    
+                    if deadline_passed:
+                        should_be_charged = True
+                        charge_reason = "Submitted after deadline"
+                    elif cancellation_dict["membership_level"] == "Welcome Package":
+                        welcome_free_used = bool(cancellation_dict.get("welcome_free_used", 0))
+                        if welcome_free_used:
+                            should_be_charged = True
+                            charge_reason = "Welcome Package free cancellation already used"
+                    else:
+                        monthly_count = get_monthly_cancellation_count(cancellation_dict["student_id"])
+                        free_notices = tier["free_notices"] if tier else 1
+                        if monthly_count >= free_notices:
+                            should_be_charged = True
+                            charge_reason = f"Monthly free cancellation limit exceeded ({monthly_count}/{free_notices} used)"
 
-                    print(f"  should_be_charged={should_be_charged}")
+                    print(f"  FIXED should_be_charged={should_be_charged}")
 
                     if should_be_charged:
                         # Process as charged according to policy
@@ -3322,11 +4185,18 @@ def batch_process_cancellations():
                             {
                                 "charged": 1,
                                 "status": "charged",
-                                "approved_by": session.get("user_email", "Unknown Manager"),
+                                "approved_by": session.get(
+                                    "user_email", "Unknown Manager"
+                                ),
                             }
                         )
                     else:
                         # Process as free according to policy
+                        
+                        # If Welcome Package, mark the free as used
+                        if cancellation_dict["membership_level"] == "Welcome Package":
+                            mark_welcome_free_used(cancellation_dict["student_id"])
+                        
                         conn.execute(
                             """UPDATE cancellations 
                                SET status = 'approved', charged = 0, manager_notes = ?, 
@@ -3345,7 +4215,9 @@ def batch_process_cancellations():
                             {
                                 "charged": 0,
                                 "status": "approved",
-                                "approved_by": session.get("user_email", "Unknown Manager"),
+                                "approved_by": session.get(
+                                    "user_email", "Unknown Manager"
+                                ),
                             }
                         )
 
@@ -3435,10 +4307,11 @@ def batch_process_cancellations():
                         email_summary["client_emails_failed"] += 1
 
                 processed_count += 1
-                
+
             except Exception as e:
                 print(f"ERROR processing cancellation {cancellation_id}: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
                 # Continue with next cancellation even if one fails
                 continue
@@ -3469,6 +4342,7 @@ def batch_process_cancellations():
     except Exception as e:
         print(f"CRITICAL ERROR in batch_process: {str(e)}")
         import traceback
+
         traceback.print_exc()
         conn.rollback()  # Roll back on error
         return jsonify({"success": False, "message": str(e)})
@@ -3482,7 +4356,7 @@ def batch_process_cancellations():
 def process_all_pending_cancellations():
     """Process all pending cancellations according to policy"""
     conn = get_db()
-    
+
     try:
         # Get all pending cancellations
         pending_cancellations = conn.execute(
@@ -3504,7 +4378,7 @@ def process_all_pending_cancellations():
             try:
                 # Convert Row to dict for easier access
                 cancellation_dict = dict(cancellation_data)
-                
+
                 # Prepare student data
                 student_dict = {
                     "id": cancellation_dict["student_id"],
@@ -3521,14 +4395,16 @@ def process_all_pending_cancellations():
                 # DO NOT recalculate based on current time - that would be incorrect!
                 # The 'charged' field was set correctly when the cancellation was submitted
                 should_be_charged = bool(cancellation_dict["charged"])
-                
+
                 # Get charge reason from stored data or create default message
                 charge_reason = (
                     cancellation_dict.get("manager_notes")
                     or "Processed according to membership policy"
                 )
 
-                print(f"Processing cancellation {cancellation_dict['id']}: should_be_charged={should_be_charged}")
+                print(
+                    f"Processing cancellation {cancellation_dict['id']}: should_be_charged={should_be_charged}"
+                )
 
                 if should_be_charged:
                     # Process as charged according to policy
@@ -3563,8 +4439,11 @@ def process_all_pending_cancellations():
 
                 processed_count += 1
             except Exception as e:
-                print(f"ERROR processing cancellation {cancellation_data['id']}: {str(e)}")
+                print(
+                    f"ERROR processing cancellation {cancellation_data['id']}: {str(e)}"
+                )
                 import traceback
+
                 traceback.print_exc()
                 # Continue with next cancellation even if one fails
                 continue
@@ -3573,7 +4452,7 @@ def process_all_pending_cancellations():
         print(f"Committing {processed_count} updates...")
         conn.commit()
         print(f"Commit successful!")
-        
+
         log_action(
             "process_all_pending",
             f"Processed {processed_count} pending cancellations according to policy",
@@ -3592,6 +4471,7 @@ def process_all_pending_cancellations():
     except Exception as e:
         print(f"CRITICAL ERROR in process_all_pending: {str(e)}")
         import traceback
+
         traceback.print_exc()
         conn.rollback()  # Roll back on error
         return jsonify({"success": False, "message": str(e)})
@@ -3718,7 +4598,7 @@ def process_all_pending():
                     created_datetime = localize_datetime(cancellation["created_at"])
                     if created_datetime is None:
                         created_datetime = toronto_now()
-                    
+
                     hours_diff = (
                         lesson_datetime - created_datetime
                     ).total_seconds() / 3600
@@ -3726,8 +4606,21 @@ def process_all_pending():
                 except:
                     deadline_passed = False
 
-            # Check monthly usage
-            monthly_count = get_monthly_cancellation_count(cancellation["student_id"])
+            # Check membership level and apply appropriate free cancellation logic
+            student = conn.execute(
+                "SELECT membership_level, welcome_free_used FROM students WHERE id = ?",
+                (cancellation["student_id"],)
+            ).fetchone()
+            
+            # For Welcome Package, check lifetime usage instead of monthly
+            if student and student["membership_level"] == "Welcome Package":
+                # Welcome Package gets only 1 FREE cancellation for lifetime
+                welcome_free_allowed = not bool(student["welcome_free_used"])
+                monthly_count = 0  # Don't limit by month for Welcome
+            else:
+                # For other packages, use monthly count
+                monthly_count = get_monthly_cancellation_count(cancellation["student_id"])
+                welcome_free_allowed = False
 
             # Determine if should be charged
             should_charge = False
@@ -3736,6 +4629,11 @@ def process_all_pending():
             if deadline_passed:
                 should_charge = True
                 charge_reason = "Submitted after deadline"
+            elif student and student["membership_level"] == "Welcome Package":
+                # Welcome Package: charge if not within deadline AND free already used
+                if not welcome_free_allowed:
+                    should_charge = True
+                    charge_reason = "Welcome Package free cancellation already used"
             elif monthly_count >= tier["free_notices"]:
                 should_charge = True
                 charge_reason = "Monthly free cancellation limit exceeded"
@@ -3759,6 +4657,10 @@ def process_all_pending():
                     ),
                 )
             else:
+                # Mark as free - if Welcome Package, mark the free cancellation as used
+                if student and student["membership_level"] == "Welcome Package":
+                    mark_welcome_free_used(cancellation["student_id"])
+                
                 conn.execute(
                     """UPDATE cancellations 
                        SET status = 'approved', charged = 0, manager_notes = ?, 
@@ -3813,12 +4715,36 @@ def get_student_details(student_id):
             """
             SELECT 
                 COUNT(*) as total_cancellations,
-                SUM(CASE WHEN strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
-                SUM(CASE WHEN charged = 0 AND excluded = 0 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
+                SUM(CASE WHEN strftime('%Y-%m', 
+                    CASE 
+                        WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                        THEN manual_submission_date
+                        ELSE created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
+                SUM(CASE WHEN charged = 0 AND excluded = 0 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                        THEN manual_submission_date
+                        ELSE created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
                 SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as total_charged,
                 SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as total_excluded,
-                SUM(CASE WHEN charged = 1 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_this_month,
-                SUM(CASE WHEN excluded = 1 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_this_month
+                SUM(CASE WHEN charged = 1 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                        THEN manual_submission_date
+                        ELSE created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_this_month,
+                SUM(CASE WHEN excluded = 1 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN is_manager_submission = 1 AND manual_submission_date IS NOT NULL
+                        THEN manual_submission_date
+                        ELSE created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_this_month
             FROM cancellations 
             WHERE student_id = ?
         """,
@@ -3827,7 +4753,20 @@ def get_student_details(student_id):
 
         # Get membership tier info
         tier = get_membership_tier(student["membership_level"])
-        monthly_limit = tier["free_notices"] if tier else 1
+        
+        # Calculate limits based on membership type
+        if student["membership_level"] == "Welcome Package":
+            # For Welcome Package, show lifetime usage
+            monthly_limit = 1
+            free_used = 1 if student["welcome_free_used"] else 0
+            remaining = 0 if student["welcome_free_used"] else 1
+            limit_type = "lifetime"
+        else:
+            # For other packages, show monthly usage
+            monthly_limit = tier["free_notices"] if tier else 1
+            free_used = stats["free_used"] or 0
+            remaining = max(0, monthly_limit - free_used)
+            limit_type = "monthly"
 
         # Get recent cancellations
         recent_cancellations = conn.execute(
@@ -3850,9 +4789,10 @@ def get_student_details(student_id):
                 "stats": {
                     "total_cancellations": stats["total_cancellations"] or 0,
                     "this_month": stats["this_month"] or 0,
-                    "free_used": stats["free_used"] or 0,
+                    "free_used": free_used,
                     "monthly_limit": monthly_limit,
-                    "remaining": max(0, monthly_limit - (stats["free_used"] or 0)),
+                    "remaining": remaining,
+                    "limit_type": limit_type,
                     "total_charged": stats["total_charged"] or 0,
                     "total_excluded": stats["total_excluded"] or 0,
                     "charged_this_month": stats["charged_this_month"] or 0,
@@ -3913,16 +4853,28 @@ def get_cancellation_details(cancellation_id):
         created_datetime = localize_datetime(cancellation_dict["created_at"])
         if created_datetime is None:
             created_datetime = toronto_now()
-        
+
         # Ensure lesson_datetime is timezone-aware
         pacific_tz = pytz.timezone("America/Los_Angeles")
         if lesson_datetime.tzinfo is None:
             lesson_datetime = pacific_tz.localize(lesson_datetime)
-        
+
         hours_notice = (lesson_datetime - created_datetime).total_seconds() / 3600
 
-        # Get monthly usage
-        monthly_count = get_monthly_cancellation_count(cancellation_dict["student_id"])
+        # Get monthly usage - handle Welcome Package specially
+        if cancellation_dict["membership_level"] == "Welcome Package":
+            # For Welcome Package, show if the free cancellation has been used
+            student_record = conn.execute(
+                "SELECT welcome_free_used FROM students WHERE id = ?",
+                (cancellation_dict["student_id"],)
+            ).fetchone()
+            welcome_free_used = bool(student_record["welcome_free_used"]) if student_record else False
+            monthly_count = 1 if welcome_free_used else 0
+            remaining_free = 0 if welcome_free_used else 1
+        else:
+            # For other packages, use normal monthly count
+            monthly_count = get_monthly_cancellation_count(cancellation_dict["student_id"])
+            remaining_free = max(0, (tier["free_notices"] if tier else 1) - monthly_count)
 
         # Parse sequential lessons
         sequential_lessons = []
@@ -3952,6 +4904,23 @@ def get_cancellation_details(cancellation_id):
             within_deadline = not bool(cancellation_dict["deadline_passed"])
         elif tier:
             within_deadline = hours_notice >= tier["deadline_hours"]
+        
+        # Determine policy result for Welcome Package
+        if cancellation_dict["membership_level"] == "Welcome Package":
+            policy_limit = 1 if not welcome_free_used else 0
+            policy_result = (
+                "Within policy"
+                if within_deadline and not welcome_free_used
+                else "Policy violation"
+            )
+        else:
+            policy_limit = tier["free_notices"] if tier else 1
+            policy_result = (
+                "Within policy"
+                if within_deadline
+                and monthly_count < (tier["free_notices"] if tier else 1)
+                else "Policy violation"
+            )
 
         return jsonify(
             {
@@ -3970,22 +4939,16 @@ def get_cancellation_details(cancellation_id):
                     "membership_level": cancellation_dict["membership_level"],
                 },
                 "policy": {
-                    "monthly_limit": tier["free_notices"] if tier else 1,
+                    "limit_type": "lifetime" if cancellation_dict["membership_level"] == "Welcome Package" else "monthly",
+                    "monthly_limit": policy_limit,
                     "used_this_month": monthly_count,
-                    "remaining": max(
-                        0, (tier["free_notices"] if tier else 1) - monthly_count
-                    ),
+                    "remaining": remaining_free,
                     "deadline_display": (
                         tier["deadline_display"] if tier else "6pm previous day"
                     ),
                     "hours_notice": round(hours_notice, 1),
                     "within_deadline": within_deadline,
-                    "policy_result": (
-                        "Within policy"
-                        if within_deadline
-                        and monthly_count < (tier["free_notices"] if tier else 1)
-                        else "Policy violation"
-                    ),
+                    "policy_result": policy_result,
                 },
                 "action_history": [dict(a) for a in action_history],
             }
@@ -4081,19 +5044,30 @@ def manager_cancellations():
         search_param = f"%{search}%"
         params.extend([search_param, search_param, search_param])
 
-    # Date range filter
+    # CORRECTED: Use correct date field based on submission type
+    # For manager submissions, use manual_submission_date (policy date)
+    # For student submissions, use created_at (actual submission timestamp)
+    date_field = """
+        CASE 
+            WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+            THEN c.manual_submission_date
+            ELSE c.created_at
+        END
+    """
+
+    # Date range filter - NOW uses correct date field
     if date_range == "today":
-        where_clauses.append("DATE(c.created_at) = DATE('now')")
+        where_clauses.append(f"DATE({date_field}) = DATE('now')")
     elif date_range == "yesterday":
-        where_clauses.append("DATE(c.created_at) = DATE('now', '-1 day')")
+        where_clauses.append(f"DATE({date_field}) = DATE('now', '-1 day')")
     elif date_range == "7days":
-        where_clauses.append("c.created_at >= DATE('now', '-7 days')")
+        where_clauses.append(f"{date_field} >= DATE('now', '-7 days')")
     elif date_range == "month":
-        where_clauses.append("c.created_at >= DATE('now', '-30 days')")
+        where_clauses.append(f"{date_field} >= DATE('now', '-30 days')")
     elif date_range == "all":
         pass  # No date filter
     elif date_range == "custom" and date_from and date_to:
-        where_clauses.append("DATE(c.created_at) BETWEEN ? AND ?")
+        where_clauses.append(f"DATE({date_field}) BETWEEN ? AND ?")
         params.extend([date_from, date_to])
 
     # Membership filter
@@ -4103,9 +5077,9 @@ def manager_cancellations():
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-    # Sort order
+    # Sort order - CORRECTED to use correct date field for manager submissions
     if sort_by == "submit_date":
-        order_by = "c.created_at DESC"
+        order_by = f"{date_field} DESC"
     elif sort_by == "lesson_date":
         order_by = "c.lesson_date DESC"
     elif sort_by == "student":
@@ -4113,7 +5087,7 @@ def manager_cancellations():
     elif sort_by == "status":
         order_by = "c.status, c.charged, c.excluded"
     else:
-        order_by = "c.created_at DESC"
+        order_by = f"{date_field} DESC"
 
     # Get cancellations with student info
     cancellations_raw = conn.execute(
@@ -4163,23 +5137,31 @@ def manager_cancellations():
         else:
             cancellation["status_class"] = "free"
 
-        # Calculate deadline status
+        # Calculate deadline status - CORRECTED: Use policy date for manager submissions
         tier = get_membership_tier(cancellation["membership_level"])
-        if tier and cancellation.get("created_at"):
+        if tier:
             lesson_datetime = datetime.combine(
                 cancellation["lesson_date"], cancellation["lesson_time"]
             )
             pacific_tz = pytz.timezone("America/Los_Angeles")
             lesson_datetime = pacific_tz.localize(lesson_datetime)
 
-            # Parse created_at to timezone-aware datetime
-            created_at = localize_datetime(cancellation["created_at"])
-            if created_at is None:
-                created_at = toronto_now()
+            # CORRECTED: Use the correct submission date based on submission type
+            submission_datetime = None
+            if cancellation.get("is_manager_submission") and cancellation.get("manual_submission_date"):
+                # For manager submissions, use the policy submission date
+                submission_datetime = cancellation.get("manual_submission_date")
+                if isinstance(submission_datetime, str):
+                    submission_datetime = localize_datetime(submission_datetime)
             
-            hours_notice = (
-                lesson_datetime - created_at
-            ).total_seconds() / 3600
+            if submission_datetime is None:
+                # Fallback to actual submission timestamp for student submissions
+                submission_datetime = localize_datetime(cancellation["created_at"])
+            
+            if submission_datetime is None:
+                submission_datetime = toronto_now()
+
+            hours_notice = (lesson_datetime - submission_datetime).total_seconds() / 3600
             cancellation["within_deadline"] = hours_notice >= tier["deadline_hours"]
         else:
             cancellation["within_deadline"] = True
@@ -4207,18 +5189,27 @@ def manager_cancellations():
             try:
                 # Handle both JSON string and already-parsed list
                 if isinstance(sequential_lessons_json, str):
-                    if sequential_lessons_json and sequential_lessons_json.strip() not in ['', '[]', 'null']:
+                    if (
+                        sequential_lessons_json
+                        and sequential_lessons_json.strip() not in ["", "[]", "null"]
+                    ):
                         import json
+
                         sequential_data = json.loads(sequential_lessons_json)
-                        has_sequential_lessons = isinstance(sequential_data, list) and len(sequential_data) > 0
+                        has_sequential_lessons = (
+                            isinstance(sequential_data, list)
+                            and len(sequential_data) > 0
+                        )
                 elif isinstance(sequential_lessons_json, list):
                     has_sequential_lessons = len(sequential_lessons_json) > 0
             except Exception as e:
-                print(f"Error parsing sequential_lessons for cancellation {cancellation.get('id')}: {e}")
+                print(
+                    f"Error parsing sequential_lessons for cancellation {cancellation.get('id')}: {e}"
+                )
                 has_sequential_lessons = False
-        
+
         cancellation["has_notes"] = (
-            has_sequential_lessons 
+            has_sequential_lessons
             or bool(cancellation.get("error_report"))
             or bool(cancellation.get("reschedule_requested"))
             or bool(cancellation.get("cancellation_note"))
@@ -4228,26 +5219,34 @@ def manager_cancellations():
         if has_sequential_lessons:
             try:
                 if isinstance(sequential_lessons_json, str):
-                    sequential_data = json.loads(sequential_lessons_json) if sequential_lessons_json.strip() not in ['', '[]', 'null'] else []
+                    sequential_data = (
+                        json.loads(sequential_lessons_json)
+                        if sequential_lessons_json.strip() not in ["", "[]", "null"]
+                        else []
+                    )
                 else:
                     sequential_data = sequential_lessons_json
-                
-                cancellation["sequential_lessons_formatted"] = format_sequential_lessons(
-                    sequential_data, cancellation.get("lesson_date")
+
+                cancellation["sequential_lessons_formatted"] = (
+                    format_sequential_lessons(
+                        sequential_data, cancellation.get("lesson_date")
+                    )
                 )
             except:
-                cancellation["sequential_lessons_formatted"] = "No additional lessons are cancelled"
+                cancellation["sequential_lessons_formatted"] = (
+                    "No additional lessons are cancelled"
+                )
         else:
-            cancellation["sequential_lessons_formatted"] = "No additional lessons are cancelled"
+            cancellation["sequential_lessons_formatted"] = (
+                "No additional lessons are cancelled"
+            )
 
         # Add urgency flags
         if cancellation.get("created_at"):
             # Parse created_at to timezone-aware datetime
             created_at = localize_datetime(cancellation["created_at"])
             if created_at:
-                hours_since = (
-                    toronto_now() - created_at
-                ).total_seconds() / 3600
+                hours_since = (toronto_now() - created_at).total_seconds() / 3600
                 cancellation["is_recent"] = hours_since < 2
                 cancellation["is_urgent"] = (
                     hours_since > 24 and cancellation.get("status") == "pending"
@@ -4264,10 +5263,10 @@ def manager_cancellations():
     # ============================================================
     # CONTEXT-AWARE STATS CALCULATION
     # ============================================================
-    
+
     # Determine context
     stats_context = "global"  # default
-    
+
     if student_id:
         stats_context = "student"
     elif date_range == "today":
@@ -4278,7 +5277,7 @@ def manager_cancellations():
         stats_context = "date_range"
     elif filter_status in ["free", "charged", "excluded", "override"]:
         stats_context = "status_filter"
-    
+
     # Calculate context-appropriate stats
     if stats_context == "student":
         # Student-specific stats
@@ -4286,50 +5285,68 @@ def manager_cancellations():
             """
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
-                SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
-                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged,
+                SUM(CASE WHEN strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
+                SUM(CASE WHEN c.charged = 0 AND c.excluded = 0 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_used,
+                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged,
                 SUM(CASE WHEN c.excluded = 1 THEN 1 ELSE 0 END) as excluded
             FROM cancellations c
             WHERE c.student_id = ?
             """,
-            (student_id,)
+            (student_id,),
         ).fetchone()
-        
+
         # Get student's membership tier for limit
         student_info = conn.execute(
             "SELECT membership_level FROM students WHERE id = ?", (student_id,)
         ).fetchone()
-        tier = get_membership_tier(student_info["membership_level"]) if student_info else None
+        tier = (
+            get_membership_tier(student_info["membership_level"])
+            if student_info
+            else None
+        )
         monthly_limit = tier["free_notices"] if tier else 1
-        
+
         stats = {
             "box1_value": student_stats["total"] or 0,
             "box1_label": "Total Cancellations",
             "box1_icon": "calendar-check",
             "box1_color": "primary",
-            
             "box2_value": student_stats["this_month"] or 0,
             "box2_label": "This Month",
             "box2_icon": "calendar-day",
             "box2_color": "info",
-            
             "box3_value": f"{student_stats['free_used'] or 0}/{monthly_limit}",
             "box3_label": "Free Used",
             "box3_icon": "gift",
             "box3_color": "success",
-            
             "box4_value": student_stats["charged"] or 0,
             "box4_label": "Charged",
             "box4_icon": "dollar-sign",
             "box4_color": "warning",
-            
-            "box5_value": max(0, monthly_limit - (student_stats['free_used'] or 0)),
+            "box5_value": max(0, monthly_limit - (student_stats["free_used"] or 0)),
             "box5_label": "Remaining Free",
             "box5_icon": "check-circle",
             "box5_color": "success",
         }
-        
+
     elif stats_context == "today":
         # Today's breakdown
         today_stats = conn.execute(
@@ -4345,34 +5362,30 @@ def manager_cancellations():
             WHERE DATE(c.created_at) = DATE('now')
             """
         ).fetchone()
-        
+
         stats = {
             "box1_value": today_stats["total"] or 0,
             "box1_label": "Total Today",
             "box1_icon": "calendar-day",
             "box1_color": "primary",
-            
             "box2_value": today_stats["free"] or 0,
             "box2_label": "Free Today",
             "box2_icon": "gift",
             "box2_color": "success",
-            
             "box3_value": today_stats["charged"] or 0,
             "box3_label": "Charged Today",
             "box3_icon": "dollar-sign",
             "box3_color": "warning",
-            
             "box4_value": today_stats["excluded"] or 0,
             "box4_label": "Excluded Today",
             "box4_icon": "shield-alt",
             "box4_color": "info",
-            
             "box5_value": today_stats["pending"] or 0,
             "box5_label": "Pending Today",
             "box5_icon": "clock",
             "box5_color": "secondary",
         }
-        
+
     elif stats_context == "yesterday":
         # Yesterday's breakdown
         yesterday_stats = conn.execute(
@@ -4388,34 +5401,30 @@ def manager_cancellations():
             WHERE DATE(c.created_at) = DATE('now', '-1 day')
             """
         ).fetchone()
-        
+
         stats = {
             "box1_value": yesterday_stats["total"] or 0,
             "box1_label": "Total Yesterday",
             "box1_icon": "calendar-alt",
             "box1_color": "primary",
-            
             "box2_value": yesterday_stats["free"] or 0,
             "box2_label": "Free Yesterday",
             "box2_icon": "gift",
             "box2_color": "success",
-            
             "box3_value": yesterday_stats["charged"] or 0,
             "box3_label": "Charged Yesterday",
             "box3_icon": "dollar-sign",
             "box3_color": "warning",
-            
             "box4_value": yesterday_stats["excluded"] or 0,
             "box4_label": "Excluded Yesterday",
             "box4_icon": "shield-alt",
             "box4_color": "info",
-            
             "box5_value": yesterday_stats["pending"] or 0,
             "box5_label": "Pending Yesterday",
             "box5_icon": "clock",
             "box5_color": "secondary",
         }
-        
+
     elif stats_context == "date_range":
         # Date range breakdown
         range_stats = conn.execute(
@@ -4430,44 +5439,40 @@ def manager_cancellations():
             JOIN students s ON c.student_id = s.id
             WHERE {where_sql}
             """,
-            params
+            params,
         ).fetchone()
-        
+
         # Determine label based on date range
         range_label_map = {
             "7days": "Last 7 Days",
             "month": "Last 30 Days",
-            "custom": "Date Range"
+            "custom": "Date Range",
         }
         range_label = range_label_map.get(date_range, "Selected Period")
-        
+
         stats = {
             "box1_value": range_stats["total"] or 0,
             "box1_label": f"Total ({range_label})",
             "box1_icon": "calendar-check",
             "box1_color": "primary",
-            
             "box2_value": range_stats["free"] or 0,
             "box2_label": f"Free ({range_label})",
             "box2_icon": "gift",
             "box2_color": "success",
-            
             "box3_value": range_stats["charged"] or 0,
             "box3_label": f"Charged ({range_label})",
             "box3_icon": "dollar-sign",
             "box3_color": "warning",
-            
             "box4_value": range_stats["excluded"] or 0,
             "box4_label": f"Excluded ({range_label})",
             "box4_icon": "shield-alt",
             "box4_color": "info",
-            
             "box5_value": range_stats["pending"] or 0,
             "box5_label": f"Pending ({range_label})",
             "box5_icon": "clock",
             "box5_color": "secondary",
         }
-        
+
     else:
         # Global overview (default for "all" and status filters)
         global_stats = conn.execute(
@@ -4476,41 +5481,55 @@ def manager_cancellations():
                 COUNT(*) as total,
                 SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today,
                 SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday,
-                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_month,
-                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_month,
-                SUM(CASE WHEN c.excluded = 1 AND strftime('%Y-%m', c.created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_month
+                SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_month,
+                SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_month,
+                SUM(CASE WHEN c.excluded = 1 AND strftime('%Y-%m', 
+                    CASE 
+                        WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
+                        THEN c.manual_submission_date
+                        ELSE c.created_at
+                    END
+                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_month
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
             """
         ).fetchone()
-        
+
         stats = {
             "box1_value": global_stats["today"] or 0,
             "box1_label": "Today",
             "box1_icon": "calendar-day",
             "box1_color": "info",
-            
             "box2_value": global_stats["yesterday"] or 0,
             "box2_label": "Yesterday",
             "box2_icon": "calendar-alt",
             "box2_color": "secondary",
-            
             "box3_value": global_stats["free_month"] or 0,
             "box3_label": "Free This Month",
             "box3_icon": "gift",
             "box3_color": "success",
-            
             "box4_value": global_stats["charged_month"] or 0,
             "box4_label": "Charged This Month",
             "box4_icon": "dollar-sign",
             "box4_color": "warning",
-            
             "box5_value": global_stats["excluded_month"] or 0,
             "box5_label": "Excluded This Month",
             "box5_icon": "shield-alt",
             "box5_color": "primary",
         }
-        
+
         # If filtering by status, highlight the relevant box
         if filter_status == "free":
             stats["box3_color"] = "success-highlight"
@@ -4518,7 +5537,7 @@ def manager_cancellations():
             stats["box4_color"] = "warning-highlight"
         elif filter_status == "excluded":
             stats["box5_color"] = "primary-highlight"
-    
+
     # Get filter tab stats (always show these for the tabs)
     tab_stats_raw = conn.execute(
         """
@@ -4538,14 +5557,18 @@ def manager_cancellations():
         JOIN students s ON c.student_id = s.id
         """
     ).fetchone()
-    
-    tab_stats = dict(tab_stats_raw) if tab_stats_raw else {
-        "total_cancellations": 0,
-        "today_cancellations": 0,
-        "yesterday_cancellations": 0,
-        "deadline_passed": 0,
-        "with_notes": 0,
-    }
+
+    tab_stats = (
+        dict(tab_stats_raw)
+        if tab_stats_raw
+        else {
+            "total_cancellations": 0,
+            "today_cancellations": 0,
+            "yesterday_cancellations": 0,
+            "deadline_passed": 0,
+            "with_notes": 0,
+        }
+    )
 
     # Get membership tiers for filter dropdown
     membership_tiers = [
@@ -4605,40 +5628,44 @@ def manager_cancellations():
         filtered_student_name=filtered_student_name,
     )
 
+
 def calculate_max_cancellation_date():
     """
     Calculate the maximum allowed date for cancellation submissions.
-    
-    Policy: Cancellations allowed for current month and next month 
+
+    Policy: Cancellations allowed for current month and next month
     only if next month is 7 or less days ahead.
-    
+
     Returns:
         date: Maximum allowed cancellation date
     """
     pacific_now = toronto_now()
     today = pacific_now.date()
-    
+
     # Get the first day of next month
     if today.month == 12:
         next_month_start = date(today.year + 1, 1, 1)
     else:
         next_month_start = date(today.year, today.month + 1, 1)
-    
+
     # Calculate days until next month
     days_until_next_month = (next_month_start - today).days
-    
+
     # If next month is 7 or fewer days away, allow submissions for next month
     if days_until_next_month <= 7:
         # Allow up to the last day of next month
         if next_month_start.month == 12:
             max_date = date(next_month_start.year + 1, 1, 1) - timedelta(days=1)
         else:
-            max_date = date(next_month_start.year, next_month_start.month + 1, 1) - timedelta(days=1)
+            max_date = date(
+                next_month_start.year, next_month_start.month + 1, 1
+            ) - timedelta(days=1)
     else:
         # Only allow current month - last day of current month
         max_date = next_month_start - timedelta(days=1)
-    
+
     return max_date
+
 
 # Add these helper functions to your app.py file in the UTILITY FUNCTIONS section
 def prepare_cancellations_for_json(cancellations):
@@ -4671,6 +5698,14 @@ def prepare_cancellations_for_json(cancellations):
                 cancellation.get("reschedule_preferences", "") or ""
             ),
             "error_report": str(cancellation.get("error_report", "") or ""),
+            # New submission fields
+            "is_manager_submission": bool(cancellation.get("is_manager_submission", False)),
+            "submitted_by": str(cancellation.get("submitted_by", "") or "student"),
+            "submission_method": str(cancellation.get("submission_method", "") or ""),
+            "actual_submission_timestamp": str(cancellation.get("actual_submission_timestamp", "")),
+            "manual_submission_date": str(cancellation.get("manual_submission_date", "") or ""),
+            "manager_submitted_by": cancellation.get("manager_submitted_by"),
+            "suppress_notifications": bool(cancellation.get("suppress_notifications", False)),
         }
         json_cancellations.append(json_cancellation)
     return json_cancellations
@@ -5216,32 +6251,53 @@ def manager_analytics():
 @admin_required
 def update_student(student_id):
     """Update student information"""
-    data = request.json
+    conn = None
+    try:
+        data = request.json
+        conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+        
+        # Start transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                """
+                UPDATE students 
+                SET first_name = ?, last_name = ?, parent_first = ?, parent_last = ?,
+                    email = ?, phone = ?, membership_level = ?, updated_at = ?
+                WHERE id = ?
+            """,
+                (
+                    data["first_name"],
+                    data["last_name"],
+                    data.get("parent_first", ""),
+                    data.get("parent_last", ""),
+                    data["email"],
+                    data.get("phone", ""),
+                    data["membership_level"],
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    student_id,
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
-    conn = get_db()
-    conn.execute(
-        """
-        UPDATE students 
-        SET first_name = ?, last_name = ?, parent_first = ?, parent_last = ?,
-            email = ?, phone = ?, membership_level = ?
-        WHERE id = ?
-    """,
-        (
-            data["first_name"],
-            data["last_name"],
-            data["parent_first"],
-            data["parent_last"],
-            data["email"],
-            data["phone"],
-            data["membership_level"],
-            student_id,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    log_action("student_updated", f"Student ID: {student_id}")
-    return jsonify({"success": True})
+        log_action("student_updated", f"Student ID: {student_id}")
+        return jsonify({"success": True, "message": "Student updated successfully"})
+    
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error updating student {student_id}: {str(e)}")
+        return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/manager/api/student", methods=["POST"])
@@ -5249,68 +6305,130 @@ def update_student(student_id):
 @admin_required
 def add_student():
     """Add new student"""
-    data = request.json
-
-    conn = get_db()
+    conn = None
     try:
-        cursor = conn.execute(
-            """
-            INSERT INTO students (first_name, last_name, parent_first, parent_last, email, phone, membership_level)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                data["first_name"],
-                data["last_name"],
-                data["parent_first"],
-                data["parent_last"],
-                data["email"],
-                data["phone"],
-                data["membership_level"],
-            ),
-        )
-        student_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        data = request.json
+        conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+        
+        # Start transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+            membership_level = data["membership_level"]
+            welcome_start_date = current_time if membership_level == "Welcome Package" else None
+            
+            cursor = conn.execute(
+                """
+                INSERT INTO students (first_name, last_name, parent_first, parent_last, email, phone, membership_level, welcome_package_date_started)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    data["first_name"],
+                    data["last_name"],
+                    data["parent_first"],
+                    data["parent_last"],
+                    data["email"],
+                    data["phone"],
+                    membership_level,
+                    welcome_start_date,
+                ),
+            )
+            student_id = cursor.lastrowid
+            
+            # Track Welcome Package start
+            if membership_level == "Welcome Package":
+                track_package_upgrade(student_id, "None", "Welcome Package", False, conn)
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
         log_action("student_added", f"New student: {data['email']}")
         return jsonify({"success": True, "student_id": student_id})
+        
     except sqlite3.IntegrityError:
-        conn.close()
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         return jsonify({"success": False, "error": "Email already exists"})
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error adding student: {str(e)}")
+        return jsonify({"success": False, "error": str(e)})
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/manager/api/student/<int:student_id>", methods=["DELETE"])
 @login_required
-@admin_required
+@senior_admin_required
 def delete_student(student_id):
-    """Delete student"""
-    conn = get_db()
+    """Delete student - Senior Manager only"""
+    conn = None
+    try:
+        conn = get_db()
+        
+        # Set timeout for database operations
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+        
+        # Get student info for logging before deletion
+        student = conn.execute(
+            "SELECT email, first_name, last_name FROM students WHERE id = ?", (student_id,)
+        ).fetchone()
 
-    # Get student info for logging
-    student = conn.execute(
-        "SELECT email FROM students WHERE id = ?", (student_id,)
-    ).fetchone()
+        if not student:
+            if conn:
+                conn.close()
+            return jsonify({"success": False, "message": "Student not found"})
 
-    # Delete cancellations first (foreign key constraint)
-    conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
-    conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
-    conn.commit()
-    conn.close()
+        # Delete in transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Delete cancellations first (foreign key constraint)
+            conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
+            # Delete student
+            conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
-    log_action(
-        "student_deleted",
-        f"Student ID: {student_id}, Email: {student['email'] if student else 'Unknown'}",
-    )
-    return jsonify({"success": True})
+        log_action(
+            "student_deleted",
+            f"Student: {student['first_name']} {student['last_name']} ({student['email']})",
+        )
+        return jsonify({"success": True, "message": "Student deleted successfully"})
+
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error deleting student {student_id}: {str(e)}")
+        return jsonify({"success": False, "message": f"Error deleting student: {str(e)}"})
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/manager/api/cancellation/<int:cancellation_id>/exclude", methods=["POST"])
 @login_required
 @admin_required
 def exclude_cancellation(cancellation_id):
-    """Exclude cancellation from policy (illness, etc.) - UPDATED with override tracking"""
+    """Exclude cancellation from policy (illness, etc.) - sends notifications to student and manager"""
     data = request.json
     reason = data.get("reason", "")
+    suppress_notifications = data.get("suppress_notifications", False)
 
     if not reason.strip():
         return jsonify({"success": False, "message": "Exclusion reason is required"})
@@ -5321,21 +6439,30 @@ def exclude_cancellation(cancellation_id):
         conn.execute(
             """UPDATE cancellations 
                SET excluded = 1, exclusion_reason = ?, approved_by = ?, 
-                   is_override = 1, updated_at = ? 
+                   is_override = 1, updated_at = ?, excluded_notification_suppressed = ?
                WHERE id = ?""",
             (
                 reason,
                 session["user_email"],
                 toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                1 if suppress_notifications else 0,
                 cancellation_id,
             ),
         )
         conn.commit()
+        
+        # Send notifications if not suppressed
+        if not suppress_notifications:
+            # Send to student
+            send_exclusion_notification(cancellation_id, "student")
+            # Send to managers from system settings
+            send_exclusion_notification(cancellation_id, "manager")
+        
         conn.close()
 
         log_action(
             "cancellation_excluded",
-            f"Cancellation ID: {cancellation_id}, Reason: {reason}, By: {session['user_email']}",
+            f"Cancellation ID: {cancellation_id}, Reason: {reason}, By: {session['user_email']}, Notifications: {'suppressed' if suppress_notifications else 'sent'}",
         )
         return jsonify({"success": True})
 
@@ -5344,7 +6471,184 @@ def exclude_cancellation(cancellation_id):
         return jsonify({"success": False, "message": str(e)})
 
 
-@app.route("/manager/api/bulk-import", methods=["POST"])
+@app.route("/manager/api/cancellation/<int:cancellation_id>/override-excluded", methods=["POST"])
+@login_required
+@admin_required
+def override_excluded_cancellation(cancellation_id):
+    """Override an excluded cancellation back to free or charged status"""
+    data = request.json
+    new_status = data.get("status", "").lower()  # 'free' or 'charged'
+    reason = data.get("reason", "")
+    suppress_notifications = data.get("suppress_notifications", False)
+
+    if new_status not in ["free", "charged"]:
+        return jsonify({"success": False, "message": "Invalid status. Must be 'free' or 'charged'"})
+
+    if not reason.strip():
+        return jsonify({"success": False, "message": "Override reason is required"})
+
+    conn = get_db()
+
+    try:
+        # Update the cancellation
+        charged = 1 if new_status == "charged" else 0
+        status_value = "charged" if new_status == "charged" else "approved"
+        
+        print(f"\n{'='*60}")
+        print(f"DEBUG: Override Excluded Cancellation")
+        print(f"{'='*60}")
+        print(f"Cancellation ID: {cancellation_id}")
+        print(f"New Status: {new_status}")
+        print(f"Charged: {charged}")
+        print(f"Status Value: {status_value}")
+        print(f"Reason: {reason}")
+        
+        # Before update - check current status
+        before = conn.execute(
+            "SELECT id, excluded, charged, status FROM cancellations WHERE id = ?",
+            (cancellation_id,)
+        ).fetchone()
+        print(f"\nBEFORE UPDATE:")
+        print(f"  excluded: {before['excluded']}")
+        print(f"  charged: {before['charged']}")
+        print(f"  status: {before['status']}")
+        
+        # Perform update
+        result = conn.execute(
+            """UPDATE cancellations 
+               SET excluded = 0, charged = ?, status = ?, manager_notes = ?, 
+                   approved_by = ?, is_override = 1, updated_at = ?,
+                   override_notification_suppressed = ?
+               WHERE id = ?""",
+            (
+                charged,
+                status_value,
+                f"Override from exclusion to {new_status}: {reason}",
+                session["user_email"],
+                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                1 if suppress_notifications else 0,
+                cancellation_id,
+            ),
+        )
+        print(f"\nUPDATE Result: {result.rowcount} rows affected")
+        
+        conn.commit()
+        print(f"COMMIT: Success")
+        
+        # After update - verify changes
+        after = conn.execute(
+            "SELECT id, excluded, charged, status FROM cancellations WHERE id = ?",
+            (cancellation_id,)
+        ).fetchone()
+        print(f"\nAFTER UPDATE:")
+        print(f"  excluded: {after['excluded']}")
+        print(f"  charged: {after['charged']}")
+        print(f"  status: {after['status']}")
+        print(f"{'='*60}\n")
+        
+        # Fetch updated cancellation and student data for email sending
+        if not suppress_notifications:
+            try:
+                updated_cancellation = conn.execute(
+                    "SELECT * FROM cancellations WHERE id = ?", (cancellation_id,)
+                ).fetchone()
+                
+                if updated_cancellation:
+                    student_id = updated_cancellation["student_id"]
+                    student_record = conn.execute(
+                        "SELECT * FROM students WHERE id = ?", (student_id,)
+                    ).fetchone()
+                    
+                    if student_record:
+                        # Use send_override_notification_emails for comprehensive email handling
+                        override_action = "charge" if new_status == "charged" else "approve"
+                        email_results = send_override_notification_emails(
+                            student_record,
+                            updated_cancellation,
+                            override_action,
+                            reason,
+                            session.get("user_email", "Unknown Manager")
+                        )
+            except Exception as email_error:
+                print(f"⚠️ Error sending override notification emails: {str(email_error)}")
+        
+        conn.close()
+
+        log_action(
+            "cancellation_override",
+            f"Cancellation ID: {cancellation_id}, Overridden to {new_status}, Reason: {reason}, By: {session['user_email']}, Notifications: {'suppressed' if suppress_notifications else 'sent'}",
+        )
+        return jsonify({"success": True})
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"success": False, "message": str(e)})
+
+
+def notification_settings():
+    """Manage manager notification suppression preferences"""
+    if request.method == "POST":
+        data = request.json
+        manager_id = session.get("user_id")
+        
+        # Store preferences in system_settings or create a new manager_preferences table
+        # For now, we'll use system_settings with a key pattern
+        try:
+            conn = get_db()
+            
+            suppress_exclusions = data.get("suppress_exclusion_notifications", False)
+            suppress_overrides = data.get("suppress_override_notifications", False)
+            suppress_cancellations = data.get("suppress_cancellation_notifications", False)
+            
+            # Update or insert settings for this manager
+            for key, value in [
+                (f"manager_{manager_id}_suppress_exclusions", suppress_exclusions),
+                (f"manager_{manager_id}_suppress_overrides", suppress_overrides),
+                (f"manager_{manager_id}_suppress_cancellations", suppress_cancellations),
+            ]:
+                conn.execute(
+                    """INSERT OR REPLACE INTO system_settings (key, value, description, category)
+                       VALUES (?, ?, ?, ?)""",
+                    (key, str(int(value)), "Manager notification preference", "notifications")
+                )
+            
+            conn.commit()
+            conn.close()
+            
+            return jsonify({"success": True, "message": "Notification settings updated"})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+    
+    else:  # GET
+        try:
+            conn = get_db()
+            manager_id = session.get("user_id")
+            
+            # Get current settings
+            settings = {}
+            for key_pattern in [
+                f"manager_{manager_id}_suppress_exclusions",
+                f"manager_{manager_id}_suppress_overrides",
+                f"manager_{manager_id}_suppress_cancellations",
+            ]:
+                result = conn.execute(
+                    "SELECT value FROM system_settings WHERE key = ?", (key_pattern,)
+                ).fetchone()
+                
+                setting_name = key_pattern.replace(f"manager_{manager_id}_", "")
+                settings[setting_name] = bool(int(result["value"])) if result else False
+            
+            conn.close()
+            
+            return jsonify({
+                "success": True,
+                "settings": settings
+            })
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
+
+
 @login_required
 @admin_required
 def bulk_import_students():
@@ -5368,10 +6672,14 @@ def bulk_import_students():
             continue
 
         try:
-            conn.execute(
+            current_time = toronto_now().strftime("%Y-%m-%d %H:%M:%S")
+            membership_level = row[6] if len(row) > 6 else "Bronze"
+            welcome_start_date = current_time if membership_level == "Welcome Package" else None
+            
+            cursor = conn.execute(
                 """
-                INSERT INTO students (first_name, last_name, parent_first, parent_last, email, phone, membership_level)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO students (first_name, last_name, parent_first, parent_last, email, phone, membership_level, welcome_package_date_started)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     row[0],
@@ -5380,9 +6688,16 @@ def bulk_import_students():
                     row[3],
                     row[4],
                     row[5],
-                    row[6] if len(row) > 6 else "Bronze",
+                    membership_level,
+                    welcome_start_date,
                 ),
             )
+            
+            # Track Welcome Package start
+            if membership_level == "Welcome Package":
+                student_id = cursor.lastrowid
+                track_package_upgrade(student_id, "None", "Welcome Package", False, conn)
+            
             imported += 1
         except sqlite3.IntegrityError:
             errors.append(f"Row {row_num}: Email {row[4]} already exists")
@@ -5456,46 +6771,64 @@ def export_students():
 @admin_required
 def update_student_post(student_id):
     """Update student information via POST (for the edit form)"""
+    conn = None
     try:
         data = request.json
         conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
 
-        conn.execute(
-            """
-            UPDATE students 
-            SET first_name = ?, last_name = ?, parent_first = ?, parent_last = ?,
-                email = ?, phone = ?, membership_level = ?, updated_at = ?
-            WHERE id = ?
-        """,
-            (
-                data["first_name"],
-                data["last_name"],
-                data.get("parent_first", ""),
-                data.get("parent_last", ""),
-                data["email"],
-                data.get("phone", ""),
-                data["membership_level"],
-                toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
-                student_id,
-            ),
-        )
-        conn.commit()
-        conn.close()
+        # Start transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                """
+                UPDATE students 
+                SET first_name = ?, last_name = ?, parent_first = ?, parent_last = ?,
+                    email = ?, phone = ?, membership_level = ?, updated_at = ?
+                WHERE id = ?
+            """,
+                (
+                    data["first_name"],
+                    data["last_name"],
+                    data.get("parent_first", ""),
+                    data.get("parent_last", ""),
+                    data["email"],
+                    data.get("phone", ""),
+                    data["membership_level"],
+                    toronto_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    student_id,
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
         log_action("student_updated", f"Student ID: {student_id}")
         return jsonify({"success": True, "message": "Student updated successfully"})
 
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error updating student {student_id}: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/manager/api/student/<int:student_id>/delete", methods=["DELETE"])
 @login_required
-@admin_required
+@senior_admin_required
 def delete_student_api(student_id):
-    """Delete student via API"""
+    """Delete student via API - Senior Manager only"""
+    conn = None
     try:
         conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
 
         # Get student info for logging
         student = conn.execute(
@@ -5504,13 +6837,20 @@ def delete_student_api(student_id):
         ).fetchone()
 
         if not student:
+            if conn:
+                conn.close()
             return jsonify({"success": False, "message": "Student not found"})
 
-        # Delete cancellations first (foreign key constraint)
-        conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
-        conn.commit()
-        conn.close()
+        # Delete in transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Delete cancellations first (foreign key constraint)
+            conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
+            conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
         log_action(
             "student_deleted",
@@ -5519,7 +6859,78 @@ def delete_student_api(student_id):
         return jsonify({"success": True, "message": "Student deleted successfully"})
 
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error deleting student {student_id}: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route("/manager/api/students/bulk-delete", methods=["POST"])
+@login_required
+@senior_admin_required
+def bulk_delete_students():
+    """Delete multiple students via API - Senior Manager only"""
+    conn = None
+    try:
+        data = request.json
+        student_ids = data.get("student_ids", [])
+        
+        if not student_ids:
+            return jsonify({"success": False, "message": "No students selected"})
+        
+        conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
+        deleted_count = 0
+        
+        # Start transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for student_id in student_ids:
+                # Get student info for logging
+                student = conn.execute(
+                    "SELECT email, first_name, last_name FROM students WHERE id = ?",
+                    (student_id,),
+                ).fetchone()
+                
+                if student:
+                    # Delete cancellations first (foreign key constraint)
+                    conn.execute("DELETE FROM cancellations WHERE student_id = ?", (student_id,))
+                    conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+                    deleted_count += 1
+                    
+                    log_action(
+                        "student_deleted",
+                        f"Student: {student['first_name']} {student['last_name']} ({student['email']})",
+                    )
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        
+        return jsonify({
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} student(s)",
+            "deleted_count": deleted_count
+        })
+    
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error in bulk delete: {str(e)}")
+        return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/manager/api/student/<int:student_id>/membership", methods=["POST"])
@@ -5527,6 +6938,7 @@ def delete_student_api(student_id):
 @admin_required
 def change_student_membership(student_id):
     """Change student membership level"""
+    conn = None
     try:
         data = request.json
         new_membership = data.get("membership_level")
@@ -5537,6 +6949,7 @@ def change_student_membership(student_id):
             )
 
         conn = get_db()
+        conn.execute("PRAGMA busy_timeout = 5000")  # 5 second timeout
 
         # Get student info for logging
         student = conn.execute(
@@ -5545,15 +6958,48 @@ def change_student_membership(student_id):
         ).fetchone()
 
         if not student:
+            if conn:
+                conn.close()
             return jsonify({"success": False, "message": "Student not found"})
 
-        # Update membership
-        conn.execute(
-            "UPDATE students SET membership_level = ?, updated_at = ? WHERE id = ?",
-            (new_membership, toronto_now().strftime("%Y-%m-%d %H:%M:%S"), student_id),
-        )
-        conn.commit()
-        conn.close()
+        # Start transaction
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Update membership
+            old_package = student['membership_level']
+            conn.execute(
+                "UPDATE students SET membership_level = ?, updated_at = ? WHERE id = ?",
+                (new_membership, toronto_now().strftime("%Y-%m-%d %H:%M:%S"), student_id),
+            )
+            
+            # Track package upgrade/change in history
+            if old_package != new_membership:
+                # Check if Welcome free was used when upgrading FROM Welcome Package
+                welcome_free_used_at_upgrade = False
+                if old_package == "Welcome Package":
+                    student_check = conn.execute(
+                        "SELECT welcome_free_used FROM students WHERE id = ?",
+                        (student_id,)
+                    ).fetchone()
+                    welcome_free_used_at_upgrade = bool(student_check["welcome_free_used"]) if student_check else False
+                    
+                    # Set upgrade date if leaving Welcome Package
+                    conn.execute(
+                        "UPDATE students SET welcome_package_upgrade_date = ? WHERE id = ?",
+                        (toronto_now().strftime("%Y-%m-%d %H:%M:%S"), student_id)
+                    )
+                
+                # Record in package history
+                track_package_upgrade(student_id, old_package, new_membership, welcome_free_used_at_upgrade, conn)
+                
+                # If joining Welcome Package, record the start date
+                if new_membership == "Welcome Package":
+                    record_welcome_package_start(student_id, conn)
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
         log_action(
             "membership_changed",
@@ -5564,7 +7010,16 @@ def change_student_membership(student_id):
         return jsonify({"success": True, "message": "Membership updated successfully"})
 
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        print(f"Error changing student membership: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
 
 
 # ===================================
@@ -6783,6 +8238,269 @@ def import_templates_enhanced():
 
 
 # ===================================
+# EMAIL TRIGGER MANAGEMENT ROUTES - NEW
+# ===================================
+
+@app.route("/senior/api/triggers", methods=["GET"])
+@login_required
+@senior_admin_required
+def get_all_triggers():
+    """Get all email triggers with their current mappings"""
+    try:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        
+        # Get all triggers
+        triggers = conn.execute(
+            """
+            SELECT id, name, description, category, event_condition, active
+            FROM email_triggers
+            ORDER BY category, name
+            """
+        ).fetchall()
+        
+        result = []
+        for trigger in triggers:
+            trigger_dict = dict(trigger)
+            
+            # Get all mappings for this trigger
+            mappings = conn.execute(
+                """
+                SELECT tm.id, tm.template_id, tm.recipient_type, tm.enabled, tm.priority,
+                       et.name as template_name
+                FROM email_trigger_mappings tm
+                JOIN email_templates et ON tm.template_id = et.id
+                WHERE tm.trigger_id = ?
+                ORDER BY tm.priority, et.name
+                """,
+                (trigger['id'],)
+            ).fetchall()
+            
+            trigger_dict['mappings'] = [dict(m) for m in mappings]
+            result.append(trigger_dict)
+        
+        conn.close()
+        return jsonify({"success": True, "triggers": result})
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/api/trigger/<trigger_id>/mappings", methods=["GET"])
+@login_required
+@senior_admin_required
+def get_trigger_mappings(trigger_id):
+    """Get all template mappings for a specific trigger"""
+    try:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        
+        # Get trigger info
+        trigger = conn.execute(
+            "SELECT * FROM email_triggers WHERE id = ?",
+            (trigger_id,)
+        ).fetchone()
+        
+        if not trigger:
+            conn.close()
+            return jsonify({"success": False, "message": "Trigger not found"}), 404
+        
+        # Get all mappings
+        mappings = conn.execute(
+            """
+            SELECT tm.id, tm.template_id, tm.recipient_type, tm.enabled, tm.priority,
+                   et.name as template_name, et.type as template_type
+            FROM email_trigger_mappings tm
+            LEFT JOIN email_templates et ON tm.template_id = et.id
+            WHERE tm.trigger_id = ?
+            ORDER BY tm.priority, et.name
+            """,
+            (trigger_id,)
+        ).fetchall()
+        
+        # Get all available templates
+        templates = conn.execute(
+            "SELECT id, name, type FROM email_templates ORDER BY type, name"
+        ).fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "trigger": dict(trigger),
+            "mappings": [dict(m) for m in mappings],
+            "available_templates": [dict(t) for t in templates]
+        })
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/api/trigger/mapping/add", methods=["POST"])
+@login_required
+@senior_admin_required
+def add_trigger_mapping():
+    """Add a new template mapping to a trigger"""
+    try:
+        data = request.json
+        trigger_id = data.get('trigger_id')
+        template_id = data.get('template_id')
+        recipient_type = data.get('recipient_type')
+        
+        if not all([trigger_id, template_id, recipient_type]):
+            return jsonify({"success": False, "message": "Missing required fields"}), 400
+        
+        conn = get_db()
+        
+        # Check if mapping already exists
+        existing = conn.execute(
+            """
+            SELECT id FROM email_trigger_mappings 
+            WHERE trigger_id = ? AND template_id = ? AND recipient_type = ?
+            """,
+            (trigger_id, template_id, recipient_type)
+        ).fetchone()
+        
+        if existing:
+            conn.close()
+            return jsonify({"success": False, "message": "This mapping already exists"}), 400
+        
+        # Add mapping
+        cursor = conn.execute(
+            """
+            INSERT INTO email_trigger_mappings 
+            (trigger_id, template_id, recipient_type, enabled, priority)
+            VALUES (?, ?, ?, 1, 0)
+            """,
+            (trigger_id, template_id, recipient_type)
+        )
+        
+        conn.commit()
+        mapping_id = cursor.lastrowid
+        conn.close()
+        
+        log_action("trigger_mapping_added", f"Added mapping for trigger {trigger_id}")
+        return jsonify({"success": True, "mapping_id": mapping_id})
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/api/trigger/mapping/<int:mapping_id>/remove", methods=["DELETE"])
+@login_required
+@senior_admin_required
+def remove_trigger_mapping(mapping_id):
+    """Remove a template mapping from a trigger"""
+    try:
+        conn = get_db()
+        
+        # Get mapping info for logging
+        mapping = conn.execute(
+            "SELECT trigger_id FROM email_trigger_mappings WHERE id = ?",
+            (mapping_id,)
+        ).fetchone()
+        
+        if not mapping:
+            conn.close()
+            return jsonify({"success": False, "message": "Mapping not found"}), 404
+        
+        conn.execute("DELETE FROM email_trigger_mappings WHERE id = ?", (mapping_id,))
+        conn.commit()
+        conn.close()
+        
+        log_action("trigger_mapping_removed", f"Removed mapping {mapping_id}")
+        return jsonify({"success": True})
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/api/trigger/mapping/<int:mapping_id>/toggle", methods=["POST"])
+@login_required
+@senior_admin_required
+def toggle_trigger_mapping(mapping_id):
+    """Toggle a trigger mapping enabled/disabled"""
+    try:
+        conn = get_db()
+        
+        # Get current status
+        mapping = conn.execute(
+            "SELECT enabled FROM email_trigger_mappings WHERE id = ?",
+            (mapping_id,)
+        ).fetchone()
+        
+        if not mapping:
+            conn.close()
+            return jsonify({"success": False, "message": "Mapping not found"}), 404
+        
+        new_status = 1 - mapping['enabled']
+        conn.execute(
+            "UPDATE email_trigger_mappings SET enabled = ? WHERE id = ?",
+            (new_status, mapping_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        log_action("trigger_mapping_toggled", f"Toggled mapping {mapping_id} to {new_status}")
+        return jsonify({"success": True, "enabled": new_status})
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/api/trigger/mapping/<int:mapping_id>/priority", methods=["POST"])
+@login_required
+@senior_admin_required
+def update_mapping_priority(mapping_id):
+    """Update priority of a trigger mapping"""
+    try:
+        data = request.json
+        priority = data.get('priority')
+        
+        if priority is None:
+            return jsonify({"success": False, "message": "Priority value required"}), 400
+        
+        conn = get_db()
+        conn.execute(
+            "UPDATE email_trigger_mappings SET priority = ? WHERE id = ?",
+            (priority, mapping_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True})
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/senior/triggers")
+@login_required
+@senior_admin_required
+def manage_triggers():
+    """Email triggers management page"""
+    try:
+        conn = get_db()
+        
+        # Get all triggers
+        triggers = conn.execute(
+            """
+            SELECT id, name, description, category, active
+            FROM email_triggers
+            ORDER BY category, name
+            """
+        ).fetchall()
+        
+        conn.close()
+        
+        return render_template("email_triggers.html", triggers=[dict(t) for t in triggers])
+    
+    except Exception as e:
+        return render_template("email_triggers.html", triggers=[], error=str(e))
+
+
+# ===================================
 # UPDATE EXISTING SENIOR TEMPLATES ROUTE
 # ===================================
 
@@ -6880,7 +8598,7 @@ def save_tiers():
                 "same_day": 0,
             }
             deadline_hours = deadline_mapping.get(tier["deadline"], 18)
-            
+
             conn.execute(
                 """
                 UPDATE membership_tiers 
@@ -7057,38 +8775,66 @@ def preview_cancellation():
     """Preview cancellation status before submission"""
     if session["user_role"] != "client":
         return jsonify({"error": "Unauthorized"}), 403
-
+ 
     data = request.json
     lesson_date = data.get("lesson_date")
     lesson_time = data.get("lesson_time")
-
+ 
     if not lesson_date or not lesson_time:
         return jsonify({"error": "Missing date or time"}), 400
-
+ 
     try:
         # Parse and create timezone-aware datetime
         lesson_datetime = parse_lesson_datetime(lesson_date, lesson_time)
     except ValueError:
         return jsonify({"error": "Invalid date or time format"}), 400
-
+ 
     # Get student info
     conn = get_db()
     student = conn.execute(
         "SELECT * FROM students WHERE id = ?", (session["user_id"],)
     ).fetchone()
     conn.close()
-
+ 
     if not student:
         return jsonify({"error": "Student not found"}), 404
-
+ 
+    # Get current time for comparison
+    current_time = toronto_now()
+    
+    # Check if lesson is in the past
+    same_day_past_lesson = False
+    cannot_cancel = False
+    
+    if lesson_datetime <= current_time:
+        # Lesson has passed - check if it's the same day
+        lesson_date_obj = lesson_datetime.date()
+        current_date_obj = current_time.date()
+        
+        if lesson_date_obj == current_date_obj:
+            # Same-day past lesson - will be charged
+            same_day_past_lesson = True
+            will_charge = True
+            reason = "Same-day cancellation after lesson time (charged)"
+        else:
+            # Past lesson from earlier day - cannot cancel
+            cannot_cancel = True
+            will_charge = True
+            reason = "Cannot cancel past lessons"
+    else:
+        # Normal future lesson - use standard charge logic
+        will_charge, reason = will_be_charged(student, lesson_datetime)
+ 
     # Calculate status
-    will_charge, reason = will_be_charged(student, lesson_datetime)
     status = calculate_cancellation_status(student)
-
-    return jsonify(
-        {"will_be_charged": will_charge, "reason": reason, "current_status": status}
-    )
-
+ 
+    return jsonify({
+        "will_be_charged": will_charge,
+        "reason": reason,
+        "current_status": status,
+        "same_day_past_lesson": same_day_past_lesson,
+        "cannot_cancel": cannot_cancel
+    })
 
 # ===================================
 # TEMPLATE CONTEXT PROCESSORS
@@ -7126,11 +8872,11 @@ def inject_moment():
                     date_obj = localize_datetime(date_obj)
 
             now = toronto_now()
-            
+
             # Make sure both are timezone-aware before comparison
             if date_obj.tzinfo is None:
                 date_obj = localize_datetime(date_obj)
-            
+
             time_diff = now - date_obj
 
             total_seconds = int(time_diff.total_seconds())
@@ -8579,50 +10325,58 @@ def get_notification_settings():
         settings = {}
         settings_rows = conn.execute(
             "SELECT key, value FROM system_settings WHERE key IN (?, ?, ?)",
-            ('client_email_notifications', 'manager_email_notifications', 'manager_emails')
+            (
+                "client_email_notifications",
+                "manager_email_notifications",
+                "manager_emails",
+            ),
         ).fetchall()
-        
+
         for setting in settings_rows:
             settings[setting["key"]] = setting["value"]
-        
+
         conn.close()
-        
+
         # Return settings with defaults
         return {
-            'client_enabled': settings.get('client_email_notifications', 'true') == 'true',
-            'manager_enabled': settings.get('manager_email_notifications', 'true') == 'true',
-            'manager_emails': [
-                email.strip() 
-                for email in settings.get('manager_emails', 'managers@riversideequestrian.ca').split(',')
+            "client_enabled": settings.get("client_email_notifications", "true")
+            == "true",
+            "manager_enabled": settings.get("manager_email_notifications", "true")
+            == "true",
+            "manager_emails": [
+                email.strip()
+                for email in settings.get(
+                    "manager_emails", "managers@riversideequestrian.ca"
+                ).split(",")
                 if email.strip()
-            ]
+            ],
         }
     except Exception as e:
         # Fallback to defaults if database error
         print(f"Warning: Could not load notification settings from database: {e}")
         return {
-            'client_enabled': True,
-            'manager_enabled': True,
-            'manager_emails': ['managers@riversideequestrian.ca']
+            "client_enabled": True,
+            "manager_enabled": True,
+            "manager_emails": ["managers@riversideequestrian.ca"],
         }
 
 
 def should_send_email(recipient_type):
     """
     Check if emails should be sent for the given recipient type
-    
+
     Args:
         recipient_type (str): 'client' or 'manager'
-        
+
     Returns:
         bool: True if emails should be sent, False otherwise
     """
     settings = get_notification_settings()
-    
-    if recipient_type == 'client':
-        return settings['client_enabled']
-    elif recipient_type == 'manager':
-        return settings['manager_enabled']
+
+    if recipient_type == "client":
+        return settings["client_enabled"]
+    elif recipient_type == "manager":
+        return settings["manager_enabled"]
     else:
         return True  # Default to sending for unknown types
 
@@ -8630,12 +10384,12 @@ def should_send_email(recipient_type):
 def get_manager_emails_from_settings():
     """
     Get manager emails from database settings
-    
+
     Returns:
         list: List of manager email addresses
     """
     settings = get_notification_settings()
-    return settings['manager_emails']
+    return settings["manager_emails"]
 
 
 # ===================================
@@ -8686,12 +10440,114 @@ def log_email_attempt(to_email, subject, success, error=None, template_id=None):
             print(f"Failed to log email attempt: {e}")
 
 
+def wrap_email_html(body_content):
+    """
+    Wrap email body in proper HTML structure for Gmail and email client compatibility
+    
+    Args:
+        body_content (str): Raw HTML body content
+    
+    Returns:
+        str: Properly wrapped HTML email with DOCTYPE, styles, and structure
+    """
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <style>
+        body {{
+            font-family: Arial, Helvetica, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }}
+        .email-container {{
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }}
+        .email-content {{
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 5px;
+            line-height: 1.6;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        p {{
+            margin: 12px 0;
+            color: #333;
+        }}
+        strong {{
+            color: #0066cc;
+            font-weight: bold;
+        }}
+        ul {{
+            margin: 10px 0;
+            padding-left: 20px;
+        }}
+        li {{
+            margin: 6px 0;
+        }}
+        hr {{
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 20px 0;
+        }}
+        .footer {{
+            font-size: 12px;
+            color: #666;
+            margin-top: 20px;
+            text-align: center;
+        }}
+        a {{
+            color: #0066cc;
+            text-decoration: none;
+        }}
+        a:hover {{
+            text-decoration: underline;
+        }}
+        .status-box {{
+            padding: 15px;
+            border-left: 4px solid #999;
+            background-color: #f5f5f5;
+            margin: 15px 0;
+        }}
+        .charged {{
+            border-left-color: #cc0000;
+            background-color: #fff5f5;
+        }}
+        .free {{
+            border-left-color: #009900;
+            background-color: #f5fff5;
+        }}
+        .header-charged {{
+            color: #cc0000;
+        }}
+        .header-free {{
+            color: #009900;
+        }}
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="email-content">
+            {body_content}
+        </div>
+    </div>
+</body>
+</html>"""
+    return html
+
+
 def send_email(
     to_email, subject, body, template_type="client", attachments=None, template_id=None
 ):
     """
     Enhanced email sending with Office 365 support and notification settings check
-    
+
     Args:
         to_email (str): Recipient email address
         subject (str): Email subject
@@ -8699,11 +10555,11 @@ def send_email(
         template_type (str): Type of email template ('client' or 'manager')
         attachments (list): List of file paths to attach
         template_id (str): Template ID for logging
-    
+
     Returns:
         dict: Result with success status and message
     """
-    
+
     # NEW: Check if notifications are enabled for this recipient type
     if not should_send_email(template_type):
         message = f"Email notifications disabled for {template_type}s"
@@ -8711,7 +10567,7 @@ def send_email(
             print(f"🔕 {message} - would send to {to_email}: {subject}")
         log_email_attempt(to_email, subject, True, message, template_id)
         return {"success": True, "message": message, "skipped": True}
-    
+
     if not email_config.send_emails:
         if email_config.debug_mode:
             print(f"Email sending disabled - would send to {to_email}: {subject}")
@@ -8730,8 +10586,11 @@ def send_email(
         msg["Subject"] = subject
         msg["Reply-To"] = email_config.from_email
 
+        # Wrap body in proper HTML structure for Gmail compatibility
+        wrapped_body = wrap_email_html(body)
+        
         # Add HTML body
-        html_part = MIMEText(body, "html", "utf-8")
+        html_part = MIMEText(wrapped_body, "html", "utf-8")
         msg.attach(html_part)
 
         # Add plain text version for better compatibility
@@ -8784,12 +10643,176 @@ def send_email(
         return result
 
 
-@send_email_async
-def send_email_async_wrapper(
-    to_email, subject, body, template_type="client", attachments=None, template_id=None
-):
-    """Async wrapper for sending emails"""
-    return send_email(to_email, subject, body, template_type, attachments, template_id)
+def send_email_by_trigger(trigger_id, student, cancellation, recipient_type=None, extra_vars=None):
+    """
+    New function: Send emails based on trigger mappings
+    This replaces hardcoded email sending with trigger-based system
+    
+    Args:
+        trigger_id (str): The trigger ID (e.g., 'free_cancellation_triggered')
+        student (dict): Student data
+        cancellation (dict): Cancellation data
+        recipient_type (str): Optional filter for recipient type ('student', 'manager', 'client')
+        extra_vars (dict): Extra variables to include in template
+    
+    Returns:
+        dict: Results with success status and details
+    """
+    
+    # Convert sqlite3.Row to dict if needed
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+    
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+    
+    # Get templates for this trigger
+    templates = get_templates_by_trigger(trigger_id, recipient_type)
+    
+    if not templates:
+        if email_config.debug_mode:
+            print(f"No templates found for trigger: {trigger_id}")
+        return {"success": False, "message": f"No templates configured for trigger: {trigger_id}"}
+    
+    results = []
+    
+    # Generate variables once
+    variables = get_template_variables(student_dict, cancellation_dict, extra_vars)
+    
+    # Send email for each mapped template
+    for template in templates:
+        try:
+            recipient_type_email = template.get('recipient_type', 'client')
+            
+            # Determine recipient email
+            if recipient_type_email == 'manager':
+                manager_emails = get_manager_emails_from_settings()
+                recipient_emails = manager_emails
+            elif recipient_type_email == 'student':
+                recipient_emails = [student_dict.get('email')]
+            else:  # client
+                recipient_emails = [student_dict.get('email')]
+            
+            # Send to each recipient
+            for to_email in recipient_emails:
+                if not to_email:
+                    continue
+                
+                # Process template
+                body, subject = process_template_variables(
+                    template["body"], template["subject"], variables
+                )
+                
+                # Send email
+                result = send_email(
+                    to_email,
+                    subject,
+                    body,
+                    recipient_type_email,
+                    template_id=template["id"]
+                )
+                
+                results.append({
+                    "template_id": template["id"],
+                    "recipient": to_email,
+                    "recipient_type": recipient_type_email,
+                    "result": result
+                })
+        
+        except Exception as e:
+            if email_config.debug_mode:
+                print(f"Error sending template {template.get('id')}: {str(e)}")
+            results.append({
+                "template_id": template.get("id"),
+                "error": str(e)
+            })
+    
+    # Return aggregate results
+    success_count = sum(1 for r in results if r.get('result', {}).get('success'))
+    return {
+        "success": success_count > 0,
+        "message": f"Sent {success_count}/{len(results)} emails for trigger {trigger_id}",
+        "details": results
+    }
+
+
+def send_cancellation_emails_by_trigger(student, cancellation):
+    """
+    Enhanced version: Send all appropriate cancellation emails using trigger system
+    Replaces the old hardcoded logic
+    
+    Args:
+        student (dict): Student data
+        cancellation (dict): Cancellation data
+    
+    Returns:
+        dict: Results with success status
+    """
+    
+    # Convert to dicts
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+    
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+    
+    # Determine which trigger to use based on charge status
+    if cancellation_dict.get('charged'):
+        trigger_id = 'charged_cancellation_triggered'
+    else:
+        trigger_id = 'free_cancellation_triggered'
+    
+    if email_config.debug_mode:
+        print(f"📧 Using trigger: {trigger_id} for student {student_dict.get('email')}")
+    
+    # Send using trigger-based system
+    return send_email_by_trigger(trigger_id, student_dict, cancellation_dict)
+
+
+def send_manager_notification_by_trigger(student, cancellation):
+    """
+    Enhanced version: Send manager notification using trigger system
+    
+    Args:
+        student (dict): Student data
+        cancellation (dict): Cancellation data
+    
+    Returns:
+        dict: Results with success status
+    """
+    
+    # Convert to dicts
+    if hasattr(student, "keys"):
+        student_dict = dict(student)
+    else:
+        student_dict = student
+    
+    if hasattr(cancellation, "keys"):
+        cancellation_dict = dict(cancellation)
+    else:
+        cancellation_dict = cancellation
+    
+    extra_vars = {
+        "action_required": "Review cancellation and approve/charge as needed",
+        "dashboard_url": f"{request.url_root if 'request' in globals() else 'http://localhost:5000/'}manager/cancellations?student={student_dict['id']}",
+    }
+    
+    if email_config.debug_mode:
+        print(f"📧 Sending manager notification for student {student_dict.get('email')}")
+    
+    # Send using trigger-based system
+    return send_email_by_trigger('manager_new_cancellation', student_dict, cancellation_dict, 'manager', extra_vars)
+
+
+
 
 
 # ===================================
@@ -8810,6 +10833,37 @@ def get_email_template(template_id):
         if email_config.debug_mode:
             print(f"Error getting template {template_id}: {e}")
         return None
+
+
+def get_templates_by_trigger(trigger_id, recipient_type=None):
+    """Get all templates mapped to a specific trigger, optionally filtered by recipient type"""
+    try:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        
+        query = """
+            SELECT et.id, et.name, et.subject, et.body, et.type, et.active,
+                   tm.recipient_type, tm.enabled, tm.priority
+            FROM email_trigger_mappings tm
+            JOIN email_templates et ON tm.template_id = et.id
+            WHERE tm.trigger_id = ? AND tm.enabled = 1 AND et.active = 1
+        """
+        params = [trigger_id]
+        
+        if recipient_type:
+            query += " AND tm.recipient_type = ?"
+            params.append(recipient_type)
+        
+        query += " ORDER BY tm.priority, et.name"
+        
+        templates = conn.execute(query, params).fetchall()
+        conn.close()
+        
+        return [dict(t) for t in templates]
+    except Exception as e:
+        if email_config.debug_mode:
+            print(f"Error getting templates for trigger {trigger_id}: {e}")
+        return []
 
 
 def process_template_variables(template_body, template_subject, variables):
@@ -8840,11 +10894,21 @@ def process_template_variables(template_body, template_subject, variables):
 # ===================================
 
 
+def safe_value(val, default="NONE"):
+    """Convert None or empty string to NONE, otherwise return value"""
+    if val is None or val == "" or val == "None":
+        return default
+    if isinstance(val, str):
+        stripped = val.strip()
+        return default if stripped == "" else stripped
+    return str(val)
+
+
 def get_template_variables(student=None, cancellation=None, extra_vars=None):
     """Generate template variables for your cancellation system - FIXED for sqlite3.Row"""
     # Use Pacific timezone for all timestamps
     pacific_now = toronto_now()
-    
+
     variables = {
         "current_date": pacific_now.strftime("%B %d, %Y"),
         "current_time": pacific_now.strftime("%I:%M %p"),
@@ -8864,26 +10928,26 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
 
         variables.update(
             {
-                "client_name": f"{student_dict['first_name']} {student_dict['last_name']}",
-                "client_first_name": student_dict["first_name"],
-                "client_last_name": student_dict["last_name"],
-                "client_email": student_dict["email"],
-                "client_phone": student_dict.get("phone", ""),
-                "membership_tier": student_dict["membership_level"],
-                "parent_name": f"{student_dict.get('parent_first', '')} {student_dict.get('parent_last', '')}".strip(),
-                "parent_first_name": student_dict.get("parent_first", ""),
-                "parent_last_name": student_dict.get("parent_last", ""),
+                "client_name": safe_value(f"{student_dict.get('first_name', '')} {student_dict.get('last_name', '')}".strip()),
+                "client_first_name": safe_value(student_dict.get("first_name")),
+                "client_last_name": safe_value(student_dict.get("last_name")),
+                "client_email": safe_value(student_dict.get("email")),
+                "client_phone": safe_value(student_dict.get("phone")),
+                "membership_tier": safe_value(student_dict.get("membership_level")),
+                "parent_name": safe_value(f"{student_dict.get('parent_first', '')} {student_dict.get('parent_last', '')}".strip()),
+                "parent_first_name": safe_value(student_dict.get("parent_first")),
+                "parent_last_name": safe_value(student_dict.get("parent_last")),
             }
         )
 
         # Get membership tier info
-        tier = get_membership_tier(student_dict["membership_level"])
+        tier = get_membership_tier(student_dict.get("membership_level"))
         if tier:
             tier_dict = dict(tier) if hasattr(tier, "keys") else tier
             variables.update(
                 {
-                    "allowed_cancellations": str(tier_dict["free_notices"]),
-                    "cancellation_deadline": tier_dict["deadline_display"],
+                    "allowed_cancellations": safe_value(tier_dict.get("free_notices")),
+                    "cancellation_deadline": safe_value(tier_dict.get("deadline_display")),
                 }
             )
 
@@ -8891,8 +10955,8 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
         status = calculate_cancellation_status(student_dict)
         variables.update(
             {
-                "used_cancellations": str(status["used"]),
-                "remaining_cancellations": str(status["remaining"]),
+                "used_cancellations": safe_value(status.get("used")),
+                "remaining_cancellations": safe_value(status.get("remaining")),
             }
         )
 
@@ -8936,7 +11000,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
         else:
             # Fallback to current Pacific time if no created_at
             submission_time_str = toronto_now().strftime("%B %d, %Y at %I:%M %p")
-        
+
         variables.update(
             {
                 "lesson_date": lesson_date.strftime("%B %d, %Y"),
@@ -8947,9 +11011,9 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                     else "Charged cancellation"
                 ),
                 "will_be_charged": "Yes" if cancellation_dict.get("charged") else "No",
-                "charge_reason": get_charge_reason(cancellation_dict),
+                "charge_reason": safe_value(get_charge_reason(cancellation_dict)),
                 "submission_time": submission_time_str,
-                "cancellation_id": str(cancellation_dict.get("id", "")),
+                "cancellation_id": safe_value(cancellation_dict.get("id")),
             }
         )
 
@@ -8969,16 +11033,19 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 "reschedule_requested": (
                     "Yes" if cancellation_dict.get("reschedule_requested") else "No"
                 ),
-                "reschedule_preferences": cancellation_dict.get(
-                    "reschedule_preferences", "None provided"
-                ),
-                "error_report": cancellation_dict.get("error_report", "None reported"),
+                "reschedule_preferences": safe_value(cancellation_dict.get("reschedule_preferences"), "None provided"),
+                "error_report": safe_value(cancellation_dict.get("error_report"), "None reported"),
+                "cancellation_note": safe_value(cancellation_dict.get("cancellation_note")),
+                "manager_notes": safe_value(cancellation_dict.get("manager_notes")),
             }
         )
 
-    # Add extra variables
+    # Add extra variables and sanitize them
     if extra_vars:
-        variables.update(extra_vars)
+        sanitized_extra = {}
+        for key, value in extra_vars.items():
+            sanitized_extra[key] = safe_value(value) if not isinstance(value, (int, float, bool)) else value
+        variables.update(sanitized_extra)
 
     return variables
 
@@ -9029,14 +11096,16 @@ def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
                 # Add one day to get the return date
                 return_date_obj = last_cancelled_date + timedelta(days=1)
                 return_date = return_date_obj.strftime("%B %d, %Y")
-                
+
                 # If cancelled_lesson_date is provided, show the full message
                 if cancelled_lesson_date:
                     if isinstance(cancelled_lesson_date, str):
-                        cancelled_date = datetime.strptime(cancelled_lesson_date, "%Y-%m-%d").strftime("%B %d, %Y")
+                        cancelled_date = datetime.strptime(
+                            cancelled_lesson_date, "%Y-%m-%d"
+                        ).strftime("%B %d, %Y")
                     else:
                         cancelled_date = cancelled_lesson_date.strftime("%B %d, %Y")
-                    
+
                     return f"All lessons are cancelled from {cancelled_date} until the return date of {return_date}"
                 else:
                     # Fallback if cancelled date is not provided
@@ -9050,6 +11119,7 @@ def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
         if email_config.debug_mode:
             print(f"Error formatting sequential lessons: {e}")
         return "No additional lessons"
+
 
 def safe_dict_convert(row_or_dict):
     """Safely convert sqlite3.Row to dict, or return dict as-is"""
@@ -9481,13 +11551,10 @@ def send_manager_notification(student, cancellation):
 
     # Get manager emails from settings instead of email_config
     manager_emails = get_manager_emails_from_settings()
-    
+
     if not manager_emails:
-        return {
-            "success": False,
-            "message": "No manager emails configured in settings"
-        }
-    
+        return {"success": False, "message": "No manager emails configured in settings"}
+
     # Send to all manager emails
     results = []
     for manager_email in manager_emails:
@@ -9499,14 +11566,14 @@ def send_manager_notification(student, cancellation):
     # Return success if any email was sent successfully (excluding skipped)
     success_count = sum(1 for r in results if r.get("success") and not r.get("skipped"))
     skipped_count = sum(1 for r in results if r.get("skipped"))
-    
+
     if skipped_count > 0:
         return {
             "success": True,
             "message": f"Manager notifications disabled (would have sent to {len(manager_emails)} managers)",
-            "skipped": True
+            "skipped": True,
         }
-    
+
     return {
         "success": success_count > 0,
         "message": f"Sent to {success_count}/{len(results)} managers",
@@ -9516,7 +11583,7 @@ def send_manager_notification(student, cancellation):
 def send_override_notification_emails(
     student, cancellation, override_action, override_reason, manager_email
 ):
-    """Send emails after manager override - both to client and managers"""
+    """Send emails after manager override - both to client and managers - USES TRIGGER SYSTEM"""
 
     # Convert data to dicts for consistency
     if hasattr(student, "keys"):
@@ -9542,15 +11609,35 @@ def send_override_notification_emails(
         "override_date": toronto_now().strftime("%B %d, %Y at %I:%M %p"),
     }
 
-    # STEP 1: Send updated confirmation to CLIENT
+    # STEP 1: Send updated confirmation to CLIENT using TRIGGER SYSTEM
     try:
         print(f"📧 Sending override notification to client: {student_dict['email']}")
         print(
             f"   Action: {override_action}, Charged: {cancellation_dict.get('charged', False)}"
         )
 
-        # Use the standard cancellation confirmation logic (it will pick the right template)
-        client_result = send_cancellation_confirmation(student_dict, cancellation_dict)
+        # DETERMINE THE CORRECT TRIGGER BASED ON OVERRIDE ACTION
+        if override_action == "force_free":
+            trigger_id = "override_to_free_student"
+        elif override_action == "force_charge" or override_action == "charge":
+            trigger_id = "override_to_charged_student"
+        elif override_action == "approve":
+            # For approve action, use the same as force_free (no charge change, just approved)
+            trigger_id = "override_to_free_student"
+        else:
+            # Default to free for unknown actions
+            trigger_id = "override_to_free_student"
+
+        print(f"   Using trigger: {trigger_id}")
+
+        # USE TRIGGER SYSTEM to send email
+        client_result = send_email_by_trigger(
+            trigger_id,
+            student_dict,
+            cancellation_dict,
+            recipient_type="student",
+            extra_vars=override_info
+        )
         results["client_email"] = client_result
 
         if client_result.get("success"):
@@ -9566,88 +11653,41 @@ def send_override_notification_emails(
 
     # STEP 2: Send notification to MANAGERS about the override
     try:
-        # Create override notification for managers
-        manager_template = get_email_template("manager_override_notification")
-
-        # If no specific override template, use regular manager notification
-        if not manager_template:
-            manager_template = get_email_template("manager_notification")
-
-        if manager_template:
-            # Generate template variables with override info
-            variables = get_template_variables(
-                student_dict, cancellation_dict, override_info
-            )
-
-            # Add manager-specific variables
-            variables.update(
-                {
-                    "manager_action": f"Override: {override_action}",
-                    "action_taken": f"{manager_email} {override_action}d this cancellation",
-                    "override_summary": f"This cancellation was {override_action}d by {manager_email}",
-                    "new_status": (
-                        "Free cancellation"
-                        if not cancellation_dict.get("charged")
-                        else "Charged cancellation"
-                    ),
-                    "dashboard_url": f"{request.url_root if 'request' in globals() else 'http://localhost:5000/'}manager/cancellations?student={student_dict['id']}",
-                }
-            )
-
-            # Process template
-            body, subject = process_template_variables(
-                manager_template["body"],
-                f"🔄 Override: {override_action.title()} - {variables['client_name']} - {variables['lesson_date']}",
-                variables,
-            )
-
-            # Send to all manager emails EXCEPT the one who made the override
-            all_manager_emails = get_manager_emails_from_settings()
-            manager_emails = [
-                email for email in all_manager_emails if email != manager_email
-            ]
-
-            if manager_emails:
-                manager_results = []
-                for mgr_email in manager_emails:
-                    result = send_email(
-                        mgr_email,
-                        subject,
-                        body,
-                        "manager",
-                        template_id="manager_override_notification",
-                    )
-                    manager_results.append(result)
-
-                success_count = sum(1 for r in manager_results if r.get("success") and not r.get("skipped"))
-                skipped_count = sum(1 for r in manager_results if r.get("skipped"))
-                
-                if skipped_count > 0:
-                    results["manager_notification"] = {
-                        "success": True,
-                        "message": f"Manager notifications disabled (would have sent to {len(manager_emails)} managers)",
-                        "skipped": True
-                    }
-                else:
-                    results["manager_notification"] = {
-                        "success": success_count > 0,
-                        "message": f"Sent override notification to {success_count}/{len(manager_results)} managers",
-                    }
-
-                print(
-                    f"📧 Manager override notifications sent to {success_count}/{len(manager_results)} managers"
-                )
-            else:
-                results["manager_notification"] = {
-                    "success": True,
-                    "message": "No other managers to notify (override made by only manager)",
-                }
+        # Create override notification for managers using TRIGGER SYSTEM
+        
+        # Determine which manager trigger to use
+        if override_action == "force_free":
+            manager_trigger_id = "override_to_free_manager"
+        elif override_action == "force_charge" or override_action == "charge":
+            manager_trigger_id = "override_to_charged_manager"
+        elif override_action == "approve":
+            manager_trigger_id = "override_to_free_manager"
         else:
-            print(f"⚠️  No manager template found for override notifications")
+            manager_trigger_id = "override_to_free_manager"
+
+        print(f"   Manager trigger: {manager_trigger_id}")
+
+        # USE TRIGGER SYSTEM to send to managers
+        manager_result = send_email_by_trigger(
+            manager_trigger_id,
+            student_dict,
+            cancellation_dict,
+            recipient_type="manager",
+            extra_vars=override_info
+        )
+
+        if manager_result.get("success"):
+            results["manager_notification"] = {
+                "success": True,
+                "message": manager_result.get("message", "Manager notifications sent")
+            }
+            print(f"📧 Manager override notifications sent")
+        else:
             results["manager_notification"] = {
                 "success": False,
-                "message": "Manager notification template not found",
+                "message": manager_result.get("message", "Failed to send manager notifications")
             }
+            print(f"⚠️ Manager notifications failed: {manager_result.get('message')}")
 
     except Exception as e:
         print(f"❌ Manager override notification error: {str(e)}")
@@ -9745,6 +11785,536 @@ def format_time_filter(time_value):
 # ===================================
 # APPLICATION INITIALIZATION
 # ===================================
+
+
+# ============================================
+# MANAGER SUBMISSION FEATURE - NEW ROUTES
+# ============================================
+
+
+@app.route("/manager/api/policy-impact", methods=["GET"])
+@login_required
+@admin_required
+def policy_impact():
+    """Get policy impact for a given student and submission date"""
+    try:
+        student_id = request.args.get("student_id")
+        submission_date = request.args.get("submission_date")
+        
+        if not student_id or not submission_date:
+            return jsonify({"error": "Missing required parameters"}), 400
+        
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        
+        # Get student
+        student = conn.execute(
+            "SELECT membership_level FROM students WHERE id = ?",
+            (student_id,)
+        ).fetchone()
+        
+        if not student:
+            conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        
+        # Get current month from submission date
+        from datetime import datetime
+        try:
+            submission_dt = datetime.strptime(submission_date, "%Y-%m-%d")
+        except:
+            conn.close()
+            return jsonify({"error": "Invalid date format"}), 400
+        
+        month_display = submission_dt.strftime("%B %Y")
+        
+        # Count free cancellations for this month
+        month_str = submission_dt.strftime("%Y-%m")
+        count = conn.execute(
+            """
+            SELECT COUNT(*) as count FROM cancellations
+            WHERE student_id = ?
+            AND strftime('%Y-%m', created_at) = ?
+            AND charged = 0
+            AND excluded = 0
+        """,
+            (student_id, month_str),
+        ).fetchone()["count"]
+        
+        # Get tier info
+        tier = conn.execute(
+            "SELECT free_notices FROM membership_tiers WHERE level = ?",
+            (student["membership_level"],)
+        ).fetchone()
+        
+        free_notices = tier["free_notices"] if tier else 1
+        
+        if count >= free_notices:
+            impact_text = f"This cancellation will be CHARGED (monthly limit reached: {count}/{free_notices})"
+        else:
+            impact_text = f"This cancellation will be FREE ({count + 1}/{free_notices} used)"
+        
+        conn.close()
+        
+        return jsonify({
+            "month_display": month_display,
+            "impact_text": impact_text,
+            "success": True
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/manager/submit-cancellation", methods=["GET", "POST"])
+@login_required
+@admin_required
+def manager_submit_cancellation():
+    """
+    Allow managers to submit cancellations for any student.
+    GET: Display form
+    POST: Process submission
+    """
+    if request.method == "GET":
+        try:
+            conn = get_db()
+            students = conn.execute(
+                "SELECT id, first_name, last_name, email, membership_level FROM students ORDER BY first_name, last_name"
+            ).fetchall()
+            conn.close()
+
+            return render_template(
+                "manager_submit_cancellation.html",
+                students=students,
+                manager_name=session.get("user_name", "Manager"),
+            )
+        except Exception as e:
+            flash(f"Error loading form: {str(e)}", "error")
+            return redirect(url_for("manager_dashboard"))
+
+    elif request.method == "POST":
+        try:
+            student_id = request.form.get("student_id")
+            lesson_date = request.form.get("lesson_date")
+            lesson_time = request.form.get("lesson_time")
+            submission_date_time = request.form.get(
+                "submission_date_time"
+            )  # Format: "2026-04-02 14:30"
+            suppress_notifications = request.form.get("suppress_notifications") == "1"
+            manager_notes = request.form.get("manager_notes", "")
+            
+            # NEW: Handle sequential lessons and reschedule fields
+            sequential_dates = request.form.getlist("sequential_dates[]")
+            sequential_times = request.form.getlist("sequential_times[]")
+            wants_reschedule = request.form.get("wants_reschedule") == "1"
+            reschedule_preferences = request.form.get("reschedule_preferences", "")
+
+            # DEBUG: Print what we received
+            print(f"DEBUG: Received form data:")
+            print(f"  student_id: {student_id}")
+            print(f"  lesson_date: {lesson_date}")
+            print(f"  lesson_time: {lesson_time}")
+            print(f"  submission_date_time: {submission_date_time}")
+            print(f"  manager_notes: {manager_notes}")
+            print(f"  suppress_notifications: {suppress_notifications}")
+            print(f"  sequential_dates: {sequential_dates}")
+            print(f"  sequential_times: {sequential_times}")
+            print(f"  wants_reschedule: {wants_reschedule}")
+            print(f"  reschedule_preferences: {reschedule_preferences}")
+
+            # Validate inputs
+            if not all([student_id, lesson_date, lesson_time, submission_date_time]):
+                missing = []
+                if not student_id:
+                    missing.append("student_id")
+                if not lesson_date:
+                    missing.append("lesson_date")
+                if not lesson_time:
+                    missing.append("lesson_time")
+                if not submission_date_time:
+                    missing.append("submission_date_time")
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": f"Missing required fields: {', '.join(missing)}",
+                        }
+                    ),
+                    400,
+                )
+
+            conn = get_db()
+            conn.row_factory = sqlite3.Row  # Enable dictionary-like access
+
+            # Verify student exists
+            student = conn.execute(
+                "SELECT * FROM students WHERE id = ?", (student_id,)
+            ).fetchone()
+            if not student:
+                conn.close()
+                return jsonify({"success": False, "message": "Student not found"}), 404
+
+            # CRITICAL FIX: Convert sqlite3.Row to dict to use .get() method
+            student = dict(student)
+
+            print(
+                f"DEBUG: Found student: {student['first_name']} {student['last_name']}"
+            )
+
+            # ⭐ CRITICAL: Calculate will_be_charged immediately (just like student submission does!)
+            try:
+                # Parse lesson datetime
+                lesson_datetime = parse_lesson_datetime(lesson_date, lesson_time)
+                
+                # Parse submission datetime (manager's specified date)
+                submission_datetime = datetime.strptime(submission_date_time, "%Y-%m-%d %H:%M")
+                pacific_tz = pytz.timezone("America/Los_Angeles")
+                if submission_datetime.tzinfo is None:
+                    submission_datetime = pacific_tz.localize(submission_datetime)
+                
+                # ⭐ THIS IS THE FIX: Call will_be_charged with manager's submission date
+                will_charge, charge_reason = will_be_charged(dict(student), lesson_datetime, submission_datetime)
+                
+                # Calculate deadline_passed for this tier
+                tier = get_membership_tier(student["membership_level"])
+                deadline_hours = tier["deadline_hours"] if tier else 18
+                hours_until_lesson = (lesson_datetime - submission_datetime).total_seconds() / 3600
+                deadline_passed = hours_until_lesson < deadline_hours
+                
+                print(f"DEBUG: will_be_charged={will_charge}, charge_reason={charge_reason}")
+                print(f"DEBUG: deadline_passed={deadline_passed}")
+                
+            except Exception as calc_error:
+                print(f"DEBUG: Error calculating charge status: {str(calc_error)}")
+                will_charge = False  # Default to free if calculation fails
+                deadline_passed = False
+                charge_reason = "Calculation failed, defaulting to free"
+
+            # Create cancellation
+            try:
+                # Prepare sequential lessons data (just like client submission)
+                sequential_lessons = []
+                if sequential_dates and sequential_times:
+                    for seq_date, seq_time in zip(sequential_dates, sequential_times):
+                        if seq_date and seq_time:
+                            sequential_lessons.append({"date": seq_date, "time": seq_time})
+                
+                sequential_lessons_json = str(sequential_lessons) if sequential_lessons else None
+                
+                # Get status details before inserting
+                status_details = get_cancellation_status_details(int(student_id))
+                
+                # submission_date_time is in format "2026-04-02 14:30"
+                # Store as-is in manual_submission_date (the "submission date/time" for policy)
+                cursor = conn.execute(
+                    """
+                    INSERT INTO cancellations (
+                        student_id, lesson_date, lesson_time, sequential_lessons,
+                        reschedule_requested, reschedule_preferences, status, created_at,
+                        submitted_by, submission_method, actual_submission_timestamp,
+                        manual_submission_date, manager_submitted_by, is_manager_submission,
+                        charged, deadline_passed, is_override, 
+                        manager_notes, suppress_notifications, status_details
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, 'manager', 'manager_portal',
+                             CURRENT_TIMESTAMP, ?, ?, 1, ?, ?, 0, ?, ?, ?)
+                """,
+                    (
+                        student_id,
+                        lesson_date,
+                        lesson_time,
+                        sequential_lessons_json,
+                        wants_reschedule,
+                        reschedule_preferences,
+                        submission_date_time,
+                        session.get("user_id"),
+                        will_charge,           # ⭐ NOW SET CORRECTLY!
+                        deadline_passed,       # ⭐ NOW SET CORRECTLY!
+                        manager_notes,
+                        suppress_notifications,
+                        status_details,  # NEW: Add status details
+                    ),
+                )
+
+                conn.commit()
+                
+                # NEW: Mark welcome_free_used if this is a Welcome Package free cancellation
+                if student["membership_level"] == "Welcome Package" and not will_charge:
+                    conn.execute(
+                        "UPDATE students SET welcome_free_used = 1 WHERE id = ?",
+                        (student_id,)
+                    )
+                    conn.commit()
+                
+                # Get the cancellation ID for email sending
+                cancellation_id = cursor.lastrowid
+                
+                # Send notifications if not suppressed
+                if not suppress_notifications:
+                    # Send email to student
+                    try:
+                        cancellation_data = conn.execute(
+                            """SELECT c.*, s.first_name, s.last_name, s.email
+                               FROM cancellations c
+                               JOIN students s ON c.student_id = s.id
+                               WHERE c.id = ?""",
+                            (cancellation_id,)
+                        ).fetchone()
+                        
+                        if cancellation_data:
+                            # Get full variables using get_template_variables
+                            student_record = conn.execute(
+                                "SELECT * FROM students WHERE id = ?", (student_id,)
+                            ).fetchone()
+                            
+                            # Convert sqlite3.Row to dict for .get() method compatibility
+                            cancellation_dict = dict(cancellation_data) if hasattr(cancellation_data, 'keys') else cancellation_data
+                            
+                            full_variables = get_template_variables(student_record, cancellation_dict)
+                            
+                            # Get email template
+                            template = get_email_template("manager_submits_cancellation_student")
+                            if template:
+                                # Override with manager-specific variables
+                                variables = {
+                                    **full_variables,
+                                    "client_name": safe_value(f"{cancellation_dict.get('first_name', '')} {cancellation_dict.get('last_name', '')}".strip()),
+                                    "lesson_date": safe_value(f"{cancellation_dict.get('lesson_date')}"),
+                                    "lesson_time": safe_value(f"{format_time_for_email(cancellation_dict.get('lesson_time', ''))}"),
+                                    "submission_time": safe_value(submission_date_time),
+                                    "sequential_lessons": status_details if "sequential" in status_details.lower() else "None",
+                                    "cancellation_status": "CHARGED" if will_charge else "FREE",
+                                    "status_details": safe_value(status_details),
+                                    "charge_reason": safe_value(charge_reason),
+                                    "membership_tier": safe_value(student.get('membership_level')),
+                                    "policy_url": "https://www.riversideequestrian.ca/cancellations",
+                                    "website_url": "https://www.riversideequestrian.ca",
+                                    "contact_email": "stav@riversideequestrian.ca",
+                                    "company_name": "Riverside Equestrian",
+                                }
+                                subject = render_template_string(template["subject"], autoescape=False, **variables)
+                                body = render_template_string(template["body"], autoescape=False, **variables)
+                                send_email(cancellation_dict["email"], subject, body, "client")
+                    except Exception as email_error:
+                        print(f"Error sending student notification: {str(email_error)}")
+                    
+                    # Send email to ALL managers from settings (not just current user)
+                    try:
+                        # Get manager emails from database settings (comma-separated list)
+                        manager_emails = get_manager_emails_from_settings()
+                        print(f"DEBUG: Manager emails from settings: {manager_emails}")
+                        
+                        if manager_emails:
+                            template = get_email_template("manager_submits_cancellation_manager")
+                            print(f"DEBUG: Template found: {template is not None}")
+                            
+                            if template:
+                                # Get full variables once (used for all managers)
+                                student_record = conn.execute(
+                                    "SELECT * FROM students WHERE id = ?", (student_id,)
+                                ).fetchone()
+                                
+                                cancellation_record = conn.execute(
+                                    "SELECT * FROM cancellations WHERE id = ?", (cancellation_id,)
+                                ).fetchone()
+                                
+                                full_variables = get_template_variables(student_record, cancellation_record)
+                                
+                                variables = {
+                                    **full_variables,
+                                    "client_name": safe_value(f"{student.get('first_name', '')} {student.get('last_name', '')}".strip()),
+                                    "parent_name": safe_value(student.get('parent_name', '')),
+                                    "client_email": safe_value(student.get('email')),
+                                    "client_phone": safe_value(student.get('phone')),
+                                    "membership_tier": safe_value(student.get('membership_level')),
+                                    "lesson_date": safe_value(f"{lesson_date}"),
+                                    "lesson_time": safe_value(f"{format_time_for_email(lesson_time)}"),
+                                    "submission_time": safe_value(submission_date_time),
+                                    "sequential_lessons": status_details if "sequential" in status_details.lower() else "None",
+                                    "cancellation_status": "CHARGED" if will_charge else "FREE",
+                                    "status_details": safe_value(status_details),
+                                    "charge_reason": safe_value(charge_reason),
+                                    "policy_url": "https://www.riversideequestrian.ca/cancellations",
+                                    "website_url": "https://www.riversideequestrian.ca",
+                                    "contact_email": "stav@riversideequestrian.ca",
+                                    "company_name": "Riverside Equestrian",
+                                }
+                                
+                                subject = render_template_string(template["subject"], autoescape=False, **variables)
+                                body = render_template_string(template["body"], autoescape=False, **variables)
+                                
+                                # Send to ALL managers
+                                print(f"DEBUG: Sending manager notification to {len(manager_emails)} managers")
+                                for manager_email in manager_emails:
+                                    try:
+                                        result = send_email(manager_email, subject, body, "manager")
+                                        print(f"DEBUG: Manager email send result to {manager_email}: {result}")
+                                        if result.get("success"):
+                                            print(f"✅ Manager email sent successfully to {manager_email}")
+                                        else:
+                                            print(f"❌ Manager email failed for {manager_email}: {result.get('message')}")
+                                    except Exception as mgr_error:
+                                        print(f"❌ Error sending to manager {manager_email}: {str(mgr_error)}")
+                            else:
+                                print(f"DEBUG: Template not found for manager_submits_cancellation_manager")
+                        else:
+                            print(f"DEBUG: No manager emails configured in settings")
+                    except Exception as email_error:
+                        print(f"❌ Error in manager notification process: {str(email_error)}")
+                        import traceback
+                        traceback.print_exc()
+                
+                conn.close()
+
+                print(
+                    f"DEBUG: Cancellation created successfully with submission_date_time: {submission_date_time}"
+                )
+
+                flash("Cancellation submitted successfully!", "success")
+
+                return jsonify(
+                    {"success": True, "redirect": url_for("manager_cancellations")}
+                )
+            except Exception as db_error:
+                conn.close()
+                print(f"DEBUG: Database error: {str(db_error)}")
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": f"Database error: {str(db_error)}",
+                        }
+                    ),
+                    500,
+                )
+
+        except Exception as e:
+            import traceback
+
+            print(f"DEBUG: Exception: {str(e)}")
+            traceback.print_exc()
+            return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/manager/api/student-search")
+@login_required
+@admin_required
+def student_search():
+    """AJAX endpoint for student search autocomplete"""
+    query = request.args.get("q", "").lower()
+
+    if len(query) < 2:
+        return jsonify([])
+
+    try:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row  # Enable dictionary-like access
+        students = conn.execute(
+            """
+            SELECT id, first_name, last_name, email, phone, parent_first, parent_last, membership_level
+            FROM students
+            WHERE (LOWER(first_name) LIKE ? 
+                   OR LOWER(last_name) LIKE ? 
+                   OR LOWER(email) LIKE ?
+                   OR LOWER(parent_first) LIKE ?
+                   OR LOWER(parent_last) LIKE ?
+                   OR LOWER(phone) LIKE ?)
+            ORDER BY first_name, last_name
+            LIMIT 10
+        """,
+            (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%"),
+        ).fetchall()
+        conn.close()
+
+        results = []
+        for s in students:
+            first_name = s["first_name"] if s["first_name"] else ""
+            last_name = s["last_name"] if s["last_name"] else ""
+            full_name = f"{first_name} {last_name}".strip()
+
+            results.append(
+                {
+                    "id": s["id"],
+                    "name": full_name if full_name else "Unknown Student",
+                    "email": s["email"] if s["email"] else "No email",
+                    "membership": (
+                        s["membership_level"] if s["membership_level"] else "Standard"
+                    ),
+                    "phone": s["phone"] if s["phone"] else "No phone",
+                    "parent_first": s["parent_first"] if s["parent_first"] else "",
+                    "parent_last": s["parent_last"] if s["parent_last"] else "",
+                }
+            )
+
+        return jsonify(results)
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()  # Print error to Flask console
+        return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/manager/api/student-policy-info/<int:student_id>")
+@login_required
+@admin_required
+def student_policy_info(student_id):
+    """Get current month policy info for a student"""
+    try:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+
+        # Get student info
+        student = conn.execute(
+            "SELECT id, first_name, last_name, email, membership_level FROM students WHERE id = ?",
+            (student_id,),
+        ).fetchone()
+
+        if not student:
+            conn.close()
+            return jsonify({"error": "Student not found"}), 404
+
+        # Get current month cancellations (student submitted)
+        from datetime import datetime
+
+        current_month = datetime.now().strftime("%Y-%m")
+
+        student_count = conn.execute(
+            """
+            SELECT COUNT(*) as count FROM cancellations
+            WHERE student_id = ?
+            AND strftime('%Y-%m', created_at) = ?
+            AND submitted_by = 'student'
+        """,
+            (student_id, current_month),
+        ).fetchone()["count"]
+
+        conn.close()
+
+        # Policy: 1 free cancellation per month for standard membership
+        membership = student["membership_level"] or "Standard"
+        free_notices = 1  # Default to 1 free per month
+        
+        # Get status details (e.g., "1 of 2 used this month")
+        status_details = get_cancellation_status_details(student_id)
+
+        return jsonify(
+            {
+                "membership_level": membership,
+                "free_notices_per_month": free_notices,
+                "deadline_display": "4 days before lesson",
+                "current_month_count": student_count,
+                "free_remaining": max(0, free_notices - student_count),
+                "status_details": status_details,
+            }
+        )
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

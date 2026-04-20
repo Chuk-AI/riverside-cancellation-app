@@ -8,6 +8,10 @@
         Template Management
       </h1>
       <p class="text-muted">Create and manage professional email templates</p>
+      <p class="text-info small">
+        <i class="fas fa-info-circle me-1"></i>
+        <strong>Tip:</strong> Each template can be assigned to one or more triggers. Use the "⚡ Triggers" page to manage trigger-to-template mappings.
+      </p>
 
       <div class="mt-3">
         <button type="button" class="btn btn-primary me-2" id="newTemplateBtn">
@@ -20,6 +24,9 @@
         >
           <i class="fas fa-check me-1"></i>Test API
         </button>
+        <a href="{{ url_for('manage_triggers') }}" class="btn btn-outline-warning">
+          <i class="fas fa-bolt me-1"></i>Manage Triggers
+        </a>
       </div>
     </div>
   </div>
@@ -52,6 +59,16 @@
             template.subject|length > 50 %}...{% endif %}
           </p>
 
+          <!-- Trigger Information Section -->
+          <div class="alert alert-light p-2 mb-3" style="font-size: 0.85rem;">
+            <strong>
+              <i class="fas fa-bolt text-warning"></i> Used by Triggers:
+            </strong>
+            <div id="triggers-{{ template.id }}" class="mt-2">
+              <span class="text-muted small"><i class="fas fa-spinner fa-spin"></i> Loading...</span>
+            </div>
+          </div>
+
           <div class="btn-group-vertical d-grid gap-2">
             <button
               class="btn btn-primary btn-sm edit-btn"
@@ -74,6 +91,13 @@
               ></i>
               {{ 'Disable' if template.active else 'Enable' }}
             </button>
+            <a
+              href="{{ url_for('manage_triggers') }}"
+              class="btn btn-outline-secondary btn-sm"
+              title="Go to Triggers page to manage mappings"
+            >
+              <i class="fas fa-link me-1"></i>View Triggers
+            </a>
           </div>
         </div>
       </div>
@@ -172,6 +196,7 @@
 
   // Global variables
   let currentTemplateId = null;
+  let allTriggers = [];
 
   // Show alert
   function showAlert(message, type = "info") {
@@ -190,6 +215,76 @@
         alertDiv.remove();
       }
     }, 5000);
+  }
+
+  // Load all triggers once on page load
+  async function loadAllTriggers() {
+    try {
+      const response = await fetch("/senior/api/triggers");
+      const data = await response.json();
+      if (data.success) {
+        allTriggers = data.triggers;
+        console.log("Triggers loaded:", allTriggers.length);
+        // Now display trigger info for each template
+        displayTriggersForAllTemplates();
+      }
+    } catch (error) {
+      console.error("Error loading triggers:", error);
+    }
+  }
+
+  // Display triggers that use each template
+  function displayTriggersForAllTemplates() {
+    // Get all template IDs from the page
+    const triggerElements = document.querySelectorAll("[id^='triggers-']");
+    
+    triggerElements.forEach((element) => {
+      const templateId = element.id.replace("triggers-", "");
+      const triggersUsingTemplate = getTriggersByTemplate(templateId);
+      
+      if (triggersUsingTemplate.length === 0) {
+        element.innerHTML = '<span class="badge bg-secondary">Not assigned</span>';
+      } else {
+        let html = '<div class="d-flex flex-wrap gap-1">';
+        triggersUsingTemplate.forEach((trigger) => {
+          const categoryColor = getCategoryColor(trigger.category);
+          html += `
+            <span class="badge ${categoryColor}" title="${trigger.description}">
+              ${trigger.name}
+            </span>
+          `;
+        });
+        html += '</div>';
+        element.innerHTML = html;
+      }
+    });
+  }
+
+  // Get triggers using a specific template
+  function getTriggersByTemplate(templateId) {
+    const triggers = [];
+    allTriggers.forEach((trigger) => {
+      if (trigger.mappings && trigger.mappings.length > 0) {
+        const hasTemplate = trigger.mappings.some(
+          (m) => m.template_id === templateId && m.enabled
+        );
+        if (hasTemplate) {
+          triggers.push(trigger);
+        }
+      }
+    });
+    return triggers;
+  }
+
+  // Get color based on category
+  function getCategoryColor(category) {
+    const colors = {
+      cancellation: "bg-primary",
+      override: "bg-warning text-dark",
+      exclusion: "bg-danger",
+      submission: "bg-info",
+    };
+    return colors[category] || "bg-secondary";
   }
 
   // Test the API
@@ -424,6 +519,9 @@
   // Setup event listeners when DOM is loaded
   document.addEventListener("DOMContentLoaded", function () {
     console.log("DOM loaded, setting up event listeners...");
+
+    // Load triggers first
+    loadAllTriggers();
 
     // Header button listeners
     const newBtn = document.getElementById("newTemplateBtn");
