@@ -3803,12 +3803,18 @@ def process_cancellation():
             if cancellation_dict["is_manager_submission"] and cancellation_dict["manual_submission_date"]:
                 # Manager submission: use the policy submission date they specified
                 try:
-                    submission_datetime = datetime.strptime(
-                        cancellation_dict["manual_submission_date"], "%Y-%m-%d %H:%M:%S"
-                    )
+                    manual_date_str = cancellation_dict["manual_submission_date"].strip()
+                    # Handle both "YYYY-MM-DD HH:MM" and "YYYY-MM-DD HH:MM:SS" formats
+                    if manual_date_str.count(':') == 1:  # HH:MM format (missing seconds)
+                        submission_datetime = datetime.strptime(manual_date_str + ":00", "%Y-%m-%d %H:%M:%S")
+                    else:  # HH:MM:SS format
+                        submission_datetime = datetime.strptime(manual_date_str, "%Y-%m-%d %H:%M:%S")
+                    
                     if submission_datetime.tzinfo is None:
                         submission_datetime = pacific_tz.localize(submission_datetime)
-                except:
+                    print(f"DEBUG: Successfully parsed manual_submission_date: {manual_date_str} -> {submission_datetime}")
+                except Exception as parse_error:
+                    print(f"DEBUG: Failed to parse manual_submission_date '{manual_date_str}': {parse_error}")
                     submission_datetime = None
             else:
                 # Student submission: use when they actually submitted
@@ -4970,13 +4976,14 @@ def manager_cancellations():
     # Get filter parameters
     filter_status = request.args.get("status", "")
     search = request.args.get("search", "")
-    date_range = request.args.get("date_range", "7days")
+    date_range = request.args.get("date_range", "month")
     membership = request.args.get("membership", "")
     sort_by = request.args.get("sort", "submit_date")
     student_id = request.args.get("student")
     date_from = request.args.get("date_from")
     date_to = request.args.get("date_to")
     approval_status = request.args.get("approval_status", "")
+    submission_type = request.args.get("submission_type", "")
 
     # Check if this is an AJAX request
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -5035,6 +5042,12 @@ def manager_cancellations():
         where_clauses.append(
             "c.status = 'pending' AND c.excluded = 0 AND c.is_override = 0"
         )
+
+    # Submission type filter (student vs manager submitted)
+    if submission_type == "student":
+        where_clauses.append("c.is_manager_submission = 0")
+    elif submission_type == "manager":
+        where_clauses.append("c.is_manager_submission = 1")
 
     # Search filter
     if search:
@@ -10989,17 +11002,38 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
         else:
             lesson_time = lesson_time_str or toronto_now().time()
 
-        # Get submission time from created_at field in Pacific timezone
-        created_at = cancellation_dict.get("created_at")
-        if created_at:
-            # Parse the timestamp (handles both old and new formats)
+        # Get submission time - use manual_submission_date for manager submissions
+        # This ensures emails show the correct "policy" submission date
+        is_manager_submission = cancellation_dict.get("is_manager_submission", False)
+        manual_submission_date = cancellation_dict.get("manual_submission_date")
+
+        if is_manager_submission and manual_submission_date:
+            # Manager submission: use the policy submission date they specified
+            try:
+                manual_date_str = manual_submission_date.strip()
+                # Handle both "YYYY-MM-DD HH:MM" and "YYYY-MM-DD HH:MM:SS" formats
+                if manual_date_str.count(':') == 1:  # HH:MM format
+                    submission_dt = datetime.strptime(manual_date_str + ":00", "%Y-%m-%d %H:%M:%S")
+                else:  # HH:MM:SS format
+                    submission_dt = datetime.strptime(manual_date_str, "%Y-%m-%d %H:%M:%S")
+                pacific_tz = pytz.timezone("America/Los_Angeles")
+                if submission_dt.tzinfo is None:
+                    submission_dt = pacific_tz.localize(submission_dt)
+            except Exception as e:
+                # Fallback to created_at if parsing fails
+                created_at = cancellation_dict.get("created_at")
+                submission_dt = localize_datetime(created_at)
+                if submission_dt is None:
+                    submission_dt = toronto_now()
+        else:
+            # Student submission: use created_at (actual submission timestamp)
+            created_at = cancellation_dict.get("created_at")
             submission_dt = localize_datetime(created_at)
             if submission_dt is None:
                 submission_dt = toronto_now()
-            submission_time_str = submission_dt.strftime("%B %d, %Y at %I:%M %p")
-        else:
-            # Fallback to current Pacific time if no created_at
-            submission_time_str = toronto_now().strftime("%B %d, %Y at %I:%M %p")
+
+        submission_time_str = submission_dt.strftime("%B %d, %Y at %I:%M %p")
+        submission_month = submission_dt.strftime("%B %Y")
 
         variables.update(
             {
@@ -11013,6 +11047,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 "will_be_charged": "Yes" if cancellation_dict.get("charged") else "No",
                 "charge_reason": safe_value(get_charge_reason(cancellation_dict)),
                 "submission_time": submission_time_str,
+                "submission_month": submission_month,
                 "cancellation_id": safe_value(cancellation_dict.get("id")),
             }
         )
@@ -11039,6 +11074,29 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 "manager_notes": safe_value(cancellation_dict.get("manager_notes")),
             }
         )
+
+        # Calculate lesson month usage (for the month when the lesson is scheduled)
+        if cancellation_dict.get("student_id") and lesson_date:
+            lesson_month = lesson_date.month
+            lesson_year = lesson_date.year
+            lesson_month_usage = get_monthly_cancellation_count(cancellation_dict.get("student_id"), lesson_month, lesson_year)
+            
+            # Get the tier to know how many are allowed
+            if student:
+                tier = get_membership_tier(student_dict.get("membership_level"))
+                if tier:
+                    tier_dict = dict(tier) if hasattr(tier, "keys") else tier
+                    allowed = tier_dict.get("free_notices", 1)
+                    lesson_month_str = lesson_date.strftime("%B %Y")
+                    
+                    variables.update(
+                        {
+                            "lesson_month": lesson_month_str,
+                            "lesson_month_used_cancellations": safe_value(str(lesson_month_usage)),
+                            "lesson_month_allowed_cancellations": safe_value(str(allowed)),
+                            "lesson_month_remaining_cancellations": safe_value(str(max(0, allowed - lesson_month_usage))),
+                        }
+                    )
 
     # Add extra variables and sanitize them
     if extra_vars:
@@ -11827,15 +11885,16 @@ def policy_impact():
         
         month_display = submission_dt.strftime("%B %Y")
         
-        # Count free cancellations for this month
+        # Count free cancellations for the lesson's month (not submission month)
+        # This matches how will_be_charged() counts - by lesson_date month
         month_str = submission_dt.strftime("%Y-%m")
         count = conn.execute(
             """
             SELECT COUNT(*) as count FROM cancellations
             WHERE student_id = ?
-            AND strftime('%Y-%m', created_at) = ?
-            AND charged = 0
+            AND strftime('%Y-%m', lesson_date) = ?
             AND excluded = 0
+            AND charged = 0
         """,
             (student_id, month_str),
         ).fetchone()["count"]
@@ -12275,35 +12334,47 @@ def student_policy_info(student_id):
             conn.close()
             return jsonify({"error": "Student not found"}), 404
 
-        # Get current month cancellations (student submitted)
+        # Get the membership tier info (FIXED: was hardcoded to 1)
+        membership = student["membership_level"] or "Standard"
+        tier = get_membership_tier(membership)
+        
+        if not tier:
+            conn.close()
+            return jsonify({"error": "Membership tier not found"}), 404
+        
+        tier_dict = dict(tier) if hasattr(tier, "keys") else tier
+        free_notices = tier_dict.get("free_notices", 1)
+        deadline_display = tier_dict.get("deadline_display", "Varies by membership")
+
+        # Get current month cancellations count (based on lesson month for this month)
         from datetime import datetime
+        pacific_now = toronto_now()
+        current_month = pacific_now.month
+        current_year = pacific_now.year
 
-        current_month = datetime.now().strftime("%Y-%m")
-
+        # Count free cancellations for the current month based on lesson_date
         student_count = conn.execute(
             """
             SELECT COUNT(*) as count FROM cancellations
             WHERE student_id = ?
-            AND strftime('%Y-%m', created_at) = ?
-            AND submitted_by = 'student'
+            AND strftime('%m', lesson_date) = ?
+            AND strftime('%Y', lesson_date) = ?
+            AND charged = 0
+            AND excluded = 0
         """,
-            (student_id, current_month),
+            (student_id, f"{current_month:02d}", str(current_year)),
         ).fetchone()["count"]
 
         conn.close()
 
-        # Policy: 1 free cancellation per month for standard membership
-        membership = student["membership_level"] or "Standard"
-        free_notices = 1  # Default to 1 free per month
-        
-        # Get status details (e.g., "1 of 2 used this month")
+        # Get status details
         status_details = get_cancellation_status_details(student_id)
 
         return jsonify(
             {
                 "membership_level": membership,
                 "free_notices_per_month": free_notices,
-                "deadline_display": "4 days before lesson",
+                "deadline_display": deadline_display,
                 "current_month_count": student_count,
                 "free_remaining": max(0, free_notices - student_count),
                 "status_details": status_details,

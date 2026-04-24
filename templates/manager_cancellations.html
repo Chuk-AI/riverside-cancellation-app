@@ -748,8 +748,8 @@
             <select class="form-select form-select-sm" id="dateRangeFilter" onchange="applyFilters()">
                 <option value="today" {{ 'selected' if request.args.get('date_range') == 'today' else '' }}>Today</option>
                 <option value="yesterday" {{ 'selected' if request.args.get('date_range') == 'yesterday' else '' }}>Yesterday</option>
-                <option value="7days" {{ 'selected' if request.args.get('date_range', '7days') == '7days' else '' }}>7 Days</option>
-                <option value="month" {{ 'selected' if request.args.get('date_range') == 'month' else '' }}>Last 30 Days</option>
+                <option value="7days" {{ 'selected' if request.args.get('date_range') == '7days' else '' }}>7 Days</option>
+                <option value="month" {{ 'selected' if request.args.get('date_range', 'month') == 'month' else '' }}>Last 30 Days</option>
                 <option value="all" {{ 'selected' if request.args.get('date_range') == 'all' else '' }}>All Time</option>
                 <option value="custom" {{ 'selected' if request.args.get('date_range') == 'custom' else '' }}>Custom Range</option>
             </select>
@@ -1494,6 +1494,7 @@ function applyFilters() {
     const sortFilter = document.getElementById('sortFilter');
     const approvalStatusFilter = document.getElementById('approvalStatusFilter');
     const specialFilter = document.getElementById('specialFilter');
+    const submissionTypeFilter = document.getElementById('submissionTypeFilter');
     
     currentFilters = {
         search: searchInput.value,
@@ -1501,7 +1502,8 @@ function applyFilters() {
         date_range: dateRangeFilter.value,
         membership: membershipFilter.value,
         sort: sortFilter.value,
-        approval_status: approvalStatusFilter.value
+        approval_status: approvalStatusFilter.value,
+        submission_type: submissionTypeFilter.value
     };
     
     // Handle special filter
