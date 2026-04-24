@@ -339,6 +339,57 @@
         border-color: #8b5cf6 !important; 
     }
     
+    /* Email Suppression Toggle Switches */
+    .email-toggle {
+        position: relative;
+        display: inline-block;
+        width: 45px;
+        height: 24px;
+    }
+    
+    .email-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    
+    .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #cbd5e1;
+        transition: 0.3s;
+        border-radius: 24px;
+    }
+    
+    .toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.3s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    input:checked + .toggle-slider {
+        background-color: #ef4444;
+    }
+    
+    input:checked + .toggle-slider:before {
+        transform: translateX(21px);
+    }
+    
+    .toggle-slider:hover {
+        box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.05);
+    }
+    
     /* Floating navigation buttons */
     .floating-nav {
         position: fixed;
@@ -658,7 +709,6 @@
                     <i class="fas fa-check-double me-1"></i>
                     Process All Pending
                 </button>
-
             </div>
         </div>
         <div class="col-md-4 text-md-end">
@@ -671,6 +721,35 @@
                     <i class="fas fa-sync-alt me-1"></i>
                     Auto Refresh
                 </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Email Suppression Toggles -->
+    <div class="row mt-3 align-items-center">
+        <div class="col-md-12">
+            <div class="d-flex gap-3 align-items-center">
+                <span style="font-size: 0.9rem; color: #666;">Email Notifications:</span>
+                
+                <div class="d-flex align-items-center gap-2">
+                    <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <div class="email-toggle">
+                            <input type="checkbox" id="suppressStudentEmail" onchange="updateEmailSuppression()">
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span style="font-size: 0.85rem;">Suppress Student Email</span>
+                    </label>
+                </div>
+                
+                <div class="d-flex align-items-center gap-2">
+                    <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <div class="email-toggle">
+                            <input type="checkbox" id="suppressManagerEmail" onchange="updateEmailSuppression()">
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span style="font-size: 0.85rem;">Suppress Manager Email</span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -1345,6 +1424,24 @@ let currentFilters = {
     student: '{{ request.args.get("student", "") }}'
 };
 
+// Email suppression flags
+let suppressStudentEmailGlobal = false;
+let suppressManagerEmailGlobal = false;
+
+// Update email suppression status
+function updateEmailSuppression() {
+    const suppressStudentCheckbox = document.getElementById('suppressStudentEmail');
+    const suppressManagerCheckbox = document.getElementById('suppressManagerEmail');
+    
+    suppressStudentEmailGlobal = suppressStudentCheckbox ? suppressStudentCheckbox.checked : false;
+    suppressManagerEmailGlobal = suppressManagerCheckbox ? suppressManagerCheckbox.checked : false;
+    
+    console.log('Email suppression updated:', {
+        suppressStudent: suppressStudentEmailGlobal,
+        suppressManager: suppressManagerEmailGlobal
+    });
+}
+
 // View switching functionality
 function switchView(view) {
     currentView = view;
@@ -1650,7 +1747,9 @@ function approveAsPolicy(id) {
             },
             body: JSON.stringify({
                 action: 'approve_policy',
-                cancellation_id: id
+                cancellation_id: id,
+                suppress_student_email: suppressStudentEmailGlobal,
+                suppress_manager_email: suppressManagerEmailGlobal
             })
         })
         .then(response => response.json())
@@ -1691,7 +1790,9 @@ function processAsFree(id) {
             body: JSON.stringify({
                 action: 'force_free',
                 cancellation_id: id,
-                reason: reason
+                reason: reason,
+                suppress_student_email: suppressStudentEmailGlobal,
+                suppress_manager_email: suppressManagerEmailGlobal
             })
         })
         .then(response => response.json())
@@ -1732,7 +1833,9 @@ function processAsCharged(id) {
             body: JSON.stringify({
                 action: 'force_charge',
                 cancellation_id: id,
-                reason: reason
+                reason: reason,
+                suppress_student_email: suppressStudentEmailGlobal,
+                suppress_manager_email: suppressManagerEmailGlobal
             })
         })
         .then(response => response.json())

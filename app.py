@@ -3741,6 +3741,12 @@ def process_cancellation():
     print(f"Action: {action}")
     print(f"Cancellation ID: {cancellation_id}")
     print(f"Reason: {reason}")
+    
+    # Get email suppression flags
+    suppress_student_email = data.get("suppress_student_email", False)
+    suppress_manager_email = data.get("suppress_manager_email", False)
+    print(f"Suppress student email: {suppress_student_email}")
+    print(f"Suppress manager email: {suppress_manager_email}")
 
     if not action or not cancellation_id:
         return jsonify({"success": False, "message": "Missing required fields"})
@@ -3959,13 +3965,29 @@ def process_cancellation():
 
         # SEND EMAIL NOTIFICATIONS - Only for force actions (overrides)
         if action in ["force_free", "force_charge"]:
-            email_results = send_override_notification_emails(
-                student_dict,
-                updated_cancellation,
-                action,
-                reason,
-                session.get("user_email", "Unknown Manager"),
-            )
+            # Only send emails if not suppressed
+            if not suppress_student_email or not suppress_manager_email:
+                email_results = send_override_notification_emails(
+                    student_dict,
+                    updated_cancellation,
+                    action,
+                    reason,
+                    session.get("user_email", "Unknown Manager"),
+                    suppress_student_email=suppress_student_email,
+                    suppress_manager_email=suppress_manager_email
+                )
+            else:
+                # Both emails suppressed
+                email_results = {
+                    "client_email": {
+                        "success": True,
+                        "message": "Suppressed by manager",
+                    },
+                    "manager_notification": {
+                        "success": True,
+                        "message": "Suppressed by manager",
+                    },
+                }
         else:
             # For approve_policy, no override emails needed (normal workflow)
             email_results = {
@@ -11639,7 +11661,8 @@ def send_manager_notification(student, cancellation):
 
 
 def send_override_notification_emails(
-    student, cancellation, override_action, override_reason, manager_email
+    student, cancellation, override_action, override_reason, manager_email,
+    suppress_student_email=False, suppress_manager_email=False
 ):
     """Send emails after manager override - both to client and managers - USES TRIGGER SYSTEM"""
 
@@ -11669,41 +11692,46 @@ def send_override_notification_emails(
 
     # STEP 1: Send updated confirmation to CLIENT using TRIGGER SYSTEM
     try:
-        print(f"📧 Sending override notification to client: {student_dict['email']}")
-        print(
-            f"   Action: {override_action}, Charged: {cancellation_dict.get('charged', False)}"
-        )
-
-        # DETERMINE THE CORRECT TRIGGER BASED ON OVERRIDE ACTION
-        if override_action == "force_free":
-            trigger_id = "override_to_free_student"
-        elif override_action == "force_charge" or override_action == "charge":
-            trigger_id = "override_to_charged_student"
-        elif override_action == "approve":
-            # For approve action, use the same as force_free (no charge change, just approved)
-            trigger_id = "override_to_free_student"
+        # Check if student email should be suppressed
+        if suppress_student_email:
+            print(f"🔇 Student email suppressed by manager")
+            results["client_email"] = {"success": True, "message": "Suppressed by manager"}
         else:
-            # Default to free for unknown actions
-            trigger_id = "override_to_free_student"
-
-        print(f"   Using trigger: {trigger_id}")
-
-        # USE TRIGGER SYSTEM to send email
-        client_result = send_email_by_trigger(
-            trigger_id,
-            student_dict,
-            cancellation_dict,
-            recipient_type="student",
-            extra_vars=override_info
-        )
-        results["client_email"] = client_result
-
-        if client_result.get("success"):
-            print(f"✅ Client override email sent successfully")
-        else:
+            print(f"📧 Sending override notification to client: {student_dict['email']}")
             print(
-                f"❌ Client override email failed: {client_result.get('message', 'Unknown error')}"
+                f"   Action: {override_action}, Charged: {cancellation_dict.get('charged', False)}"
             )
+
+            # DETERMINE THE CORRECT TRIGGER BASED ON OVERRIDE ACTION
+            if override_action == "force_free":
+                trigger_id = "override_to_free_student"
+            elif override_action == "force_charge" or override_action == "charge":
+                trigger_id = "override_to_charged_student"
+            elif override_action == "approve":
+                # For approve action, use the same as force_free (no charge change, just approved)
+                trigger_id = "override_to_free_student"
+            else:
+                # Default to free for unknown actions
+                trigger_id = "override_to_free_student"
+
+            print(f"   Using trigger: {trigger_id}")
+
+            # USE TRIGGER SYSTEM to send email
+            client_result = send_email_by_trigger(
+                trigger_id,
+                student_dict,
+                cancellation_dict,
+                recipient_type="student",
+                extra_vars=override_info
+            )
+            results["client_email"] = client_result
+
+            if client_result.get("success"):
+                print(f"✅ Client override email sent successfully")
+            else:
+                print(
+                    f"❌ Client override email failed: {client_result.get('message', 'Unknown error')}"
+                )
 
     except Exception as e:
         print(f"❌ Client override email error: {str(e)}")
@@ -11711,41 +11739,46 @@ def send_override_notification_emails(
 
     # STEP 2: Send notification to MANAGERS about the override
     try:
-        # Create override notification for managers using TRIGGER SYSTEM
-        
-        # Determine which manager trigger to use
-        if override_action == "force_free":
-            manager_trigger_id = "override_to_free_manager"
-        elif override_action == "force_charge" or override_action == "charge":
-            manager_trigger_id = "override_to_charged_manager"
-        elif override_action == "approve":
-            manager_trigger_id = "override_to_free_manager"
+        # Check if manager email should be suppressed
+        if suppress_manager_email:
+            print(f"🔇 Manager email suppressed by manager")
+            results["manager_notification"] = {"success": True, "message": "Suppressed by manager"}
         else:
-            manager_trigger_id = "override_to_free_manager"
+            # Create override notification for managers using TRIGGER SYSTEM
+            
+            # Determine which manager trigger to use
+            if override_action == "force_free":
+                manager_trigger_id = "override_to_free_manager"
+            elif override_action == "force_charge" or override_action == "charge":
+                manager_trigger_id = "override_to_charged_manager"
+            elif override_action == "approve":
+                manager_trigger_id = "override_to_free_manager"
+            else:
+                manager_trigger_id = "override_to_free_manager"
 
-        print(f"   Manager trigger: {manager_trigger_id}")
+            print(f"   Manager trigger: {manager_trigger_id}")
 
-        # USE TRIGGER SYSTEM to send to managers
-        manager_result = send_email_by_trigger(
-            manager_trigger_id,
-            student_dict,
-            cancellation_dict,
-            recipient_type="manager",
-            extra_vars=override_info
-        )
+            # USE TRIGGER SYSTEM to send to managers
+            manager_result = send_email_by_trigger(
+                manager_trigger_id,
+                student_dict,
+                cancellation_dict,
+                recipient_type="manager",
+                extra_vars=override_info
+            )
 
-        if manager_result.get("success"):
-            results["manager_notification"] = {
-                "success": True,
-                "message": manager_result.get("message", "Manager notifications sent")
-            }
-            print(f"📧 Manager override notifications sent")
-        else:
-            results["manager_notification"] = {
-                "success": False,
-                "message": manager_result.get("message", "Failed to send manager notifications")
-            }
-            print(f"⚠️ Manager notifications failed: {manager_result.get('message')}")
+            if manager_result.get("success"):
+                results["manager_notification"] = {
+                    "success": True,
+                    "message": manager_result.get("message", "Manager notifications sent")
+                }
+                print(f"📧 Manager override notifications sent")
+            else:
+                results["manager_notification"] = {
+                    "success": False,
+                    "message": manager_result.get("message", "Failed to send manager notifications")
+                }
+                print(f"⚠️ Manager notifications failed: {manager_result.get('message')}")
 
     except Exception as e:
         print(f"❌ Manager override notification error: {str(e)}")
