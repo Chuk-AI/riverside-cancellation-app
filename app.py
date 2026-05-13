@@ -1522,12 +1522,20 @@ def get_membership_tier(level):
     return tier
 
 
-def get_monthly_cancellation_count(student_id, month=None, year=None):
+def get_monthly_cancellation_count(student_id, month=None, year=None, exclude_cancellation_id=None):
     """Get cancellation count for a student in a specific month (based on lesson date)
     
     Returns count of free (non-charged) cancellations for the month.
     Counts based on the lesson_date month, not submission date.
     This ensures quota resets based on lesson month.
+    
+    Args:
+        student_id: The student to count for
+        month: Optional month (defaults to current Pacific month)
+        year: Optional year (defaults to current Pacific year)
+        exclude_cancellation_id: If provided, this cancellation ID is excluded from the
+            count. Use this when re-evaluating a specific cancellation during processing,
+            so the cancellation being processed doesn't count itself toward its own limit.
     """
     current_time = toronto_now()
     if not month:
@@ -1537,17 +1545,21 @@ def get_monthly_cancellation_count(student_id, month=None, year=None):
 
     conn = get_db()
     # Count free cancellations based on LESSON DATE month, not submission date
-    count = conn.execute(
-        """
+    query = """
         SELECT COUNT(*) as count FROM cancellations 
         WHERE student_id = ? 
         AND strftime('%m', lesson_date) = ? 
         AND strftime('%Y', lesson_date) = ?
         AND excluded = 0
         AND charged = 0
-    """,
-        (student_id, f"{month:02d}", str(year)),
-    ).fetchone()
+    """
+    params = [student_id, f"{month:02d}", str(year)]
+
+    if exclude_cancellation_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_cancellation_id)
+
+    count = conn.execute(query, params).fetchone()
     conn.close()
     return count["count"] if count else 0
 
@@ -1754,7 +1766,7 @@ def calculate_cancellation_status(student):
     }
 
 
-def will_be_charged(student, lesson_datetime, submission_datetime=None):
+def will_be_charged(student, lesson_datetime, submission_datetime=None, exclude_cancellation_id=None):
     """
     Check if a cancellation will be charged based on:
     1. Same-day after-time (always charged)
@@ -1768,6 +1780,10 @@ def will_be_charged(student, lesson_datetime, submission_datetime=None):
         lesson_datetime: Lesson datetime (timezone-aware, Pacific)
         submission_datetime: When the cancellation was submitted (timezone-aware, Pacific)
                             If None, uses current time
+        exclude_cancellation_id: If provided, this cancellation ID is excluded from any
+            policy counts (monthly limit, Welcome Package lifetime check). Use when
+            re-evaluating a specific cancellation during manager processing so the
+            cancellation being processed doesn't count itself.
     
     Returns:
         tuple: (will_charge: bool, reason: str)
@@ -1795,15 +1811,31 @@ def will_be_charged(student, lesson_datetime, submission_datetime=None):
         return False, "Student membership not found"
     
     # ===== WELCOME PACKAGE SPECIAL LOGIC =====
+    # Welcome Package has a lifetime limit of 1 free cancellation.
+    # We determine "already used" by dynamically counting prior non-charged cancellations
+    # for this student (excluding the one being processed, if any). This is more reliable
+    # than the `welcome_free_used` flag alone, which can become stale when a pending
+    # cancellation has been recorded but not yet manager-approved.
     if student["membership_level"] == "Welcome Package":
-        # Welcome Package: 1 lifetime free (not monthly)
-        welcome_free_used = bool(student["welcome_free_used"]) if student["welcome_free_used"] is not None else False
-        
-        if welcome_free_used:
-            # Already used their lifetime free → CHARGE
+        conn = get_db()
+        other_free_query = """
+            SELECT COUNT(*) as cnt FROM cancellations
+            WHERE student_id = ? AND charged = 0 AND excluded = 0
+        """
+        other_free_params = [student["id"]]
+        if exclude_cancellation_id is not None:
+            other_free_query += " AND id != ?"
+            other_free_params.append(exclude_cancellation_id)
+
+        other_free_row = conn.execute(other_free_query, other_free_params).fetchone()
+        conn.close()
+        other_free_count = other_free_row["cnt"] if other_free_row else 0
+
+        if other_free_count >= 1:
+            # Some other (or earlier) free cancellation has already used the lifetime free
             return True, "Welcome Package free cancellation already used (lifetime limit)"
         else:
-            # Haven't used it yet → FREE (this time)
+            # This is the first/only free cancellation
             return False, "Welcome Package - first free cancellation"
     
     # ===== REGULAR MEMBERSHIP LOGIC =====
@@ -1821,8 +1853,12 @@ def will_be_charged(student, lesson_datetime, submission_datetime=None):
     lesson_month = lesson_datetime.month
     lesson_year = lesson_datetime.year
     
-    # Count free cancellations used this month (for the lesson month)
-    monthly_count = get_monthly_cancellation_count(student["id"], lesson_month, lesson_year)
+    # Count free cancellations used this month (for the lesson month),
+    # excluding the cancellation currently being processed so it doesn't count itself.
+    monthly_count = get_monthly_cancellation_count(
+        student["id"], lesson_month, lesson_year,
+        exclude_cancellation_id=exclude_cancellation_id,
+    )
     free_notices = tier["free_notices"]
     
     # 3. HANDLE WELCOME PACKAGE UPGRADE CARRYOVER
@@ -2692,12 +2728,14 @@ def client_cancel():
         )
         cancellation_id = cursor.lastrowid
         
-        # NEW: Mark welcome_free_used if this is a Welcome Package free cancellation
-        if client["membership_level"] == "Welcome Package" and not will_charge:
-            conn.execute(
-                "UPDATE students SET welcome_free_used = 1 WHERE id = ?",
-                (session["user_id"],)
-            )
+        # Note: We deliberately do NOT mark welcome_free_used here at submission time.
+        # The flag is only set once a manager confirms the cancellation as free
+        # (in process_cancellation / process_all_pending). Until then, the lifetime
+        # check in will_be_charged() relies on a dynamic count of charged=0
+        # cancellations, which already accounts for this still-pending submission.
+        # This prevents the bug where re-evaluating a pending Welcome cancellation
+        # during manager processing would see the flag set by its own submission and
+        # incorrectly classify it as "already used".
         
         conn.commit()
         conn.close()
@@ -3833,11 +3871,17 @@ def process_cancellation():
                 except:
                     submission_datetime = None
             
-            # Call the unified will_be_charged function
+            # Call the unified will_be_charged function.
+            # We pass exclude_cancellation_id so this cancellation does NOT count
+            # itself toward the student's monthly free limit or Welcome Package
+            # lifetime check. Without this, a Bronze student's only pending free
+            # cancellation would count itself (1 >= 1) and be flipped to charged
+            # on Process.
             should_be_charged, charge_reason = will_be_charged(
                 student_dict, 
                 lesson_datetime,
-                submission_datetime
+                submission_datetime,
+                exclude_cancellation_id=cancellation_id,
             )
             
             print(f"Should be charged: {should_be_charged}")
@@ -4180,12 +4224,24 @@ def batch_process_cancellations():
                         should_be_charged = True
                         charge_reason = "Submitted after deadline"
                     elif cancellation_dict["membership_level"] == "Welcome Package":
-                        welcome_free_used = bool(cancellation_dict.get("welcome_free_used", 0))
-                        if welcome_free_used:
+                        # Welcome Package: count other free cancellations dynamically,
+                        # excluding this one (same fix as the single-process path).
+                        other_free_row = conn.execute(
+                            """SELECT COUNT(*) as cnt FROM cancellations
+                               WHERE student_id = ? AND charged = 0 AND excluded = 0 AND id != ?""",
+                            (cancellation_dict["student_id"], cancellation_id),
+                        ).fetchone()
+                        other_free_count = other_free_row["cnt"] if other_free_row else 0
+                        if other_free_count >= 1:
                             should_be_charged = True
                             charge_reason = "Welcome Package free cancellation already used"
                     else:
-                        monthly_count = get_monthly_cancellation_count(cancellation_dict["student_id"])
+                        # Exclude the cancellation being processed so it doesn't
+                        # count itself toward the student's monthly free limit.
+                        monthly_count = get_monthly_cancellation_count(
+                            cancellation_dict["student_id"],
+                            exclude_cancellation_id=cancellation_id,
+                        )
                         free_notices = tier["free_notices"] if tier else 1
                         if monthly_count >= free_notices:
                             should_be_charged = True
@@ -4640,14 +4696,25 @@ def process_all_pending():
                 (cancellation["student_id"],)
             ).fetchone()
             
-            # For Welcome Package, check lifetime usage instead of monthly
+            # For Welcome Package, check lifetime usage dynamically (count other free
+            # cancellations) instead of relying solely on the welcome_free_used flag,
+            # which may have been set by this same still-pending cancellation.
             if student and student["membership_level"] == "Welcome Package":
-                # Welcome Package gets only 1 FREE cancellation for lifetime
-                welcome_free_allowed = not bool(student["welcome_free_used"])
+                other_free_row = conn.execute(
+                    """SELECT COUNT(*) as cnt FROM cancellations
+                       WHERE student_id = ? AND charged = 0 AND excluded = 0 AND id != ?""",
+                    (cancellation["student_id"], cancellation["id"]),
+                ).fetchone()
+                other_free_count = other_free_row["cnt"] if other_free_row else 0
+                welcome_free_allowed = (other_free_count == 0)
                 monthly_count = 0  # Don't limit by month for Welcome
             else:
-                # For other packages, use monthly count
-                monthly_count = get_monthly_cancellation_count(cancellation["student_id"])
+                # For other packages, use monthly count, excluding the cancellation
+                # being processed so it doesn't count itself toward its own limit.
+                monthly_count = get_monthly_cancellation_count(
+                    cancellation["student_id"],
+                    exclude_cancellation_id=cancellation["id"],
+                )
                 welcome_free_allowed = False
 
             # Determine if should be charged
@@ -5090,15 +5157,29 @@ def manager_cancellations():
         END
     """
 
-    # Date range filter - NOW uses correct date field
+    # Date range filter - use Pacific (America/Los_Angeles) dates rather than
+    # SQLite's DATE('now')/strftime(..., 'now'), which return UTC. Between roughly
+    # 4pm-midnight Pacific, UTC is already on the next calendar day, so the old
+    # SQL would file today's submissions under tomorrow's UTC date — which is
+    # what made the "Today" tab show 0 and "Yesterday" show today's submissions.
+    pacific_today_date = toronto_now().date()
+    pacific_today_str = pacific_today_date.strftime("%Y-%m-%d")
+    pacific_yesterday_str = (pacific_today_date - timedelta(days=1)).strftime("%Y-%m-%d")
+    pacific_7days_str = (pacific_today_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    pacific_30days_str = (pacific_today_date - timedelta(days=30)).strftime("%Y-%m-%d")
+
     if date_range == "today":
-        where_clauses.append(f"DATE({date_field}) = DATE('now')")
+        where_clauses.append(f"DATE({date_field}) = ?")
+        params.append(pacific_today_str)
     elif date_range == "yesterday":
-        where_clauses.append(f"DATE({date_field}) = DATE('now', '-1 day')")
+        where_clauses.append(f"DATE({date_field}) = ?")
+        params.append(pacific_yesterday_str)
     elif date_range == "7days":
-        where_clauses.append(f"{date_field} >= DATE('now', '-7 days')")
+        where_clauses.append(f"DATE({date_field}) >= ?")
+        params.append(pacific_7days_str)
     elif date_range == "month":
-        where_clauses.append(f"{date_field} >= DATE('now', '-30 days')")
+        where_clauses.append(f"DATE({date_field}) >= ?")
+        params.append(pacific_30days_str)
     elif date_range == "all":
         pass  # No date filter
     elif date_range == "custom" and date_from and date_to:
@@ -5383,7 +5464,9 @@ def manager_cancellations():
         }
 
     elif stats_context == "today":
-        # Today's breakdown
+        # Today's breakdown - use Pacific date (not UTC) so this matches the
+        # date_range filter the manager actually selected.
+        pacific_today_str = toronto_now().date().strftime("%Y-%m-%d")
         today_stats = conn.execute(
             """
             SELECT
@@ -5394,8 +5477,9 @@ def manager_cancellations():
                 SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
-            WHERE DATE(c.created_at) = DATE('now')
-            """
+            WHERE DATE(c.created_at) = ?
+            """,
+            (pacific_today_str,),
         ).fetchone()
 
         stats = {
@@ -5422,7 +5506,8 @@ def manager_cancellations():
         }
 
     elif stats_context == "yesterday":
-        # Yesterday's breakdown
+        # Yesterday's breakdown - use Pacific date (not UTC).
+        pacific_yesterday_str = (toronto_now().date() - timedelta(days=1)).strftime("%Y-%m-%d")
         yesterday_stats = conn.execute(
             """
             SELECT
@@ -5433,8 +5518,9 @@ def manager_cancellations():
                 SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
-            WHERE DATE(c.created_at) = DATE('now', '-1 day')
-            """
+            WHERE DATE(c.created_at) = ?
+            """,
+            (pacific_yesterday_str,),
         ).fetchone()
 
         stats = {
@@ -5509,37 +5595,51 @@ def manager_cancellations():
         }
 
     else:
-        # Global overview (default for "all" and status filters)
+        # Global overview (default for "all" and status filters).
+        # Use Pacific (not UTC) for today/yesterday and for the current year-month
+        # so these counters match what a Pacific-time user expects to see.
+        _pac_today = toronto_now().date()
+        _pac_today_str = _pac_today.strftime("%Y-%m-%d")
+        _pac_yesterday_str = (_pac_today - timedelta(days=1)).strftime("%Y-%m-%d")
+        _pac_year_month_str = _pac_today.strftime("%Y-%m")
+
         global_stats = conn.execute(
             """
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today,
-                SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday,
+                SUM(CASE WHEN DATE(c.created_at) = ? THEN 1 ELSE 0 END) as today,
+                SUM(CASE WHEN DATE(c.created_at) = ? THEN 1 ELSE 0 END) as yesterday,
                 SUM(CASE WHEN c.charged = 0 AND c.status = 'approved' AND strftime('%Y-%m', 
                     CASE 
                         WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
                         THEN c.manual_submission_date
                         ELSE c.created_at
                     END
-                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as free_month,
+                ) = ? THEN 1 ELSE 0 END) as free_month,
                 SUM(CASE WHEN c.charged = 1 AND strftime('%Y-%m', 
                     CASE 
                         WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
                         THEN c.manual_submission_date
                         ELSE c.created_at
                     END
-                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as charged_month,
+                ) = ? THEN 1 ELSE 0 END) as charged_month,
                 SUM(CASE WHEN c.excluded = 1 AND strftime('%Y-%m', 
                     CASE 
                         WHEN c.is_manager_submission = 1 AND c.manual_submission_date IS NOT NULL
                         THEN c.manual_submission_date
                         ELSE c.created_at
                     END
-                ) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as excluded_month
+                ) = ? THEN 1 ELSE 0 END) as excluded_month
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
-            """
+            """,
+            (
+                _pac_today_str,
+                _pac_yesterday_str,
+                _pac_year_month_str,
+                _pac_year_month_str,
+                _pac_year_month_str,
+            ),
         ).fetchone()
 
         stats = {
@@ -5573,14 +5673,20 @@ def manager_cancellations():
         elif filter_status == "excluded":
             stats["box5_color"] = "primary-highlight"
 
-    # Get filter tab stats (always show these for the tabs)
+    # Get filter tab stats (always show these for the tabs).
+    # Use Pacific dates (not UTC) so the Today/Yesterday tab counters match the
+    # date-range filter behavior and what the manager sees.
+    _pac_today2 = toronto_now().date()
+    _pac_today_str2 = _pac_today2.strftime("%Y-%m-%d")
+    _pac_yesterday_str2 = (_pac_today2 - timedelta(days=1)).strftime("%Y-%m-%d")
+    _pac_7days_str2 = (_pac_today2 - timedelta(days=7)).strftime("%Y-%m-%d")
     tab_stats_raw = conn.execute(
         """
         SELECT
             COUNT(*) as total_cancellations,
-            SUM(CASE WHEN DATE(c.created_at) = DATE('now') THEN 1 ELSE 0 END) as today_cancellations,
-            SUM(CASE WHEN DATE(c.created_at) = DATE('now', '-1 day') THEN 1 ELSE 0 END) as yesterday_cancellations,
-            SUM(CASE WHEN c.deadline_passed = 1 AND c.created_at >= DATE('now', '-7 days') THEN 1 ELSE 0 END) as deadline_passed,
+            SUM(CASE WHEN DATE(c.created_at) = ? THEN 1 ELSE 0 END) as today_cancellations,
+            SUM(CASE WHEN DATE(c.created_at) = ? THEN 1 ELSE 0 END) as yesterday_cancellations,
+            SUM(CASE WHEN c.deadline_passed = 1 AND DATE(c.created_at) >= ? THEN 1 ELSE 0 END) as deadline_passed,
             SUM(CASE WHEN 
                 (c.sequential_lessons IS NOT NULL AND c.sequential_lessons != '' AND c.sequential_lessons != '[]') 
                 OR 
@@ -5590,7 +5696,8 @@ def manager_cancellations():
             THEN 1 ELSE 0 END) as with_notes
         FROM cancellations c
         JOIN students s ON c.student_id = s.id
-        """
+        """,
+        (_pac_today_str2, _pac_yesterday_str2, _pac_7days_str2),
     ).fetchone()
 
     tab_stats = (

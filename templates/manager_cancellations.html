@@ -2178,13 +2178,39 @@ function exportCancellations() {
     window.location.href = `{{ url_for('export_cancellations_excel') }}?${params.toString()}`;
 }
 
-// Note functionality - placeholder for now
+// Note functionality - calls the existing /manager/api/cancellation/note endpoint,
+// which appends the note (with timestamp and manager email) to the cancellation's
+// manager_notes field. The endpoint was already implemented in app.py; only the
+// frontend was a placeholder.
 function addNote(id) {
     const noteText = prompt('Add a note for this cancellation:');
-    if (noteText) {
-        // This would need to be implemented in the backend
-        showAlert('Note functionality needs backend implementation', 'warning');
+    if (noteText === null) return; // User clicked Cancel
+    const trimmed = noteText.trim();
+    if (!trimmed) {
+        showAlert('Note cannot be empty', 'warning');
+        return;
     }
+
+    fetch('/manager/api/cancellation/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancellation_id: id, note: trimmed })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Note added successfully!', 'success');
+            // Refresh the page so the new note appears in the Manager Notes section
+            // of the card and the "Has Notes" indicator updates.
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showAlert('Error adding note: ' + (data.message || 'Unknown error'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Add note error:', error);
+        showAlert('Network error occurred while adding note', 'error');
+    });
 }
 
 // Revert processing functionality - placeholder
