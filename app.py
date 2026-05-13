@@ -1847,7 +1847,7 @@ def will_be_charged(student, lesson_datetime, submission_datetime=None, exclude_
     
     if hours_notice < deadline_hours:
         # Submitted after deadline → CHARGE
-        return True, f"Notice submitted after deadline ({hours_notice:.1f} hours, need {deadline_hours})"
+        return True, f"Notice submitted after deadline"
     
     # 2. CHECK MONTHLY LIMIT (based on lesson month, not submission month)
     lesson_month = lesson_datetime.month
@@ -2912,7 +2912,7 @@ def client_history():
             )
         else:
             cancellation_dict["sequential_lessons_formatted"] = (
-                "No additional lessons are cancelled"
+                "None"
             )
 
         # Fix: Handle both HH:MM and HH:MM:SS time formats
@@ -5350,11 +5350,11 @@ def manager_cancellations():
                 )
             except:
                 cancellation["sequential_lessons_formatted"] = (
-                    "No additional lessons are cancelled"
+                    "None"
                 )
         else:
             cancellation["sequential_lessons_formatted"] = (
-                "No additional lessons are cancelled"
+                "None"
             )
 
         # Add urgency flags
@@ -11189,7 +11189,7 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
                 sequential_lessons, lesson_date_for_seq
             )
         else:
-            variables["sequential_lessons"] = "No additional lessons are cancelled"
+            variables["sequential_lessons"] = "None"
 
         # Reschedule info
         variables.update(
@@ -11258,7 +11258,7 @@ def get_charge_reason(cancellation):
 def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
     """Format sequential lessons for email and view history"""
     if not sequential_data:
-        return "No additional lessons are cancelled"
+        return "None"
 
     try:
         if isinstance(sequential_data, str):
@@ -11267,14 +11267,14 @@ def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
             sequential_lessons = sequential_data
 
         if not sequential_lessons:
-            return "No additional lessons are cancelled"
+            return "None"
 
         # Get the last lesson date and add one day to get the return date
         last_lesson = sequential_lessons[-1]
         if isinstance(last_lesson, dict):
             date_str = last_lesson.get("date", "")
         else:
-            return "No additional lessons are cancelled"
+            return "None"
 
         if date_str:
             try:
@@ -11298,9 +11298,9 @@ def format_sequential_lessons(sequential_data, cancelled_lesson_date=None):
                     # Fallback if cancelled date is not provided
                     return f"All lessons are cancelled until the return date of {return_date}"
             except:
-                return "No additional lessons are cancelled"
+                return "None"
 
-        return "No additional lessons are cancelled"
+        return "None"
 
     except Exception as e:
         if email_config.debug_mode:
