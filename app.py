@@ -10698,10 +10698,17 @@ def wrap_email_html(body_content):
     """
     import re as _re
 
-    # Force bold on bare <strong> and <b> (no existing attributes)
+    # Force bold on bare <strong> and <b> (no existing attributes).
+    def _style_bold_tag(m):
+        tag = m.group(1)
+        attrs = m.group(2)
+        if attrs and 'style=' in attrs.lower():
+            return m.group(0)
+        return f'<{tag} style="font-weight: bold; font-family: Arial, Helvetica, sans-serif;">'
+
     styled_body = _re.sub(
-        r"<(strong|b)(?!\s|>)?>|<(strong|b)>",
-        lambda m: f'<{(m.group(1) or m.group(2))} style="font-weight: bold; font-family: Arial, Helvetica, sans-serif;">',
+        r"<(strong|b)(\s[^>]*)?>",
+        _style_bold_tag,
         body_content,
         flags=_re.IGNORECASE,
     )
@@ -10727,10 +10734,16 @@ def wrap_email_html(body_content):
         styled_body,
         flags=_re.IGNORECASE,
     )
-    # Inline-style bare <a> tags so link colour survives Gmail's reset
+    # Inline-style bare <a> tags so link colour survives Gmail's reset.
+    def _style_a_tag(m):
+        attrs = m.group(1)
+        if 'style=' in attrs.lower():
+            return m.group(0)
+        return f'<a {attrs} style="color: #2B7BC2; text-decoration: underline;">'
+
     styled_body = _re.sub(
-        r"<a(?=\s)([^>]*?)(?<!\bstyle\b=['\"][^'\"]*)(href=['\"][^'\"]*['\"])([^>]*)>",
-        lambda m: f'<a {m.group(1)}{m.group(2)}{m.group(3)} style="color: #2B7BC2; text-decoration: underline;">',
+        r"<a\s([^>]*)>",
+        _style_a_tag,
         styled_body,
         flags=_re.IGNORECASE,
     )
