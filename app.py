@@ -2977,6 +2977,7 @@ def client_cancel():
         # Prepare cancellation data for email - UPDATED with new fields
         cancellation_data = {
             "id": cancellation_id,
+            "student_id": session["user_id"],
             "lesson_date": lesson_date,
             "lesson_time": lesson_time,
             "sequential_lessons": sequential_lessons_json,
