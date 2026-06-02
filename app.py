@@ -633,7 +633,7 @@ def init_db():
                 "cancellation_charged",
                 "Cancellation Charged",
                 "Cancellation Notice - Charge Applied - {{client_name}}",
-                "<p>Dear {{client_name}},</p><p>Your cancellation has been processed, and a charge has been applied to your account.</p><p><strong>Lesson Date:</strong> {{lesson_date}}</p><p><strong>Lesson Time:</strong> {{lesson_time}}</p><p><strong>Reason for charge:</strong> {{charge_reason}}</p><p><strong>Charge amount:</strong> As per your membership agreement</p><p>For questions about this charge, please contact us at {{contact_email}}.</p><p>Best regards,<br>The Riverside Equestrian Team</p>",
+                "<p>Dear {{client_name}},</p><p>Your cancellation has been processed, and a charge has been applied to your account.</p><p><strong>Lesson Date:</strong> {{lesson_date}}</p><p><strong>Lesson Time:</strong> {{lesson_time}}</p><p><strong>Reason for charge:</strong> {{charge_reason}}</p><p><strong>Charge amount:</strong> As per your membership agreement</p><p>Best regards,<br>The Riverside Equestrian Team</p>",
                 "client",
                 1,
                 1,
@@ -3163,8 +3163,9 @@ def manager_dashboard():
         SELECT
             strftime('%Y-%m', created_at) as month,
             COUNT(*) as total,
-            SUM(CASE WHEN charged = 0 THEN 1 ELSE 0 END) as free,
-            SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged
+            SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free,
+            SUM(CASE WHEN charged = 1 AND excluded = 0 THEN 1 ELSE 0 END) as charged,
+            SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded
         FROM cancellations
         WHERE created_at >= date('now', '-6 months')
         GROUP BY strftime('%Y-%m', created_at)
@@ -6336,8 +6337,8 @@ def manager_analytics():
         revenue_impact_query = """
             SELECT
                 strftime('%Y-%m', c.created_at) as month,
-                CAST(SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) AS INTEGER) as charged_count,
-                CAST(SUM(CASE WHEN c.charged = 1 THEN 1 ELSE 0 END) * 25 AS INTEGER) as estimated_revenue
+                CAST(SUM(CASE WHEN c.charged = 1 AND c.excluded = 0 THEN 1 ELSE 0 END) AS INTEGER) as charged_count,
+                CAST(SUM(CASE WHEN c.charged = 1 AND c.excluded = 0 THEN 1 ELSE 0 END) * 25 AS INTEGER) as estimated_revenue
             FROM cancellations c
             WHERE c.created_at >= DATE('now', '-12 months')
             GROUP BY strftime('%Y-%m', c.created_at)
@@ -7340,8 +7341,9 @@ def senior_dashboard():
             SELECT 
                 strftime('%Y-%m', created_at) as month,
                 COUNT(*) as total_cancellations,
-                SUM(CASE WHEN charged = 0 THEN 1 ELSE 0 END) as free_cancellations,
-                SUM(CASE WHEN charged = 1 THEN 1 ELSE 0 END) as charged_cancellations
+                SUM(CASE WHEN charged = 0 AND excluded = 0 THEN 1 ELSE 0 END) as free_cancellations,
+                SUM(CASE WHEN charged = 1 AND excluded = 0 THEN 1 ELSE 0 END) as charged_cancellations,
+                SUM(CASE WHEN excluded = 1 THEN 1 ELSE 0 END) as excluded_cancellations
             FROM cancellations
             WHERE created_at >= date('now', '-6 months')
             GROUP BY strftime('%Y-%m', created_at)
@@ -7443,7 +7445,7 @@ def generate_system_report():
                 "SELECT COUNT(*) as count FROM cancellations"
             ).fetchone()["count"],
             "this_month": conn.execute(
-                "SELECT COUNT(*) as count FROM cancellations WHERE created_at >= date('now', 'start of month')"
+                "SELECT COUNT(*) as count FROM cancellations WHERE created_at >= date('now', 'localtime', 'start of month')"
             ).fetchone()["count"],
             "pending": conn.execute(
                 "SELECT COUNT(*) as count FROM cancellations WHERE status = 'pending'"
@@ -9778,7 +9780,7 @@ def export_charged_cancellations():
                 c.manager_notes
             FROM cancellations c
             JOIN students s ON c.student_id = s.id
-            WHERE c.charged = 1
+            WHERE c.charged = 1 AND c.excluded = 0
             ORDER BY c.created_at DESC
         """
         ).fetchall()
