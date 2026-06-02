@@ -1766,12 +1766,90 @@ def calculate_cancellation_status(student):
     }
 
 
+def calculate_deadline_datetime(tier, lesson_datetime):
+    """
+    Calculate the actual deadline datetime for a cancellation based on tier policy.
+
+    Supports two policy types based on the tier's `deadline_display` text:
+      1. "X hours before lesson" (e.g. Gold "2 hours before lesson"):
+         deadline = lesson_datetime - deadline_hours
+      2. "<time> previous day" (e.g. Bronze/Silver "6pm previous day"):
+         deadline = absolute time on the day BEFORE the lesson date.
+
+    Falls back to the relative "deadline_hours before lesson" interpretation
+    when no "previous day" wording is detected, preserving Gold-tier behavior.
+
+    Args:
+        tier: Membership tier dict (must have `deadline_display` and `deadline_hours`)
+        lesson_datetime: Timezone-aware lesson datetime (Pacific) or naive (assumed Pacific)
+
+    Returns:
+        Timezone-aware datetime in Pacific timezone representing the deadline.
+    """
+    pacific_tz = pytz.timezone("America/Los_Angeles")
+
+    # Ensure lesson_datetime is timezone-aware
+    if lesson_datetime.tzinfo is None:
+        lesson_datetime = pacific_tz.localize(lesson_datetime)
+
+    # Convert tier to dict if needed
+    if hasattr(tier, "keys"):
+        tier_dict = dict(tier)
+    else:
+        tier_dict = tier or {}
+
+    deadline_display = (tier_dict.get("deadline_display") or "").strip().lower()
+    deadline_hours = tier_dict.get("deadline_hours", 18) or 18
+
+    # Detect "<time> previous day" pattern, e.g. "6pm previous day", "5:30pm previous day"
+    prev_day_match = re.search(
+        r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*previous\s*day",
+        deadline_display,
+    )
+
+    if prev_day_match:
+        hour = int(prev_day_match.group(1))
+        minute = int(prev_day_match.group(2)) if prev_day_match.group(2) else 0
+        ampm = prev_day_match.group(3)
+
+        # Convert to 24-hour format if am/pm was provided
+        if ampm == "pm" and hour != 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+        # If no am/pm, assume the value is already 24-hour
+
+        # Build deadline: previous day at the specified clock time, Pacific tz
+        prev_day = lesson_datetime.date() - timedelta(days=1)
+        naive_deadline = datetime.combine(prev_day, time(hour, minute))
+        return pacific_tz.localize(naive_deadline)
+
+    # Fallback: relative "X hours before lesson"
+    return lesson_datetime - timedelta(hours=deadline_hours)
+
+
+def is_after_deadline(tier, lesson_datetime, submission_datetime):
+    """
+    Return True iff `submission_datetime` is strictly after the tier's deadline
+    for the given lesson (i.e., the submission was LATE).
+
+    Submitting exactly at the deadline is considered on time.
+    """
+    pacific_tz = pytz.timezone("America/Los_Angeles")
+    if submission_datetime is None:
+        return False
+    if submission_datetime.tzinfo is None:
+        submission_datetime = pacific_tz.localize(submission_datetime)
+    deadline_dt = calculate_deadline_datetime(tier, lesson_datetime)
+    return submission_datetime > deadline_dt
+
+
 def will_be_charged(student, lesson_datetime, submission_datetime=None, exclude_cancellation_id=None):
     """
     Check if a cancellation will be charged based on:
     1. Same-day after-time (always charged)
     2. Welcome Package status (1 lifetime free if not used)
-    3. Deadline (deadline_hours before lesson)
+    3. Deadline (per-tier policy: relative hours OR "<time> previous day")
     4. Monthly limit (free_notices per month, based on LESSON month)
     5. Welcome Package upgrade carryover (if upgraded this month, use both old and new allowances)
     
@@ -1841,11 +1919,12 @@ def will_be_charged(student, lesson_datetime, submission_datetime=None, exclude_
     # ===== REGULAR MEMBERSHIP LOGIC =====
     
     # 1. CHECK DEADLINE
-    # Calculate hours between submission and lesson
-    hours_notice = (lesson_datetime - submission_datetime).total_seconds() / 3600
-    deadline_hours = tier["deadline_hours"]
-    
-    if hours_notice < deadline_hours:
+    # Use tier-aware deadline: supports both "X hours before lesson" (e.g. Gold)
+    # and absolute "<time> previous day" deadlines (e.g. Bronze "6pm previous day").
+    # The earlier behavior of subtracting `deadline_hours` from lesson time was
+    # incorrect for tiers like Bronze/Silver, which use an absolute clock time
+    # on the prior day rather than a fixed offset.
+    if is_after_deadline(tier, lesson_datetime, submission_datetime):
         # Submitted after deadline → CHARGE
         return True, f"Notice submitted after deadline"
     
@@ -2068,14 +2147,16 @@ def get_dashboard_stats():
             print(f"DEBUG: Error getting new students: {e}")
             new_students_month = 0
 
-        # Pending reviews - simplified logic (excluding overridden cancellations)
+        # Pending reviews - count only items truly awaiting manager action
+        # (status = 'pending' and not overridden). The previous query also counted
+        # any charged-not-excluded record whose status wasn't literally 'processed',
+        # which inflated the count with already-handled charged cancellations.
         print("DEBUG: Checking pending reviews...")
 
         pending_reviews_result = conn.execute(
-            """SELECT COUNT(*) as count FROM cancellations 
-               WHERE is_override = 0
-               AND (status = 'pending' 
-                    OR (charged = 1 AND excluded = 0 AND status != 'processed'))"""
+            """SELECT COUNT(*) as count FROM cancellations
+               WHERE status = 'pending'
+               AND is_override = 0"""
         ).fetchone()
         pending_reviews = (
             pending_reviews_result["count"] if pending_reviews_result else 0
@@ -2669,10 +2750,12 @@ def client_cancel():
 
         # Determine deadline status for new database fields
         tier = get_membership_tier(client["membership_level"])
-        deadline_hours = tier["deadline_hours"] if tier else 18
-        # Both times are now timezone-aware, so subtraction works correctly
-        hours_until_lesson = (lesson_datetime - current_time).total_seconds() / 3600
-        deadline_passed = hours_until_lesson < deadline_hours
+        # Use tier-aware deadline calculation so "<time> previous day" tiers
+        # (Bronze, Silver, Intro, Legacy, Guest, Welcome) are evaluated against
+        # the absolute previous-day clock time rather than a fixed hour offset.
+        deadline_passed = (
+            is_after_deadline(tier, lesson_datetime, current_time) if tier else False
+        )
 
         # Prepare sequential lessons data
         sequential_lessons = []
@@ -4211,8 +4294,12 @@ def batch_process_cancellations():
                         if created_datetime.tzinfo is None:
                             created_datetime = pacific_tz.localize(created_datetime)
                         
-                        hours_notice = (lesson_datetime - created_datetime).total_seconds() / 3600
-                        deadline_passed = hours_notice < tier["deadline_hours"]
+                        # Use tier-aware deadline calculation (supports both
+                        # relative "X hours before lesson" and absolute
+                        # "<time> previous day" deadlines).
+                        deadline_passed = is_after_deadline(
+                            tier, lesson_datetime, created_datetime
+                        )
                     except:
                         deadline_passed = False
                     
@@ -4683,10 +4770,11 @@ def process_all_pending():
                     if created_datetime is None:
                         created_datetime = toronto_now()
 
-                    hours_diff = (
-                        lesson_datetime - created_datetime
-                    ).total_seconds() / 3600
-                    deadline_passed = hours_diff < tier["deadline_hours"]
+                    # Use tier-aware deadline calculation so we honor absolute
+                    # "<time> previous day" deadlines for Bronze/Silver/etc.
+                    deadline_passed = is_after_deadline(
+                        tier, lesson_datetime, created_datetime
+                    )
                 except:
                     deadline_passed = False
 
@@ -10584,101 +10672,69 @@ def log_email_attempt(to_email, subject, success, error=None, template_id=None):
 
 def wrap_email_html(body_content):
     """
-    Wrap email body in proper HTML structure for Gmail and email client compatibility
-    
+    Wrap email body in a minimal HTML email shell with inline styles only.
+
+    WHY INLINE STYLES (not <style> blocks):
+        Gmail (especially mobile and forwarded mail) strips <style> blocks
+        in <head>. Inline style="..." attributes always survive.
+
+    WHAT THIS DOES:
+        - Provides a minimal HTML document shell + centered white card.
+        - Does NOT inject styles into <p>, <div>, <a>, etc. — your template's
+          own inline styles take full effect.
+        - DOES force font-weight: bold inline onto bare <strong>/<b> tags,
+          because Gmail intermittently fails to honor the default browser
+          bold weight when the parent element has custom font-family.
+        - Same for <em>/<i> → italic.
+        - Skips tags that already have a style attribute, so any
+          template-customized weight/style is preserved.
+
     Args:
-        body_content (str): Raw HTML body content
-    
+        body_content (str): Raw HTML body content from the template,
+                            with template variables already substituted.
+
     Returns:
-        str: Properly wrapped HTML email with DOCTYPE, styles, and structure
+        str: Complete HTML email document.
     """
-    html = f"""<!DOCTYPE html>
-<html>
+    import re as _re
+
+    # Force bold on bare <strong> and <b> (no attributes -> no style="")
+    styled_body = _re.sub(
+        r"<(strong|b)>",
+        lambda m: f'<{m.group(1)} style="font-weight: bold;">',
+        body_content,
+        flags=_re.IGNORECASE,
+    )
+    # Force italic on bare <em> and <i>
+    styled_body = _re.sub(
+        r"<(em|i)>",
+        lambda m: f'<{m.group(1)} style="font-style: italic;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+
+    html = f"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <style>
-        body {{
-            font-family: Arial, Helvetica, sans-serif;
-            color: #333;
-            margin: 0;
-            padding: 0;
-        }}
-        .email-container {{
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f9f9f9;
-        }}
-        .email-content {{
-            background-color: #ffffff;
-            padding: 30px;
-            border-radius: 5px;
-            line-height: 1.6;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        p {{
-            margin: 12px 0;
-            color: #333;
-        }}
-        strong {{
-            color: #0066cc;
-            font-weight: bold;
-        }}
-        ul {{
-            margin: 10px 0;
-            padding-left: 20px;
-        }}
-        li {{
-            margin: 6px 0;
-        }}
-        hr {{
-            border: none;
-            border-top: 1px solid #ddd;
-            margin: 20px 0;
-        }}
-        .footer {{
-            font-size: 12px;
-            color: #666;
-            margin-top: 20px;
-            text-align: center;
-        }}
-        a {{
-            color: #0066cc;
-            text-decoration: none;
-        }}
-        a:hover {{
-            text-decoration: underline;
-        }}
-        .status-box {{
-            padding: 15px;
-            border-left: 4px solid #999;
-            background-color: #f5f5f5;
-            margin: 15px 0;
-        }}
-        .charged {{
-            border-left-color: #cc0000;
-            background-color: #fff5f5;
-        }}
-        .free {{
-            border-left-color: #009900;
-            background-color: #f5fff5;
-        }}
-        .header-charged {{
-            color: #cc0000;
-        }}
-        .header-free {{
-            color: #009900;
-        }}
-    </style>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>Riverside Equestrian</title>
 </head>
-<body>
-    <div class="email-container">
-        <div class="email-content">
-            {body_content}
-        </div>
-    </div>
+<body style="margin: 0; padding: 20px; background-color: #f4f5f7; font-family: Arial, Helvetica, sans-serif;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f4f5f7;">
+        <tr>
+            <td align="center">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 32px;">
+                            {styled_body}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>"""
     return html
@@ -10730,19 +10786,23 @@ def send_email(
 
         # Wrap body in proper HTML structure for Gmail compatibility
         wrapped_body = wrap_email_html(body)
-        
-        # Add HTML body
-        html_part = MIMEText(wrapped_body, "html", "utf-8")
-        msg.attach(html_part)
 
-        # Add plain text version for better compatibility
+        # Build a plain-text fallback by stripping tags from the raw body
         from html import unescape
         import re
 
         plain_text = re.sub("<[^<]+?>", "", body)
         plain_text = unescape(plain_text)
+
+        # IMPORTANT (RFC 2046): For multipart/alternative, parts must be
+        # ordered from least-preferred (plain text) to MOST-preferred (HTML).
+        # Email clients display the LAST part they can render. Attaching
+        # plain text last would make Gmail show the unformatted version.
         text_part = MIMEText(plain_text, "plain", "utf-8")
         msg.attach(text_part)
+
+        html_part = MIMEText(wrapped_body, "html", "utf-8")
+        msg.attach(html_part)
 
         # Add attachments if provided
         if attachments:
@@ -12101,11 +12161,24 @@ def manager_submit_cancellation():
                 "submission_date_time"
             )  # Format: "2026-04-02 14:30"
             suppress_notifications = request.form.get("suppress_notifications") == "1"
+            # FIX: Read granular notification suppression flags so "Don't Notify
+            # Student" / "Don't Notify Managers" actually take effect (previously
+            # only the "Suppress All" checkbox was honored).
+            suppress_to_student = request.form.get("suppress_to_student") == "1"
+            suppress_to_manager = request.form.get("suppress_to_manager") == "1"
+            # Effective per-channel flags: "Suppress All" overrides individual flags
+            suppress_student_email = suppress_notifications or suppress_to_student
+            suppress_manager_email = suppress_notifications or suppress_to_manager
             manager_notes = request.form.get("manager_notes", "")
             
             # NEW: Handle sequential lessons and reschedule fields
             sequential_dates = request.form.getlist("sequential_dates[]")
             sequential_times = request.form.getlist("sequential_times[]")
+            # FIX: Manager portal uses a single "return_date" input instead of
+            # per-lesson sequential dates. We expand it into a sequential_lessons
+            # list below so the dashboard and emails correctly show the cancelled
+            # range and computed return date.
+            return_date = request.form.get("return_date", "").strip()
             wants_reschedule = request.form.get("wants_reschedule") == "1"
             reschedule_preferences = request.form.get("reschedule_preferences", "")
 
@@ -12117,8 +12190,11 @@ def manager_submit_cancellation():
             print(f"  submission_date_time: {submission_date_time}")
             print(f"  manager_notes: {manager_notes}")
             print(f"  suppress_notifications: {suppress_notifications}")
+            print(f"  suppress_to_student: {suppress_to_student}")
+            print(f"  suppress_to_manager: {suppress_to_manager}")
             print(f"  sequential_dates: {sequential_dates}")
             print(f"  sequential_times: {sequential_times}")
+            print(f"  return_date: {return_date}")
             print(f"  wants_reschedule: {wants_reschedule}")
             print(f"  reschedule_preferences: {reschedule_preferences}")
 
@@ -12175,11 +12251,14 @@ def manager_submit_cancellation():
                 # ⭐ THIS IS THE FIX: Call will_be_charged with manager's submission date
                 will_charge, charge_reason = will_be_charged(dict(student), lesson_datetime, submission_datetime)
                 
-                # Calculate deadline_passed for this tier
+                # Calculate deadline_passed for this tier using tier-aware logic.
+                # Bronze/Silver/etc. use "<time> previous day" (absolute), Gold uses
+                # "X hours before lesson" (relative). The helper handles both.
                 tier = get_membership_tier(student["membership_level"])
-                deadline_hours = tier["deadline_hours"] if tier else 18
-                hours_until_lesson = (lesson_datetime - submission_datetime).total_seconds() / 3600
-                deadline_passed = hours_until_lesson < deadline_hours
+                deadline_passed = (
+                    is_after_deadline(tier, lesson_datetime, submission_datetime)
+                    if tier else False
+                )
                 
                 print(f"DEBUG: will_be_charged={will_charge}, charge_reason={charge_reason}")
                 print(f"DEBUG: deadline_passed={deadline_passed}")
@@ -12192,12 +12271,44 @@ def manager_submit_cancellation():
 
             # Create cancellation
             try:
-                # Prepare sequential lessons data (just like client submission)
+                # Prepare sequential lessons data.
+                # Two input shapes are supported:
+                #   (a) explicit per-lesson arrays (sequential_dates[]/sequential_times[])
+                #   (b) a single return_date — the manager portal's current UI shape:
+                #       every day between lesson_date+1 and return_date-1 is treated
+                #       as a cancelled lesson at the same time-of-day as the original.
+                # The dashboard/email "All lessons are cancelled from X until the
+                # return date of Y" message is generated by format_sequential_lessons,
+                # which uses the LAST entry's date + 1 day as the return date — so
+                # filling in the in-between days makes that display work correctly.
                 sequential_lessons = []
                 if sequential_dates and sequential_times:
                     for seq_date, seq_time in zip(sequential_dates, sequential_times):
                         if seq_date and seq_time:
                             sequential_lessons.append({"date": seq_date, "time": seq_time})
+                elif return_date:
+                    try:
+                        original_date_obj = datetime.strptime(lesson_date, "%Y-%m-%d").date()
+                        return_date_obj = datetime.strptime(return_date, "%Y-%m-%d").date()
+                        # Only expand if the return date is strictly after the lesson date.
+                        if return_date_obj > original_date_obj:
+                            # Cancelled range: day AFTER the original lesson up to the
+                            # day BEFORE the return date (the return date itself is
+                            # when the student resumes lessons, so it is NOT cancelled).
+                            cursor_date = original_date_obj + timedelta(days=1)
+                            last_cancelled_date = return_date_obj - timedelta(days=1)
+                            while cursor_date <= last_cancelled_date:
+                                sequential_lessons.append({
+                                    "date": cursor_date.strftime("%Y-%m-%d"),
+                                    "time": lesson_time,
+                                })
+                                cursor_date += timedelta(days=1)
+                            print(
+                                f"DEBUG: Expanded return_date {return_date} into "
+                                f"{len(sequential_lessons)} sequential lesson(s)"
+                            )
+                    except Exception as range_error:
+                        print(f"DEBUG: Failed to expand return_date range: {range_error}")
                 
                 sequential_lessons_json = str(sequential_lessons) if sequential_lessons else None
                 
@@ -12248,9 +12359,11 @@ def manager_submit_cancellation():
                 # Get the cancellation ID for email sending
                 cancellation_id = cursor.lastrowid
                 
-                # Send notifications if not suppressed
-                if not suppress_notifications:
-                    # Send email to student
+                # Send notifications based on per-channel suppression flags.
+                # "Suppress All" overrides individual flags (combined into
+                # suppress_student_email / suppress_manager_email above).
+                # Send email to student (if not suppressed for student)
+                if not suppress_student_email:
                     try:
                         cancellation_data = conn.execute(
                             """SELECT c.*, s.first_name, s.last_name, s.email
@@ -12274,14 +12387,20 @@ def manager_submit_cancellation():
                             # Get email template
                             template = get_email_template("manager_submits_cancellation_student")
                             if template:
-                                # Override with manager-specific variables
+                                # Override with manager-specific variables.
+                                # NOTE: sequential_lessons is intentionally NOT overridden here —
+                                # the value from full_variables (set by get_template_variables /
+                                # format_sequential_lessons) is the correct human-readable
+                                # "All lessons are cancelled from X until the return date of Y"
+                                # text. The previous override used status_details (e.g. "1 of 2
+                                # used this month"), which produced wrong/missing range info in
+                                # emails when a return date was provided.
                                 variables = {
                                     **full_variables,
                                     "client_name": safe_value(f"{cancellation_dict.get('first_name', '')} {cancellation_dict.get('last_name', '')}".strip()),
                                     "lesson_date": safe_value(f"{cancellation_dict.get('lesson_date')}"),
                                     "lesson_time": safe_value(f"{format_time_for_email(cancellation_dict.get('lesson_time', ''))}"),
                                     "submission_time": safe_value(submission_date_time),
-                                    "sequential_lessons": status_details if "sequential" in status_details.lower() else "None",
                                     "cancellation_status": "CHARGED" if will_charge else "FREE",
                                     "status_details": safe_value(status_details),
                                     "charge_reason": safe_value(charge_reason),
@@ -12296,8 +12415,11 @@ def manager_submit_cancellation():
                                 send_email(cancellation_dict["email"], subject, body, "client")
                     except Exception as email_error:
                         print(f"Error sending student notification: {str(email_error)}")
-                    
-                    # Send email to ALL managers from settings (not just current user)
+                else:
+                    print("🔇 Student notification suppressed by manager selection")
+                
+                # Send email to ALL managers (if not suppressed for managers)
+                if not suppress_manager_email:
                     try:
                         # Get manager emails from database settings (comma-separated list)
                         manager_emails = get_manager_emails_from_settings()
@@ -12319,6 +12441,8 @@ def manager_submit_cancellation():
                                 
                                 full_variables = get_template_variables(student_record, cancellation_record)
                                 
+                                # NOTE: sequential_lessons is intentionally NOT overridden —
+                                # see equivalent comment in the student-email block above.
                                 variables = {
                                     **full_variables,
                                     "client_name": safe_value(f"{student.get('first_name', '')} {student.get('last_name', '')}".strip()),
@@ -12329,7 +12453,6 @@ def manager_submit_cancellation():
                                     "lesson_date": safe_value(f"{lesson_date}"),
                                     "lesson_time": safe_value(f"{format_time_for_email(lesson_time)}"),
                                     "submission_time": safe_value(submission_date_time),
-                                    "sequential_lessons": status_details if "sequential" in status_details.lower() else "None",
                                     "cancellation_status": "CHARGED" if will_charge else "FREE",
                                     "status_details": safe_value(status_details),
                                     "charge_reason": safe_value(charge_reason),
@@ -12362,6 +12485,8 @@ def manager_submit_cancellation():
                         print(f"❌ Error in manager notification process: {str(email_error)}")
                         import traceback
                         traceback.print_exc()
+                else:
+                    print("🔇 Manager notifications suppressed by manager selection")
                 
                 conn.close()
 

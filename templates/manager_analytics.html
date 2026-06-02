@@ -498,7 +498,7 @@ endblock %} {% block extra_css %}
                 <th>Membership</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="top-students-body">
               {% for student in top_students %}
               <tr>
                 <td>{{ student.first_name }} {{ student.last_name }}</td>
@@ -1077,6 +1077,38 @@ endblock %} {% block extra_css %}
       });
   }
 
+  // Escape HTML to safely insert user-supplied strings (student names, etc.)
+  function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+  }
+
+  // Update the "Most Active Students" table when filters change
+  function updateTopStudents(students) {
+      console.log('🏆 Updating top students');
+
+      const tbody = document.getElementById('top-students-body');
+      if (!tbody) return;
+
+      if (!students || students.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4">No data available</td></tr>';
+          return;
+      }
+
+      tbody.innerHTML = students.map(s => `
+          <tr>
+              <td>${escapeHtml(s.first_name)} ${escapeHtml(s.last_name)}</td>
+              <td><strong class="text-primary">${escapeHtml(s.cancellation_count)}</strong></td>
+              <td><span class="badge bg-secondary">${escapeHtml(s.membership_level)}</span></td>
+          </tr>
+      `).join('');
+  }
+
   function getStatusBadge(cancellation) {
       if (cancellation.is_override) {
           return '<span class="badge bg-info">Override</span>';
@@ -1129,6 +1161,7 @@ endblock %} {% block extra_css %}
                   updateMetrics(data.stats);
                   updateCharts(data);
                   updateTable(data.filtered_cancellations);
+                  updateTopStudents(data.top_students);
               } else {
                   console.error('Filter failed:', data.error);
                   alert('Filter update failed: ' + (data.error || 'Unknown error'));
