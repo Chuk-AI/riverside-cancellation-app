@@ -2767,7 +2767,7 @@ def client_cancel():
                     sequential_lessons.append({"date": seq_date, "time": seq_time})
 
         sequential_lessons_json = (
-            str(sequential_lessons) if sequential_lessons else None
+            json.dumps(sequential_lessons) if sequential_lessons else None
         )
 
         # All cancellations start as 'pending' - manager must review and approve
@@ -10698,10 +10698,10 @@ def wrap_email_html(body_content):
     """
     import re as _re
 
-    # Force bold on bare <strong> and <b> (no attributes -> no style="")
+    # Force bold on bare <strong> and <b> (no existing attributes)
     styled_body = _re.sub(
-        r"<(strong|b)>",
-        lambda m: f'<{m.group(1)} style="font-weight: bold;">',
+        r"<(strong|b)(?!\s|>)?>|<(strong|b)>",
+        lambda m: f'<{(m.group(1) or m.group(2))} style="font-weight: bold; font-family: Arial, Helvetica, sans-serif;">',
         body_content,
         flags=_re.IGNORECASE,
     )
@@ -10709,6 +10709,55 @@ def wrap_email_html(body_content):
     styled_body = _re.sub(
         r"<(em|i)>",
         lambda m: f'<{m.group(1)} style="font-style: italic;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    # Inline-style bare <p> tags (no existing style= attribute) for cross-client consistency.
+    # Gmail/Hotmail reset paragraph margins without explicit inline styles.
+    styled_body = _re.sub(
+        r"<p(?!\s[^>]*style=)(?=[>\s])",
+        '<p style="margin: 0 0 14px 0; font-size: 14px; line-height: 1.6; color: #333333; font-family: Arial, Helvetica, sans-serif;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    # Replace bare <hr> with an explicitly styled one (Outlook renders unstyled <hr> as invisible)
+    styled_body = _re.sub(
+        r"<hr\s*/?>",
+        '<hr style="border: 0; border-top: 2px solid #dddddd; margin: 20px 0;" />',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    # Inline-style bare <a> tags so link colour survives Gmail's reset
+    styled_body = _re.sub(
+        r"<a(?=\s)([^>]*?)(?<!\bstyle\b=['\"][^'\"]*)(href=['\"][^'\"]*['\"])([^>]*)>",
+        lambda m: f'<a {m.group(1)}{m.group(2)}{m.group(3)} style="color: #2B7BC2; text-decoration: underline;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    # Headings
+    for tag, size, weight in [("h1", "22px", "bold"), ("h2", "18px", "bold"), ("h3", "16px", "bold")]:
+        styled_body = _re.sub(
+            rf"<{tag}>",
+            f'<{tag} style="font-size: {size}; font-weight: {weight}; color: #222222; margin: 0 0 12px 0; font-family: Arial, Helvetica, sans-serif;">',
+            styled_body,
+            flags=_re.IGNORECASE,
+        )
+    # Lists
+    styled_body = _re.sub(
+        r"<ul>",
+        '<ul style="margin: 0 0 14px 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #333333; font-family: Arial, Helvetica, sans-serif;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    styled_body = _re.sub(
+        r"<ol>",
+        '<ol style="margin: 0 0 14px 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #333333; font-family: Arial, Helvetica, sans-serif;">',
+        styled_body,
+        flags=_re.IGNORECASE,
+    )
+    styled_body = _re.sub(
+        r"<li>",
+        '<li style="margin-bottom: 6px; font-size: 14px; color: #333333;">',
         styled_body,
         flags=_re.IGNORECASE,
     )
@@ -10721,13 +10770,13 @@ def wrap_email_html(body_content):
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <title>Riverside Equestrian</title>
 </head>
-<body style="margin: 0; padding: 20px; background-color: #f4f5f7; font-family: Arial, Helvetica, sans-serif;">
+<body style="margin: 0; padding: 20px; background-color: #f4f5f7; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f4f5f7;">
         <tr>
-            <td align="center">
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+            <td align="center" style="padding: 20px 10px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e0e0e0;">
                     <tr>
-                        <td style="padding: 32px;">
+                        <td style="padding: 32px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333; line-height: 1.6;">
                             {styled_body}
                         </td>
                     </tr>
@@ -12310,8 +12359,8 @@ def manager_submit_cancellation():
                     except Exception as range_error:
                         print(f"DEBUG: Failed to expand return_date range: {range_error}")
                 
-                sequential_lessons_json = str(sequential_lessons) if sequential_lessons else None
-                
+                sequential_lessons_json = json.dumps(sequential_lessons) if sequential_lessons else None
+
                 # Get status details before inserting
                 status_details = get_cancellation_status_details(int(student_id))
                 
@@ -12347,15 +12396,13 @@ def manager_submit_cancellation():
                 )
 
                 conn.commit()
-                
-                # NEW: Mark welcome_free_used if this is a Welcome Package free cancellation
-                if student["membership_level"] == "Welcome Package" and not will_charge:
-                    conn.execute(
-                        "UPDATE students SET welcome_free_used = 1 WHERE id = ?",
-                        (student_id,)
-                    )
-                    conn.commit()
-                
+                # NOTE: welcome_free_used is NOT set here even for Welcome Package free
+                # cancellations. The cancellation is status='pending' and must still be
+                # approved by a manager. The flag is set at approval time in
+                # process_cancellation / process_all_pending, matching the student
+                # submission flow. Until then, will_be_charged() uses a dynamic count of
+                # charged=0 cancellations to determine lifetime-free usage correctly.
+
                 # Get the cancellation ID for email sending
                 cancellation_id = cursor.lastrowid
                 
@@ -12398,8 +12445,8 @@ def manager_submit_cancellation():
                                 variables = {
                                     **full_variables,
                                     "client_name": safe_value(f"{cancellation_dict.get('first_name', '')} {cancellation_dict.get('last_name', '')}".strip()),
-                                    "lesson_date": safe_value(f"{cancellation_dict.get('lesson_date')}"),
-                                    "lesson_time": safe_value(f"{format_time_for_email(cancellation_dict.get('lesson_time', ''))}"),
+                                    "lesson_date": safe_value(full_variables.get("lesson_date", cancellation_dict.get('lesson_date', ''))),
+                                    "lesson_time": safe_value(full_variables.get("lesson_time", format_time_for_email(cancellation_dict.get('lesson_time', '')))),
                                     "submission_time": safe_value(submission_date_time),
                                     "cancellation_status": "CHARGED" if will_charge else "FREE",
                                     "status_details": safe_value(status_details),
@@ -12410,8 +12457,7 @@ def manager_submit_cancellation():
                                     "contact_email": "stav@riversideequestrian.ca",
                                     "company_name": "Riverside Equestrian",
                                 }
-                                subject = render_template_string(template["subject"], autoescape=False, **variables)
-                                body = render_template_string(template["body"], autoescape=False, **variables)
+                                body, subject = process_template_variables(template["body"], template["subject"], variables)
                                 send_email(cancellation_dict["email"], subject, body, "client")
                     except Exception as email_error:
                         print(f"Error sending student notification: {str(email_error)}")
@@ -12446,12 +12492,12 @@ def manager_submit_cancellation():
                                 variables = {
                                     **full_variables,
                                     "client_name": safe_value(f"{student.get('first_name', '')} {student.get('last_name', '')}".strip()),
-                                    "parent_name": safe_value(student.get('parent_name', '')),
+                                    "parent_name": safe_value(student.get('parent_name', student.get('parent_first', '') + ' ' + student.get('parent_last', '')).strip()),
                                     "client_email": safe_value(student.get('email')),
                                     "client_phone": safe_value(student.get('phone')),
                                     "membership_tier": safe_value(student.get('membership_level')),
-                                    "lesson_date": safe_value(f"{lesson_date}"),
-                                    "lesson_time": safe_value(f"{format_time_for_email(lesson_time)}"),
+                                    "lesson_date": safe_value(full_variables.get("lesson_date", lesson_date)),
+                                    "lesson_time": safe_value(full_variables.get("lesson_time", format_time_for_email(lesson_time))),
                                     "submission_time": safe_value(submission_date_time),
                                     "cancellation_status": "CHARGED" if will_charge else "FREE",
                                     "status_details": safe_value(status_details),
@@ -12461,9 +12507,8 @@ def manager_submit_cancellation():
                                     "contact_email": "stav@riversideequestrian.ca",
                                     "company_name": "Riverside Equestrian",
                                 }
-                                
-                                subject = render_template_string(template["subject"], autoescape=False, **variables)
-                                body = render_template_string(template["body"], autoescape=False, **variables)
+
+                                body, subject = process_template_variables(template["body"], template["subject"], variables)
                                 
                                 # Send to ALL managers
                                 print(f"DEBUG: Sending manager notification to {len(manager_emails)} managers")
