@@ -1180,6 +1180,157 @@ def init_db():
         conn.close()
 
 
+def refresh_email_templates():
+    """Update all email template bodies in the DB on every startup."""
+    templates = [
+        (
+            "free_cancellation",
+            "Free Cancellation Confirmed - {{client_name}}",
+            """<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Dear <strong style="font-weight: bold;">{{client_name}}</strong>,</p>
+<p style="margin: 0 0 20px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Your lesson cancellation has been confirmed at no charge.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #e8f0fe;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #d8dee4;">Cancellation Details</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 45%; border-bottom: 1px solid #f0f0f0;">Lesson Date</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_date}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Lesson Time</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_time}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Sequential Lessons</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{sequential_lessons}}</td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #c3e6cb; margin-bottom: 20px;">
+  <tr style="background-color: #d4edda;"><td style="padding: 12px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1e8449;">No charge will be applied to your account.</td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #f8f9fa;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333; border-bottom: 1px solid #d8dee4;">Updated Monthly Status &#8212; {{lesson_month}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 55%; border-bottom: 1px solid #f0f0f0;">Free cancellations used</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333; border-bottom: 1px solid #f0f0f0;">{{used_cancellations}} of {{allowed_cancellations}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Remaining free cancellations</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{remaining_cancellations}}</td></tr>
+</table>
+{{reschedule_section}}
+<p style="margin: 20px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 16px;">For more information about our cancellation policy, visit: <a href="{{policy_url}}" style="color: #1a5276;">{{policy_url}}</a></p>
+<p style="margin: 16px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Best regards,<br><strong style="font-weight: bold;">The Riverside Equestrian Team</strong></p>""",
+            "Free Cancellation",
+            "client",
+        ),
+        (
+            "cancellation_charged",
+            "Cancellation Notice - Charge Applied - {{client_name}}",
+            """<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Dear <strong style="font-weight: bold;">{{client_name}}</strong>,</p>
+<p style="margin: 0 0 20px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Your lesson cancellation has been processed. A charge has been applied to your account.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #e8f0fe;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #d8dee4;">Cancellation Details</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 45%; border-bottom: 1px solid #f0f0f0;">Lesson Date</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_date}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Lesson Time</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_time}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Membership Level</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333; border-bottom: 1px solid #f0f0f0;">{{membership_tier}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Sequential Lessons</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{sequential_lessons}}</td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #f5c6cb; margin-bottom: 20px;">
+  <tr style="background-color: #f8d7da;"><td style="padding: 12px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #721c24;">A charge has been applied to your account.</td></tr>
+  <tr><td style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;"><strong style="font-weight: bold;">Reason:</strong> {{charge_reason}}</td></tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #f8f9fa;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333; border-bottom: 1px solid #d8dee4;">Updated Monthly Status &#8212; {{lesson_month}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 55%;">Free cancellations used</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{used_cancellations}} of {{allowed_cancellations}}</td></tr>
+</table>
+{{reschedule_section}}
+<p style="margin: 20px 0 8px 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #666;">For questions about this charge, please contact us at <a href="mailto:{{contact_email}}" style="color: #1a5276;">{{contact_email}}</a>.</p>
+<p style="margin: 20px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 16px;">For more information about our cancellation policy, visit: <a href="{{policy_url}}" style="color: #1a5276;">{{policy_url}}</a></p>
+<p style="margin: 16px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Best regards,<br><strong style="font-weight: bold;">The Riverside Equestrian Team</strong></p>""",
+            "Cancellation Charged",
+            "client",
+        ),
+        (
+            "manager_notification",
+            "New Cancellation - {{client_name}} - {{lesson_date}}",
+            """<p style="margin: 0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold; color: #1a5276;">CANCELLATION SUBMISSION</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; margin-bottom: 16px;">
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 28%;">Student</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333;">{{client_name}} ({{membership_tier}})</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Parent</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{parent_name}}</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Email</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{client_email}}</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Phone</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{client_phone}}</td></tr>
+</table>
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Lesson Date: <strong style="font-weight: bold; color: #1a5276;">{{lesson_date}}</strong></p>
+<p style="margin: 0 0 14px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Lesson Time: <strong style="font-weight: bold; color: #1a5276;">{{lesson_time}}</strong></p>
+<p style="margin: 0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;"><strong style="font-weight: bold; color: #1a5276;">Sequential Cancelled Lessons (If Any):</strong> {{sequential_lessons}}</p>
+<hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 16px 0;" />
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Status: <strong style="font-weight: bold; color: #1a5276;">{{cancellation_status}}</strong></p>
+<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Reason: {{charge_reason}}</p>
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333;">UPDATED MONTHLY STATUS</p>
+<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Free cancellations used: {{used_cancellations}} of {{allowed_cancellations}}</p>
+{{reschedule_section}}
+{{error_section}}
+<hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 16px 0;" />
+<p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #888;">Submission Date: {{submission_time}}</p>""",
+            "Manager Notification",
+            "manager",
+        ),
+        (
+            "manager_submits_cancellation_student",
+            "Cancellation Submitted for Your Account - {{lesson_date}}",
+            """<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">This email confirms that your lesson cancellation has been submitted by our management team.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #e8f0fe;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #d8dee4;">Cancellation Details</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 45%; border-bottom: 1px solid #f0f0f0;">Lesson Date</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_date}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Lesson Time</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #1a5276; border-bottom: 1px solid #f0f0f0;">{{lesson_time}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Submission Date</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333; border-bottom: 1px solid #f0f0f0;">{{submission_time}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Sequential Lessons</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{sequential_lessons}}</td></tr>
+</table>
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Cancellation Status: <strong style="font-weight: bold; color: #1a5276;">{{cancellation_status}}</strong></p>
+<p style="margin: 0 0 20px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{charge_reason}}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; border: 1px solid #d8dee4; margin-bottom: 20px;">
+  <tr style="background-color: #f8f9fa;"><td colspan="2" style="padding: 10px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333; border-bottom: 1px solid #d8dee4;">CANCELLATION NOTICES FOR {{lesson_month}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 55%; border-bottom: 1px solid #f0f0f0;">Membership Level</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333; border-bottom: 1px solid #f0f0f0;">{{membership_tier}}</td></tr>
+  <tr style="background-color: #fafafa;"><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; border-bottom: 1px solid #f0f0f0;">Free cancellations used</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333; border-bottom: 1px solid #f0f0f0;">{{lesson_month_used_cancellations}} of {{lesson_month_allowed_cancellations}}</td></tr>
+  <tr><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Remaining free cancellations</td><td style="padding: 8px 14px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{lesson_month_remaining_cancellations}}</td></tr>
+</table>
+{{reschedule_section}}
+<hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
+<p style="margin: 0 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">If you have any questions about this cancellation, please contact us.</p>
+<p style="margin: 16px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;"><strong style="font-weight: bold;">&#8212; The Riverside Equestrian Team</strong></p>""",
+            "Manager Submits - Student",
+            "client",
+        ),
+        (
+            "manager_submits_cancellation_manager",
+            "Cancellation Submitted - {{client_name}} - {{lesson_date}}",
+            """<p style="margin: 0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold; color: #1a5276;">CANCELLATION SUBMISSION CONFIRMED</p>
+<p style="margin: 0 0 14px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">You have successfully submitted a cancellation for:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; margin-bottom: 16px;">
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555; width: 28%;">Student</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333;">{{client_name}} ({{membership_tier}})</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Parent</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{parent_name}}</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Email</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{client_email}}</td></tr>
+  <tr><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #555;">Phone</td><td style="padding: 4px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">{{client_phone}}</td></tr>
+</table>
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Lesson Date: <strong style="font-weight: bold; color: #1a5276;">{{lesson_date}}</strong></p>
+<p style="margin: 0 0 14px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Lesson Time: <strong style="font-weight: bold; color: #1a5276;">{{lesson_time}}</strong></p>
+<p style="margin: 0 0 18px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;"><strong style="font-weight: bold; color: #1a5276;">Sequential Cancelled Lessons (If Any):</strong> {{sequential_lessons}}</p>
+<hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 16px 0;" />
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Status: <strong style="font-weight: bold; color: #1a5276;">{{cancellation_status}}</strong></p>
+<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Reason: {{charge_reason}}</p>
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #333;">UPDATED MONTHLY STATUS &#8212; {{lesson_month}}</p>
+<p style="margin: 0 0 16px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">Free cancellations used: {{lesson_month_used_cancellations}} of {{lesson_month_allowed_cancellations}}</p>
+{{reschedule_section}}
+{{error_section}}
+<hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 16px 0;" />
+<p style="margin: 0 0 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #888;">Submission Date: {{submission_time}}</p>
+<p style="margin: 8px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #888;">The student has been notified of this cancellation.</p>""",
+            "Manager Submits - Manager",
+            "manager",
+        ),
+    ]
+
+    try:
+        conn = get_db()
+        for template_id, subject, body, name, ttype in templates:
+            conn.execute(
+                "UPDATE email_templates SET subject = ?, body = ?, name = ? WHERE id = ?",
+                (subject, body, name, template_id),
+            )
+        conn.commit()
+        conn.close()
+        print("✓ Email templates refreshed")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to refresh email templates: {e}")
+        return False
+
+
 def reset_database():
     """Delete database file and recreate - Safest approach"""
     try:
@@ -10783,13 +10934,13 @@ def wrap_email_html(body_content):
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <title>Riverside Equestrian</title>
 </head>
-<body style="margin: 0; padding: 20px; background-color: #f4f5f7; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333;">
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f4f5f7;">
+<body style="margin: 0; padding: 0; background-color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
-            <td align="center" style="padding: 20px 10px;">
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e0e0e0;">
+            <td style="padding: 16px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: 640px; margin: 0 auto; background-color: #ffffff; border: 1px solid #d8dee4;">
                     <tr>
-                        <td style="padding: 32px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333; line-height: 1.6;">
+                        <td style="padding: 28px 32px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333333; line-height: 1.6;">
                             {styled_body}
                         </td>
                     </tr>
@@ -10845,6 +10996,10 @@ def send_email(
         msg["To"] = to_email
         msg["Subject"] = subject
         msg["Reply-To"] = email_config.from_email
+        import email.utils as _eu
+        # Unique Message-ID prevents Gmail threading/quoting multiple emails together
+        msg["Message-ID"] = _eu.make_msgid(domain="riversideequestrian.ca")
+        msg["Date"] = _eu.formatdate(localtime=True)
 
         # Wrap body in proper HTML structure for Gmail compatibility
         wrapped_body = wrap_email_html(body)
@@ -11314,15 +11469,41 @@ def get_template_variables(student=None, cancellation=None, extra_vars=None):
             variables["sequential_lessons"] = "None"
 
         # Reschedule info
+        _reschedule_requested = bool(cancellation_dict.get("reschedule_requested"))
+        _reschedule_prefs = (cancellation_dict.get("reschedule_preferences") or "").strip()
+        _error_report = (cancellation_dict.get("error_report") or "").strip()
+
+        # Build conditional HTML blocks (empty string = hidden in template)
+        if _reschedule_requested:
+            _pref_line = (
+                f'<br style="line-height:1.6;">Preferences: {_reschedule_prefs}'
+                if _reschedule_prefs and _reschedule_prefs.lower() not in ("none provided", "none", "")
+                else ""
+            )
+            _reschedule_section = (
+                f'<p style="margin: 0 0 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">'  
+                f'<strong style="font-weight: bold;">Reschedule Requested:</strong> Yes{_pref_line}</p>'
+            )
+        else:
+            _reschedule_section = ""
+
+        if _error_report and _error_report.lower() not in ("none reported", "none", ""):
+            _error_section = (
+                f'<p style="margin: 0 0 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #333;">'  
+                f'<strong style="font-weight: bold;">Error to Report:</strong> {_error_report}</p>'
+            )
+        else:
+            _error_section = ""
+
         variables.update(
             {
-                "reschedule_requested": (
-                    "Yes" if cancellation_dict.get("reschedule_requested") else "No"
-                ),
-                "reschedule_preferences": safe_value(cancellation_dict.get("reschedule_preferences"), "None provided"),
-                "error_report": safe_value(cancellation_dict.get("error_report"), "None reported"),
+                "reschedule_requested": "Yes" if _reschedule_requested else "No",
+                "reschedule_preferences": _reschedule_prefs if _reschedule_prefs and _reschedule_prefs.lower() not in ("none provided", "none", "") else "None provided",
+                "error_report": _error_report if _error_report and _error_report.lower() not in ("none reported", "none", "") else "None reported",
                 "cancellation_note": safe_value(cancellation_dict.get("cancellation_note")),
                 "manager_notes": safe_value(cancellation_dict.get("manager_notes")),
+                "reschedule_section": _reschedule_section,
+                "error_section": _error_section,
             }
         )
 
@@ -11368,7 +11549,7 @@ def get_charge_reason(cancellation):
         cancellation_dict = cancellation
 
     if not cancellation_dict.get("charged"):
-        return "Within policy - no charge applied"
+        return "Within policy"
 
     if cancellation_dict.get("manager_notes"):
         return cancellation_dict["manager_notes"]
@@ -12757,5 +12938,6 @@ if __name__ == "__main__":
         else:
             print("Database verification passed!")
 
+    refresh_email_templates()
     print("Starting Flask application...")
     app.run(debug=False, host="0.0.0.0", port=5000)
