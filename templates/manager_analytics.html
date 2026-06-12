@@ -560,7 +560,7 @@ endblock %} {% block extra_css %}
                 <th>Charged Cancellations</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="tier-data">
               {% for tier in tier_distribution %}
               <tr>
                 <td>
@@ -1109,6 +1109,30 @@ endblock %} {% block extra_css %}
       `).join('');
   }
 
+  // Update the "Membership Level Analysis" table when filters change
+  function updateMembershipAnalysis(tiers) {
+      console.log('Updating membership analysis');
+
+      const tbody = document.getElementById('tier-data');
+      if (!tbody) return;
+
+      if (!tiers || tiers.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No membership data available</td></tr>';
+          return;
+      }
+
+      tbody.innerHTML = tiers.map(t => `
+          <tr>
+              <td><span class="badge bg-primary">${escapeHtml(t.membership_level)}</span></td>
+              <td><strong>${escapeHtml(t.student_count)}</strong></td>
+              <td><strong>${ensureNumber(t.total_cancellations)}</strong></td>
+              <td>${ensureNumber(t.avg_monthly_cancellations).toFixed(2)}</td>
+              <td><span class="text-success">${ensureNumber(t.free_cancellations)}</span></td>
+              <td><span class="text-warning">${ensureNumber(t.charged_cancellations)}</span></td>
+          </tr>
+      `).join('');
+  }
+
   function getStatusBadge(cancellation) {
       if (cancellation.is_override) {
           return '<span class="badge bg-info">Override</span>';
@@ -1162,6 +1186,7 @@ endblock %} {% block extra_css %}
                   updateCharts(data);
                   updateTable(data.filtered_cancellations);
                   updateTopStudents(data.top_students);
+                  updateMembershipAnalysis(data.tier_distribution);
               } else {
                   console.error('Filter failed:', data.error);
                   alert('Filter update failed: ' + (data.error || 'Unknown error'));
